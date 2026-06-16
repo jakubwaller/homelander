@@ -1,0 +1,22 @@
+# Homelander configuration — copy to private/config.yaml and fill in your values
+#
+# This file IS committed (no secrets). Your private/config.yaml is gitignored.
+
+fredy:
+  base_url: "http://your-address:9998"
+  username: "admin"
+  password: "your-fredy-password"
+
+chrome:
+  # Find your profile path: open chrome://version in Chrome → "Profile Path"
+  executable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  user_data_dir: "/Users/you/Library/Application Support/Google/Chrome"
+  profile_directory: "Default"
+  cdp_port: 9222
+
+polling:
+  interval_seconds: 60
+  max_sends_per_run: 3       # safety cap — never more than 3 per tick
+
+state_file: "private/is24_state.json"
+message_file: "private/message.txt"
