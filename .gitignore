@@ -1,27 +1,20 @@
-# Private configuration, state, and secrets — never commit
-private*
+# Runtime artifacts (gitignored)
+runtime/
+debug/
+data/
+private/
+autoapply.log
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
+# Secrets
+config/autoapply.config.yaml
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# Node
+node_modules/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-
-# Runtime lock
-*.lock
+# IDE
+.vscode/
+.idea/
