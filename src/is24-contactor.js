@@ -321,22 +321,42 @@ export class IS24Contactor {
       await jitter(...this.t.anredeJitter);
     }
 
-    // Text inputs
+    // Text inputs — only stringify non-undefined values (never "undefined" in the DOM)
     const fields = [
       { sel: 'input[name="firstName"]', val: this.contact.vorname },
       { sel: 'input[name="lastName"]', val: this.contact.nachname },
       { sel: 'input[name="emailAddress"]', val: this.contact.email },
       { sel: 'input[name="phoneNumber"]', val: this.contact.telefon },
       { sel: 'input[name="street"]', val: this.contact.strasse },
-      { sel: 'input[name="houseNumber"]', val: String(this.contact.hausnummer) },
-      { sel: 'input[name="postcode"]', val: String(this.contact.plz) },
+      { sel: 'input[name="houseNumber"]', val: this.contact.hausnummer != null ? String(this.contact.hausnummer) : '' },
+      { sel: 'input[name="postcode"]', val: this.contact.plz != null ? String(this.contact.plz) : '' },
       { sel: 'input[name="city"]', val: this.contact.ort },
     ];
 
     for (const { sel, val } of fields) {
       if (!val) continue;
-      const exists = await this.page.evaluate((s) => !!document.querySelector(s), sel);
-      if (!exists) continue;
+      const elState = await this.page.evaluate((s) => {
+        const el = document.querySelector(s);
+        if (!el) return null;
+        return { disabled: el.disabled, value: el.value || '' };
+      }, sel);
+      if (!elState) continue;
+
+      // Disabled field (IS24 pre-fills + locks e.g. email) — skip if correct, native-set if wrong
+      if (elState.disabled) {
+        if (elState.value === val) { filled++; continue; }
+        await this.page.evaluate(({ s, v }) => {
+          const el = document.querySelector(s);
+          if (!el) return;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nativeSetter.call(el, v);
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+        }, { s: sel, v: val });
+        await jitter(100, 200);
+        retries++;
+        filled++;
+        continue;
+      }
 
       await this.page.evaluate((s) => window.__clearInput(s), sel);
       await jitter(...this.t.fieldJitter);
@@ -410,6 +430,24 @@ export class IS24Contactor {
       }, { sel: textareaSel, msg: message });
       await jitter(200, 400);
       retries++;
+    }
+
+    // Final verify: IS24 auto-fill can asynchronously revert fields after the bot types.
+    // Re-check every field and native-set any that lost their value.
+    for (const { sel, val } of fields) {
+      if (!val) continue;
+      const actual = await this.page.evaluate((s) => document.querySelector(s)?.value || '', sel);
+      if (actual !== val) {
+        await this.page.evaluate(({ s, v }) => {
+          const el = document.querySelector(s);
+          if (!el) return;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nativeSetter.call(el, v);
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+        }, { s: sel, v: val });
+        await jitter(100, 200);
+        retries++;
+      }
     }
 
     return { filled, retries };
@@ -495,9 +533,11 @@ export class IS24Contactor {
     const formGone = await this.page.evaluate(() => !document.querySelector('textarea[name="message"]'));
     const bodyText = await this.page.evaluate(() => document.body?.innerText || '');
     const isPremium = IS24Contactor.PREMIUM_RE.test(bodyText);
+    const isServerError = /Es ist ein Fehler aufgetreten/i.test(bodyText);
 
     if (formGone && isPremium) return { verified: false, detail: 'premium upsell (Suchen+)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (formGone) return { verified: true, detail: 'form removed (modal dismissed)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    if (isServerError && !formGone) return { verified: false, detail: 'server error (premium gate?)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     return { verified: false, detail: 'no confirmation after 5s', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
   }
 
