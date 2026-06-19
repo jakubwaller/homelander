@@ -1,17 +1,39 @@
 {
-  "name": "autoapply",
-  "version": "0.1.0",
+  "name": "homelander",
+  "version": "1.0.0",
   "private": true,
-  "description": "Auto-apply service for Immoscout24 — polls Fredy for new listings and sends contact messages via host Chrome CDP",
+  "description": "Desktop app for automated IS24 apartment applications — polls listings, auto-fills contact forms via Chrome CDP.",
   "type": "module",
-  "main": "src/index.js",
+  "main": "electron/main.js",
   "scripts": {
-    "start": "node src/index.js",
-    "start:dry-run": "DRY_RUN=1 node src/index.js"
+    "dev": "concurrently -k \"vite\" \"sleep 2 && electron .\"",
+    "dev:renderer": "vite",
+    "dev:electron": "electron .",
+    "postinstall": "npx @electron/rebuild -f -w better-sqlite3",
+    "build": "vite build",
+    "start": "electron .",
+    "dist": "vite build && electron-builder",
+    "dist:mac": "vite build && electron-builder --mac",
+    "dist:win": "vite build && electron-builder --win",
+    "dist:linux": "vite build && electron-builder --linux"
   },
   "dependencies": {
     "@2captcha/captcha-solver": "^1.3.6",
+    "better-sqlite3": "^11.0.0",
+    "electron-store": "^10.0.0",
     "js-yaml": "^4.1.0",
-    "puppeteer-core": "^24.0.0"
+    "puppeteer": "^24.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^9.0.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.0.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.0"
   }
 }

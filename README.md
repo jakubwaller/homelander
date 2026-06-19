@@ -1,108 +1,130 @@
-# Homelander — IS24 Auto-Apply
+# Homelander
 
-Automates ImmobilienScout24 contact form submissions. Drives your real Chrome browser
-via CDP — residential IP, real session, passes Datadome naturally.
+Desktop app for automated IS24 apartment applications. Paste a search URL — Homelander finds listings and applies for you.
+
+## Features
+
+- **One-click setup** — guided wizard, no terminal needed
+- **Auto-apply** — fills IS24 contact forms via your Chrome browser
+- **Captcha solving** — automatic via 2captcha ($0.001/solve)
+- **Smart pausing** — detects captcha walls and auto-pauses
+- **Three speed modes** — fast, balanced, slow
+- **Cross-platform** — macOS, Windows, Linux
 
 ## How it works
 
-```
-┌──────────┐  polls API    ┌──────────────┐  CDP (websocket)  ┌───────────┐
-│  Fredy   │ ◄──────────── │  autoapply   │ ─────────────────►│  Chrome   │
-│  :9998   │  new listings │  (Node.js)   │  navigate, fill,  │  (host)   │
-└──────────┘               └──────────────┘  submit           │  :9222    │
-                                                              └───────────┘
-```
+1. You paste an IS24 search URL
+2. Homelander polls IS24's mobile API every 10 minutes for new listings
+3. When new listings appear, it opens them in a background Chrome window
+4. It fills the contact form with your details and submits
+5. Captchas are solved automatically via 2captcha
+6. Results appear in the live feed and history
 
-1. **Fredy** scrapes Immoscout24 and serves listings via REST API
-2. **Autoapply** polls Fredy every 60s, diffs against seen state, fills and submits
-   the IS24 contact form via Chrome CDP
-3. Results logged to `autoapply/autoapply.log`
+No VPS. No terminal. Everything runs on your computer.
 
 ## Quick Start
 
+### Prerequisites
+
+- **Node.js 20+** ([nodejs.org](https://nodejs.org))
+- **Chrome** — bundled automatically via `puppeteer` (npm install handles it)
+- **2captcha account** ([2captcha.com](https://2captcha.com)) — ~$3 covers hundreds of applications
+
+### Install
+
 ```bash
-git clone <repo-url> homelander
+git clone https://github.com/B1Z0N/homelander.git
 cd homelander
-bash scripts/setup.sh        # one-time: check deps, create config
-./scripts/homelander.sh      # daemon mode: polls forever until Ctrl+C
+npm install
 ```
 
-## Modes
+### Run (development)
 
-| Command | Behavior |
-|---------|----------|
-| `./scripts/homelander.sh` | **Daemon mode.** Polls every 60s, processes listings, runs until killed. |
-| `./scripts/homelander.sh --dry-run` | Daemon + dry-run: fills forms but never clicks submit. |
-| `bash scripts/autoapply.sh` | **One-shot.** Processes pending listings and exits. Used by cron. |
+```bash
+# Terminal 1: Start the Vite dev server
+npm run dev:renderer
 
-The `scripts/homelander.sh` shell script auto-starts Chrome CDP if it's not already running.
+# Terminal 2: Start Electron
+npm run dev:electron
+```
+
+Or with a single command:
+
+```bash
+npm run dev
+```
+
+### Build (production)
+
+```bash
+npm run dist:mac     # macOS .dmg
+npm run dist:win     # Windows .exe
+npm run dist:linux   # Linux .deb + .AppImage
+```
+
+## First Launch
+
+The setup wizard guides you through 5 steps:
+
+1. **Your details** — name, email, phone, address
+2. **Message template** — the message sent with each application
+3. **IS24 account** — log in manually (IS24 blocks automated login)
+4. **2captcha API key** — for automatic captcha solving
+5. **First search** — paste an IS24 search URL
+
+After setup, the app opens to the Searches tab. Add more searches anytime.
+
+## Architecture
+
+```
+IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Chrome CDP] → IS24 Forms
+                                   │                    │
+                              Electron App         Headed, offscreen
+                              (React UI)           (-32000,-32000px)
+```
+
+- **Poller**: Hits IS24's public mobile API every 10 minutes, discovers new listings
+- **SQLite**: Stores filters, listings, results (at `~/.homelander/homelander.db`)
+- **Apply Engine**: Reuses the battle-tested `is24-contactor.js` — fills forms, solves captchas, verifies submissions
+- **Chrome**: Runs headed but offscreen — invisible to you, looks normal to IS24's anti-bot
 
 ## Configuration
 
-All config lives in `config/autoapply.config.yaml` (gitignored, created by `setup.sh`).
-See `config/autoapply.config.example.yaml` for the template.
+All settings editable from the Settings tab:
 
-| Key | Description |
-|-----|-------------|
-| `fredy.base_url` | Fredy API URL |
-| `fredy.job_id` | Your IS24 search job ID in Fredy |
-| `chrome.cdp_url` | Chrome CDP endpoint (default: `http://localhost:9222`) |
-| `speed` | `"fast"`, `"balanced"` (default), or `"slow"` — controls typing delay, cooldowns |
-| `polling.max_sends_per_run` | Safety cap per run (default: 15) |
-| `captcha.api_key` | 2captcha API key (optional) |
-| `contact.*` | Your details for the IS24 contact form |
+- **Persona** — your contact details
+- **Message template** — use `{{title}}`, `{{address}}`, `{{name}}` as placeholders
+- **Timing** — speed preset (fast/balanced/slow), poll interval, send limits
+- **2captcha API key** — stored encrypted on your machine
 
-Message template at `config/message.txt` — template text sent to landlords.
+Config is stored at `~/.homelander/config.json`.
 
-## Project structure
+## Data
 
-```
-homelander/
-├── scripts/
-│   ├── setup.sh                 # one-command installer
-│   ├── homelander.sh            # entry-point: daemon mode
-│   └── autoapply.sh             # cron wrapper (one-shot)
-├── src/
-│   ├── launch.js                # config reader + spawner
-│   ├── index.js                 # main loop: poll, dedup, send
-│   ├── fredy-client.js          # Fredy REST API client
-│   ├── is24-contactor.js        # IS24 form filler via Chrome CDP
-│   ├── state-manager.js         # dedup + atomic state persistence
-│   ├── captcha-solver.js        # 2captcha integration (optional)
-│   └── config.js                # YAML config loader
-├── config/
-│   └── autoapply.config.example.yaml   # tracked
-├── platform/macos/
-│   └── com.homelander.chrome.plist     # launchd for Chrome auto-start
-├── package.json
-├── private/                     # gitignored (design docs, plans)
-├── .gitignore
-└── README.md
-```
+All data is local — nothing is sent anywhere except:
+- IS24's mobile API (to discover listings)
+- IS24's website via Chrome (to submit contact forms)
+- 2captcha API (to solve captchas)
 
-## Troubleshooting
+Database at `~/.homelander/homelander.db`. Debug logs and screenshots at `~/.homelander/debug/`.
 
-**"Es ist ein Fehler aufgetreten"**
-IS24 soft-block. Wait 24-48h, use a different profile, or slow down.
+## Captcha Wall
 
-**Chrome CDP not reachable**
-```bash
-open -a "Google Chrome" --args \
-  --remote-debugging-port=9222 \
-  --user-data-dir=/tmp/chrome-debug
-```
+IS24 triggers a captcha wall after ~12-15 contact form submissions. Homelander detects this and auto-pauses for 15 minutes. The polling continues — new listings accumulate and are processed after the cooldown.
 
-**Captcha appears**
-Add a 2captcha API key to config (`captcha.api_key`). Otherwise the listing is skipped
-and retried next cycle.
+You can also switch to **slow** mode (45-90s between listings) to avoid the wall entirely.
 
-## Future
+## Tips
 
-- **Homelander.app** — cross-platform Electron app with setup wizard, dashboard,
-  settings, and document manager. See `private/homelander-app-design.md`.
-- **Premium listings** — IS24 Plus/premium listings are website-only and don't
-  appear in the mobile API. Research in `private/premium-listings-plan.md`.
+- **Tauschwohnung listings** are immune to the captcha wall — add a Tausch search for reliable sends
+- **Multiple searches** — add several URLs for different areas/budgets
+- **Check history** — every application is logged with outcome and details
+- **Pause per search** — pause individual searches while keeping others running
 
 ## License
 
 MIT
+
+## Credits
+
+Built on the auto-apply engine developed and battle-tested across hundreds of IS24 listings.

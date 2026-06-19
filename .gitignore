@@ -1,4 +1,9 @@
-# Runtime artifacts (gitignored)
+# Build output
+build/
+dist/
+release/
+
+# Runtime artifacts
 runtime/
 debug/
 data/
@@ -7,9 +12,13 @@ autoapply.log
 
 # Secrets
 config/autoapply.config.yaml
+*.bak
 
 # Node
 node_modules/
+
+# Vite
+.vite/
 
 # OS
 .DS_Store
@@ -18,4 +27,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# Docs (generated)
 docs/

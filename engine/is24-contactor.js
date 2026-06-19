@@ -3,14 +3,14 @@
 // already-running host Chrome with its real profile and residential IP.
 // Debug outputs saved to debug/ (html/, screenshots/).
 
-import puppeteer from 'puppeteer-core';
+import puppeteer from 'puppeteer';
 import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IS24_EXPOSE_URL = 'https://www.immobilienscout24.de/expose';
-const DEBUG_DIR = join(__dirname, '..', 'debug');
+const DEBUG_DIR = process.env.HOMELANDER_DEBUG_DIR || join(__dirname, '..', 'debug');
 
 /** Ensure a debug directory exists, return its path. */
 function ensureDir(subdir) {
@@ -141,6 +141,18 @@ export class IS24Contactor {
 
       await jitter(...this.t.spaRenderWait);
 
+      // Detect deactivated listing before trying to find form
+      const isDeactivated = await this._isDeactivated();
+      if (isDeactivated) {
+        const ssDir = DEBUG.screenshotDir();
+        try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_deactivated.png`), fullPage: true }); } catch {}
+        return {
+          success: false, reason: 'DEACTIVATED (listing no longer available)',
+          timing_ms: Date.now() - tStart, timing, captcha, form_state: 'deactivated',
+          fields_typed: 0, field_retries: 0,
+        };
+      }
+
       const tForm = Date.now();
       const formReady = await this._waitForForm(this.t.formWaitTimeout);
       timing.form_wait_ms = Date.now() - tForm;
@@ -150,7 +162,6 @@ export class IS24Contactor {
         formState = premium ? 'premium_upsell' : 'no_form';
         const ssDir = DEBUG.screenshotDir();
         await this.page.screenshot({ path: join(ssDir, `${exposeId}_${formState}.png`), fullPage: true });
-        this.page = null;
         return {
           success: false, reason: premium
             ? 'SUBMIT_FAILED (PREMIUM_ONLY — Plus listing, cannot contact without subscription)'
@@ -173,21 +184,18 @@ export class IS24Contactor {
       timing.verify_ms = Date.now() - tVerify;
 
       // Dump page HTML AFTER verification
-      if (this.page) {
-        try {
-          const html = await this.page.content();
-          const htmlDir = DEBUG.htmlDir();
-          const outcomeTag = verified ? 'SENT' : (detail.includes('captcha') ? 'CAPTCHA_FAIL' : 'FAIL');
-          writeFileSync(join(htmlDir, `${exposeId}_${outcomeTag}.html`), html, 'utf8');
-        } catch {}
-      }
+      try {
+        const html = await this.page.content();
+        const htmlDir = DEBUG.htmlDir();
+        const outcomeTag = verified ? 'SENT' : (detail.includes('captcha') ? 'CAPTCHA_FAIL' : 'FAIL');
+        writeFileSync(join(htmlDir, `${exposeId}_${outcomeTag}.html`), html, 'utf8');
+      } catch {}
 
       formState = verified ? 'confirmed' : (detail.includes('captcha') ? 'captcha_fail' : detail.substring(0, 40));
 
       if (!verified) {
         const ssDir = DEBUG.screenshotDir();
         try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_submit_failed.png`), fullPage: true }); } catch {}
-        this.page = null;
         return {
           success: false, reason: `SUBMIT_FAILED (${detail})`,
           timing_ms: Date.now() - tStart, timing, captcha, form_state: formState,
@@ -195,7 +203,6 @@ export class IS24Contactor {
         };
       }
 
-      this.page = null;
       return {
         success: true, detail,
         timing_ms: Date.now() - tStart, timing, captcha, form_state: formState,
@@ -205,12 +212,23 @@ export class IS24Contactor {
       formState = 'error';
       const ssDir = DEBUG.screenshotDir();
       try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_error.png`), fullPage: true }); } catch {}
-      this.page = null;
       return {
         success: false, reason: `ERROR: ${err.message}`,
         timing_ms: Date.now() - tStart, timing, captcha, form_state: formState,
         fields_typed: fieldCount, field_retries: fieldRetries,
       };
+    } finally {
+      // Close tab — but keep at least one alive so Chrome doesn't exit
+      try {
+        const pages = await this.browser.pages();
+        if (pages.length <= 1) {
+          // Last tab: navigate to blank instead of closing
+          await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+        } else {
+          await this.page.close();
+        }
+      } catch {}
+      this.page = null;
     }
   }
 
@@ -228,6 +246,20 @@ export class IS24Contactor {
       return await this.page.evaluate(() => {
         const text = document.body?.innerText || '';
         return /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus|Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied|zum PLUS-Mitglied)/i.test(text);
+      });
+    } catch { return false; }
+  }
+
+  async _isDeactivated() {
+    try {
+      return await this.page.evaluate(() => {
+        const text = document.body?.innerText || '';
+        const url = document.location?.href || '';
+        // IS24 shows these when listing is gone
+        if (/(nicht mehr verfügbar|nicht mehr verfuegbar|Anzeige.{0,30}nicht gefunden|Anzeige.{0,30}existiert nicht|wurde deaktiviert|Objekt wurde.{0,30}entfernt|Leider wurde das Objekt|Diese Seite existiert nicht|Angebot ist abgelaufen|wurde bereits vergeben|ist bereits vergeben|nicht mehr online|expose.{0,10}not found)/i.test(text)) return true;
+        // 404 redirects or page title says "not found"
+        if (/Seite nicht gefunden|Page not found|404/i.test(document.title || '')) return true;
+        return false;
       });
     } catch { return false; }
   }
@@ -493,6 +525,11 @@ export class IS24Contactor {
 
       if (state.confirmed) return { verified: true, detail: 'confirmed (modal)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
 
+      // Deactivated — listing vanished during submission
+      if (/nicht mehr verfügbar|Anzeige.{0,20}nicht gefunden|wurde deaktiviert|wurde bereits vergeben|ist bereits vergeben/i.test(state.errorText || '')) {
+        return { verified: false, detail: 'DEACTIVATED (listing removed during submission)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
+      }
+
       if (state.captcha) {
         captchaStats.detected = true;
         captchaRetries++;
@@ -518,7 +555,11 @@ export class IS24Contactor {
       }
 
       if (state.hasErrors || state.validationText) {
-        return { verified: false, detail: `validation errors${state.errorText ? ': ' + state.errorText : ''}`, captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
+        // IS24 often flashes validation highlights during async submission.
+        // Don't bail — the form may have submitted successfully despite transient errors.
+        // Wait and re-check; only fail if errors persist and form is still present at deadline.
+        await jitter(800, 1500);
+        continue;
       }
 
       if (state.formGone) {

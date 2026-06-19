@@ -1,0 +1,50 @@
+# electron-builder configuration for Homelander
+appId: com.homelander.app
+productName: Homelander
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - engine/**/*
+  - node_modules/**/*
+  - package.json
+
+extraResources:
+  - from: engine
+    to: engine
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  icon: resources/icon.icns
+  hardenedRuntime: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+win:
+  target:
+    - nsis
+  icon: resources/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  target:
+    - deb
+    - AppImage
+  category: Utility
+  icon: resources/icon.png
+
+publish:
+  provider: github
+  owner: B1Z0N
+  repo: homelander
