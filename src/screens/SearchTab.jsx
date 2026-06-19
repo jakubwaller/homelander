@@ -1,6 +1,6 @@
 // SearchTab — manages IS24 searches, stats, live feed, and daemon controls.
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '../stores/appStore';
 import FilterCard from '../components/FilterCard';
 import ActivityFeed from '../components/ActivityFeed';
@@ -19,6 +19,70 @@ export default function SearchTab() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [tip, setTip] = useState(null);
+  const activeTipTargetRef = useRef(null);
+
+  const hideTip = useCallback(() => {
+    activeTipTargetRef.current = null;
+    setTip(null);
+  }, []);
+
+  const showTip = useCallback((text, e) => {
+    if (!text || !e?.currentTarget) {
+      hideTip();
+      return;
+    }
+    activeTipTargetRef.current = e.currentTarget;
+    setTip({ text, x: e.clientX, y: e.clientY });
+  }, [hideTip]);
+
+  const moveTip = useCallback((e) => {
+    const target = activeTipTargetRef.current || e?.currentTarget;
+    if (!target || !e) return;
+    activeTipTargetRef.current = target;
+    const rect = target.getBoundingClientRect();
+    if (
+      e.clientX < rect.left ||
+      e.clientX > rect.right ||
+      e.clientY < rect.top ||
+      e.clientY > rect.bottom
+    ) {
+      hideTip();
+      return;
+    }
+    setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+  }, [hideTip]);
+
+  useEffect(() => {
+    if (!tip) return;
+
+    const handleWindowMouseMove = (e) => {
+      const target = activeTipTargetRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      if (
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom
+      ) {
+        hideTip();
+      }
+    };
+
+    const handleWindowBlur = () => hideTip();
+    const handleWindowScroll = () => hideTip();
+
+    window.addEventListener('mousemove', handleWindowMouseMove, true);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('scroll', handleWindowScroll, true);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove, true);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('scroll', handleWindowScroll, true);
+    };
+  }, [tip, hideTip]);
 
   const normalizeStats = useCallback((fresh) => {
     if (!fresh) return fresh;
@@ -204,10 +268,14 @@ export default function SearchTab() {
   }, [stats.nextPollAt]);
 
   // ── Stat badge helper ──────────────────────────────────────────
-  const StatBadge = ({ label, value, color }) => (
+  const StatBadge = ({ label, value, color, tooltip }) => (
     <div
       className="card px-4 py-3 flex items-center gap-3 min-w-0"
       style={{ minWidth: 110 }}
+      onMouseEnter={tooltip ? (e) => showTip(tooltip, e) : undefined}
+      onMouseMove={tooltip ? moveTip : undefined}
+      onMouseLeave={tooltip ? hideTip : undefined}
+      onPointerLeave={tooltip ? hideTip : undefined}
     >
       <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
         {label}
@@ -227,9 +295,9 @@ export default function SearchTab() {
         <StatBadge label="Processed" value={`${(stats.sent + stats.failed + (stats.deactivated || 0))}/${stats.seen}`} color="var(--accent)" />
         <StatBadge label="Sent" value={stats.sent} color="var(--success)" />
         <StatBadge label="Failed" value={stats.failed} color="var(--danger)" />
-        <StatBadge label="Deactivated" value={stats.deactivated || 0} color="var(--text-muted)" />
-        <StatBadge label="Premium" value={stats.premium || 0} color="#a855f7" />
-        <StatBadge label="Captcha" value={stats.captcha || 0} color="#f59e0b" />
+        <StatBadge label="Deactivated" value={stats.deactivated || 0} color="var(--text-muted)" tooltip="Listings removed from IS24 before the bot could apply — not failures, just bad timing." />
+        <StatBadge label="Premium" value={stats.premium || 0} color="#a855f7" tooltip="Premium listings require MieterPlus/Suchen+ subscription. Buy Suchen+ to avoid these errors." />
+        <StatBadge label="Captcha" value={stats.captcha || 0} color="#f59e0b" tooltip="Blocked by captcha — enter your 2captcha API key in Settings to auto-solve." />
 
         </div>
 
@@ -327,6 +395,24 @@ export default function SearchTab() {
         </h2>
         <ActivityFeed />
       </section>
+
+      {tip && (
+        <div
+          className="fixed pointer-events-none z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
+          style={{
+            left: tip.x + 14,
+            top: tip.y - 36,
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            maxWidth: 320,
+            whiteSpace: 'normal',
+          }}
+        >
+          {tip.text}
+        </div>
+      )}
+
     </div>
   );
 }

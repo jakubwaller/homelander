@@ -30,6 +30,12 @@ export default function ActivityFeed() {
   const [requeued, setRequeued] = useState(new Set());
   const [hoveredImage, setHoveredImage] = useState(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+  const [tip, setTip] = useState(null);
+
+  const showTip = (text, e) => {
+    setTip({ text, x: e.clientX, y: e.clientY });
+  };
+  const hideTip = () => setTip(null);
 
   // Listen for daemon retry_queued events
   useEffect(() => {
@@ -142,13 +148,13 @@ export default function ActivityFeed() {
                     {outcomeLabel}
                   </span>
                   {isDeactivated && (
-                    <span className="badge badge-deactivated text-xs">🪦 Deactivated</span>
+                    <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip('Listing was removed from IS24 before the bot could apply — not a failure, just bad timing.', e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>🪦 Deactivated</span>
                   )}
                   {isCaptcha && (
-                    <span className="badge badge-captcha text-xs">🔐 Captcha</span>
+                    <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip('Blocked by captcha — enter your 2captcha API key in Settings to auto-solve', e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>🔐 Captcha</span>
                   )}
                   {isPremium && (
-                    <span className="badge badge-premium text-xs">💎 Premium</span>
+                    <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip('Premium listing — requires MieterPlus/Suchen+ subscription. Buy Suchen+ to avoid these errors', e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>💎 Premium</span>
                   )}
                 </div>
                 {item.address && (
@@ -259,6 +265,24 @@ export default function ActivityFeed() {
           </div>
         );
       })}
+
+      {/* Badge tooltip — instant hover, same pattern as image preview */}
+      {tip && (
+        <div
+          className="fixed pointer-events-none z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
+          style={{
+            left: tip.x + 14,
+            top: tip.y - 36,
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            maxWidth: 320,
+            whiteSpace: 'normal',
+          }}
+        >
+          {tip.text}
+        </div>
+      )}
 
       {/* Hover preview */}
       {hoveredImage && (

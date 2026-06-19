@@ -78,7 +78,7 @@ function listingBadges(listing) {
 
 // ── Entry Row ────────────────────────────────────────────────────────────────
 
-function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcomeFilter, onImageHover, onImageMove, onImageLeave }) {
+function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcomeFilter, onImageHover, onImageMove, onImageLeave, onTipShow, onTipMove, onTipHide }) {
   const [copied, setCopied] = useState(null);
   const [requeued, setRequeued] = useState(false);
 
@@ -156,13 +156,13 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcom
               {outcomeLabel}
             </span>
             {showBadges.includes('Deactivated') && (
-              <span className="badge badge-deactivated text-xs">🪦 Deactivated</span>
+              <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow('Listing was removed from IS24 before the bot could apply — not a failure, just bad timing.', e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>🪦 Deactivated</span>
             )}
             {showBadges.includes('Captcha') && (
-              <span className="badge badge-captcha text-xs">🔐 Captcha</span>
+              <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow('Blocked by captcha — enter your 2captcha API key in Settings to auto-solve', e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>🔐 Captcha</span>
             )}
             {showBadges.includes('Premium') && (
-              <span className="badge badge-premium text-xs">💎 Premium</span>
+              <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow('Premium listing — requires MieterPlus/Suchen+ subscription. Buy Suchen+ to avoid these errors', e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>💎 Premium</span>
             )}
           </div>
           {listing.address && (
@@ -326,6 +326,14 @@ export default function HistoryTab() {
   const fetchListingsRef = useRef(null);
   const [hoveredImage, setHoveredImage] = useState(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+  const [tip, setTip] = useState(null);
+
+  const showTip = (text, e) => {
+    if (!text) { hideTip(); return; }
+    if (e) setTip({ text, x: e.clientX, y: e.clientY });
+  };
+  const moveTip = (e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+  const hideTip = () => setTip(null);
 
   // ── Load stats (optionally filtered by search) ─────────────────────────────
   const loadStats = useCallback((forFilterId) => {
@@ -658,6 +666,9 @@ export default function HistoryTab() {
                       onImageHover={setHoveredImage}
                       onImageMove={setHoverPos}
                       onImageLeave={() => setHoveredImage(null)}
+                      onTipShow={showTip}
+                      onTipMove={moveTip}
+                      onTipHide={hideTip}
                     />
                   ))}
                 </div>
@@ -686,6 +697,24 @@ export default function HistoryTab() {
           </div>
         )}
       </div>
+
+      {/* Badge tooltip — instant hover */}
+      {tip && (
+        <div
+          className="fixed pointer-events-none z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
+          style={{
+            left: tip.x + 14,
+            top: tip.y - 36,
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            maxWidth: 320,
+            whiteSpace: 'normal',
+          }}
+        >
+          {tip.text}
+        </div>
+      )}
 
       {/* Hover preview */}
       {hoveredImage && (
