@@ -1,9 +1,17 @@
 // SettingsTab — configuration screen for Homelander.
-// Persona, Message Template, Timing, Connections, API keys.
+// Persona, Message Template, Timing, API keys.
 
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../stores/appStore';
-import StatusDot from '../components/StatusDot';
+import {
+  IS24_SALUTATION,
+  IS24_MOVE_IN,
+  IS24_PERSONS,
+  IS24_PETS,
+  IS24_EMPLOYMENT,
+  IS24_INCOME,
+  IS24_DOCUMENTS,
+} from '../shared/is24FormOptions';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -28,14 +36,13 @@ function renderPreview(template, sample) {
 
 // ── Section wrapper ─────────────────────────────────────────────────
 
-function Section({ title, action, children }) {
+function Section({ title, children }) {
   return (
     <section className="card p-4">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           {title}
         </h2>
-        {action}
       </div>
       {children}
     </section>
@@ -47,67 +54,33 @@ function Section({ title, action, children }) {
 export default function SettingsTab() {
   const config = useStore((s) => s.config);
   const setConfig = useStore((s) => s.setConfig);
-  const chromeStatus = useStore((s) => s.chromeStatus);
-  const setChromeStatus = useStore((s) => s.setChromeStatus);
 
   // Local editing state
-  const [editingPersona, setEditingPersona] = useState(false);
   const [personaDraft, setPersonaDraft] = useState(null);
   const [templateDraft, setTemplateDraft] = useState('');
-  const [timingDraft, setTimingDraft] = useState({ speed: 'balanced', max_sends_per_run: 10, poll_interval: 600 });
+  const [timingDraft, setTimingDraft] = useState({ speed: 'balanced', poll_interval: 10 });
   const [captchaDraft, setCaptchaDraft] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [showCaptcha, setShowCaptcha] = useState(false);
+  const [cleanupStep, setCleanupStep] = useState(null); // null | 'confirm' | 'purging'
+  const [cleanupEmail, setCleanupEmail] = useState('');
+  const [cleanupError, setCleanupError] = useState(null);
   const [feedback, setFeedback] = useState(null); // { type: 'success'|'error', msg }
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
 
-  // Load config into local drafts on mount / config change
-  useEffect(() => {
-    if (!config) return;
-    setTemplateDraft(config.message_template || '');
-    setTimingDraft({
-      speed: config.timing?.speed || 'balanced',
-      max_sends_per_run: config.timing?.max_sends_per_run ?? 10,
-      poll_interval: config.polling?.interval_seconds ?? 600,
-    });
-    setCaptchaDraft(config.captcha?.api_key || '');
-  }, [config]);
-
-  // Refresh Chrome status on mount
-  useEffect(() => {
-    refreshChromeStatus();
-  }, []);
-
-  const refreshChromeStatus = async () => {
-    if (!window.homelander) return;
-    const res = await window.homelander.getChromeStatus();
-    if (res && !res.error) {
-      setChromeStatus(res.tabCount > 0 ? 'running' : 'stopped');
-    }
+  const showFeedback = (fb) => {
+    setFeedback(fb);
+    requestAnimationFrame(() => setFeedbackVisible(true));
+    setTimeout(() => {
+      setFeedbackVisible(false);
+      setTimeout(() => setFeedback(null), 300);
+    }, 2000);
   };
 
-  const save = async (patch) => {
-    if (!window.homelander) {
-      setFeedback({ type: 'error', msg: 'No backend connection.' });
-      return;
-    }
-    setSaving(true);
-    setFeedback(null);
-    const res = await window.homelander.updateConfig(patch);
-    if (res?.error) {
-      setFeedback({ type: 'error', msg: res.error });
-    } else {
-      // Re-fetch full config so store is consistent
-      const fresh = await window.homelander.getConfig();
-      setConfig(fresh);
-      setFeedback({ type: 'success', msg: 'Saved.' });
-    }
-    setSaving(false);
-    setTimeout(() => setFeedback(null), 2500);
-  };
-
-  // ── Persona handlers ─────────────────────────────────────────────
-
-  const startEditPersona = () => {
-    const p = config?.persona || {};
+  // Initialize persona draft from config
+  useEffect(() => {
+    if (!config?.persona) return;
+    if (personaDraft) return; // already initialized, don't overwrite user edits
+    const p = config.persona;
     setPersonaDraft({
       anrede: p.anrede || '',
       vorname: p.vorname || '',
@@ -119,28 +92,105 @@ export default function SettingsTab() {
       plz: p.plz || '',
       ort: p.ort || '',
       einzug: p.einzug || '',
+      einzug_datum: p.einzug_datum || '',
       personen: p.personen ?? '',
       haustiere: p.haustiere ?? '',
       beschaeftigung: p.beschaeftigung || '',
       einkommen: p.einkommen ?? '',
       unterlagen: p.unterlagen ?? '',
     });
-    setEditingPersona(true);
+  }, [config?.persona]);
+
+  // Load config into local drafts on mount / config change
+  useEffect(() => {
+    if (!config) return;
+    setTemplateDraft(config.message_template || '');
+    setTimingDraft({
+      speed: config.timing?.speed || 'balanced',
+      poll_interval: Math.max(5, Math.round((config.polling?.interval_seconds ?? 600) / 60)),
+    });
+    setCaptchaDraft(config.captcha?.api_key || '');
+  }, [config]);
+
+  // Auto-detect IS24 email from Chrome if persona email is empty
+  useEffect(() => {
+    if (!config?.persona) return;
+    if (config.persona.email) return; // already set
+    if (!window.homelander) return;
+
+    let cancelled = false;
+    async function tryDetect() {
+      try {
+        const status = await window.homelander.getChromeStatus();
+        if (!status?.running) return;
+        const result = await window.homelander.getIs24Email();
+        if (result?.email && !cancelled) {
+          const fresh = await window.homelander.getConfig();
+          const patch = {
+            persona: { ...fresh.persona, email: result.email },
+            is24: { ...fresh.is24, email: result.email },
+          };
+          await window.homelander.updateConfig(patch);
+          setConfig({ ...fresh, ...patch });
+        }
+      } catch {}
+    }
+    tryDetect();
+    return () => { cancelled = true; };
+  }, [config?.persona?.email]);
+
+  const save = async (patch) => {
+    if (!window.homelander) {
+      showFeedback({ type: 'error', msg: 'No backend connection.' });
+      return;
+    }
+    const res = await window.homelander.updateConfig(patch);
+    if (res?.error) {
+      showFeedback({ type: 'error', msg: res.error });
+    } else {
+      const fresh = await window.homelander.getConfig();
+      setConfig(fresh);
+      showFeedback({ type: 'success', msg: 'Saved' });
+    }
   };
 
-  const cancelEditPersona = () => {
-    setEditingPersona(false);
-    setPersonaDraft(null);
-  };
-
-  const savePersona = () => {
-    save({ persona: personaDraft });
-    setEditingPersona(false);
-    setPersonaDraft(null);
-  };
+  // ── Persona handlers ─────────────────────────────────────────────
 
   const updatePersonaField = (field, value) => {
     setPersonaDraft((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const savePersona = () => {
+    const errors = [];
+    const p = personaDraft;
+    if (!p.anrede?.trim()) errors.push('Anrede is required');
+    if (!p.vorname?.trim()) errors.push('Vorname is required');
+    if (!p.nachname?.trim()) errors.push('Nachname is required');
+    if (!p.email?.trim()) errors.push('Email is required');
+    if (p.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email.trim())) {
+      errors.push('Email format is invalid');
+    }
+    if (!p.telefon?.trim()) errors.push('Telefon is required');
+    if (!p.strasse?.trim()) errors.push('Straße is required');
+    if (!p.hausnummer?.trim()) errors.push('Hausnr. is required');
+    if (!p.plz?.trim()) errors.push('PLZ is required');
+    if (p.plz?.trim() && !/^\d{4,5}$/.test(String(p.plz).trim())) {
+      errors.push('PLZ must be 4-5 digits');
+    }
+    if (!p.ort?.trim()) errors.push('Ort is required');
+    if (!p.einzug?.trim()) errors.push('Einzug is required');
+    if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push('Einzug Datum is required');
+    if (!p.personen?.trim()) errors.push('Personen is required');
+    if (!p.haustiere?.trim()) errors.push('Haustiere is required');
+    if (!p.beschaeftigung?.trim()) errors.push('Beschäftigung is required');
+    if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
+    if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
+    if (errors.length > 0) {
+      const msg = errors.length > 3 ? 'All fields are required' : errors.join('; ');
+      showFeedback({ type: 'error', msg });
+      return;
+    }
+    save({ persona: personaDraft });
   };
 
   // ── Template handlers ────────────────────────────────────────────
@@ -149,54 +199,52 @@ export default function SettingsTab() {
 
   // ── Timing handlers ──────────────────────────────────────────────
 
-  const saveTimingField = (field, value) => {
-    const updated = { ...timingDraft, [field]: value };
-    setTimingDraft(updated);
+  const updateTimingField = (field, value) => {
+    setTimingDraft((prev) => ({ ...prev, [field]: value }));
+  };
 
-    const patch = {
-      timing: { ...config?.timing, [field === 'speed' ? 'speed' : field === 'max_sends_per_run' ? 'max_sends_per_run' : undefined]: value },
-      polling: { ...config?.polling },
-    };
-
-    if (field === 'speed' || field === 'max_sends_per_run') {
-      patch.timing[field] = value;
-    }
-    if (field === 'poll_interval') {
-      patch.polling.interval_seconds = value;
-    }
-
-    // Clean undefined
-    if (patch.timing.speed === undefined) delete patch.timing.speed;
-    if (patch.timing.max_sends_per_run === undefined) {
-      patch.timing.max_sends_per_run = config?.timing?.max_sends_per_run ?? 10;
-    }
-
-    save(patch);
+  const saveTiming = () => {
+    const mins = parseInt(timingDraft.poll_interval) || 10;
+    const clamped = Math.max(5, mins);
+    const seconds = clamped * 60;
+    save({
+      timing: { ...config?.timing, speed: timingDraft.speed },
+      polling: { ...config?.polling, interval_seconds: seconds },
+    });
   };
 
   // ── Captcha handler ─────────────────────────────────────────────
 
   const saveCaptcha = () => save({ captcha: { api_key: captchaDraft } });
 
-  // ── Launch Chrome ───────────────────────────────────────────────
+  // ── Clean All Data ──────────────────────────────────────────────
 
-  const handleLaunchChrome = async () => {
-    if (!window.homelander) return;
-    const res = await window.homelander.launchChrome();
-    if (res?.error) {
-      setFeedback({ type: 'error', msg: res.error });
-    } else {
-      setChromeStatus('running');
-      setFeedback({ type: 'success', msg: 'Chrome launched.' });
-    }
-    setTimeout(() => setFeedback(null), 2500);
+  const handleCleanData = () => {
+    setCleanupStep('confirm');
+    setCleanupEmail('');
+    setCleanupError(null);
   };
 
-  // ── Quit ────────────────────────────────────────────────────────
+  const handleCancelClean = () => {
+    setCleanupStep(null);
+    setCleanupEmail('');
+    setCleanupError(null);
+  };
 
-  const handleQuit = () => {
-    if (window.homelander?.quit) {
-      window.homelander.quit();
+  const handleConfirmClean = async () => {
+    if (!cleanupEmail.trim()) {
+      setCleanupError('Enter your email to confirm.');
+      return;
+    }
+    setCleanupStep('purging');
+    setCleanupError(null);
+    if (window.homelander?.cleanData) {
+      const res = await window.homelander.cleanData(cleanupEmail.trim());
+      if (res?.error) {
+        setCleanupStep('confirm');
+        setCleanupError(res.error);
+      }
+      // On success, app relaunches — no state update needed
     }
   };
 
@@ -211,20 +259,22 @@ export default function SettingsTab() {
   }
 
   const persona = config.persona || {};
-  const hasCaptcha = !!config.captcha?.api_key;
+  const templateRows = Math.max(6, (templateDraft.match(/\n/g)?.length || 0) + 2);
 
   // ── Render ───────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4 pb-8">
 
-      {/* Feedback toast */}
+      {/* Feedback toast — fixed overlay, always visible */}
       {feedback && (
         <div
-          className="px-4 py-2 rounded-lg text-sm font-medium"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
           style={{
-            background: feedback.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
-            color: feedback.type === 'success' ? 'var(--success)' : 'var(--danger)',
+            background: feedback.type === 'success' ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)',
+            color: '#fff',
+            opacity: feedbackVisible ? 1 : 0,
+            transition: 'opacity 0.3s ease',
           }}
         >
           {feedback.msg}
@@ -232,25 +282,15 @@ export default function SettingsTab() {
       )}
 
       {/* ── 1. Persona ──────────────────────────────────────────── */}
-      <Section
-        title="Persona"
-        action={
-          editingPersona ? null : (
-            <button className="btn btn-ghost text-xs" onClick={startEditPersona}>
-              Edit
-            </button>
-          )
-        }
-      >
-        {editingPersona && personaDraft ? (
+      <Section title="Persona">
+        {personaDraft ? (
           <div className="space-y-3">
             <div className="grid grid-cols-4 gap-3">
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Anrede</label>
                 <select className="select text-sm" value={personaDraft.anrede} onChange={(e) => updatePersonaField('anrede', e.target.value)}>
                   <option value="">-</option>
-                  <option value="Herr">Herr</option>
-                  <option value="Frau">Frau</option>
+                  {IS24_SALUTATION.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
               <div>
@@ -293,67 +333,71 @@ export default function SettingsTab() {
             <div className="grid grid-cols-4 gap-3">
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Einzug</label>
-                <input className="input text-sm" placeholder="z.B. 01.09.2026" value={personaDraft.einzug} onChange={(e) => updatePersonaField('einzug', e.target.value)} />
+                <select className="select text-sm" value={personaDraft.einzug} onChange={(e) => updatePersonaField('einzug', e.target.value)}>
+                  {IS24_MOVE_IN.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
+                  <option value="">—</option>
+                </select>
+                {personaDraft.einzug === 'genaues Datum' && (
+                  <input
+                    className="input mt-2 text-sm"
+                    type="date"
+                    value={personaDraft.einzug_datum || ''}
+                    onChange={(e) => updatePersonaField('einzug_datum', e.target.value)}
+                  />
+                )}
               </div>
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Personen</label>
-                <input className="input text-sm" type="number" value={personaDraft.personen} onChange={(e) => updatePersonaField('personen', parseInt(e.target.value) || '')} />
+                <select className="select text-sm" value={personaDraft.personen} onChange={(e) => updatePersonaField('personen', e.target.value)}>
+                  {IS24_PERSONS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Haustiere</label>
-                <input className="input text-sm" placeholder="z.B. 1 Hund" value={personaDraft.haustiere} onChange={(e) => updatePersonaField('haustiere', e.target.value)} />
+                <select className="select text-sm" value={personaDraft.haustiere} onChange={(e) => updatePersonaField('haustiere', e.target.value)}>
+                  {IS24_PETS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Beschäftigung</label>
-                <input className="input text-sm" value={personaDraft.beschaeftigung} onChange={(e) => updatePersonaField('beschaeftigung', e.target.value)} />
+                <select className="select text-sm" value={personaDraft.beschaeftigung} onChange={(e) => updatePersonaField('beschaeftigung', e.target.value)}>
+                  {IS24_EMPLOYMENT.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
+                </select>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Einkommen (€)</label>
-                <input className="input text-sm" type="number" value={personaDraft.einkommen} onChange={(e) => updatePersonaField('einkommen', parseInt(e.target.value) || '')} />
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Einkommen (netto)</label>
+                <select className="select text-sm" value={personaDraft.einkommen} onChange={(e) => updatePersonaField('einkommen', e.target.value)}>
+                  {IS24_INCOME.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
+                </select>
               </div>
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Unterlagen</label>
                 <select className="select text-sm" value={personaDraft.unterlagen} onChange={(e) => updatePersonaField('unterlagen', e.target.value)}>
-                  <option value="">-</option>
-                  <option value="vorhanden">Vorhanden</option>
-                  <option value="teilweise">Teilweise</option>
-                  <option value="keine">Keine</option>
+                  {IS24_DOCUMENTS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
               </div>
             </div>
-            <div className="flex gap-2 pt-1">
-              <button className="btn btn-primary text-xs" onClick={savePersona} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Persona'}
+            <div className="pt-1">
+              <button className="btn btn-primary text-xs" onClick={savePersona}>
+                Save
               </button>
-              <button className="btn btn-ghost text-xs" onClick={cancelEditPersona}>Cancel</button>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
-            <InfoRow label="Name" value={[persona.anrede, persona.vorname, persona.nachname].filter(Boolean).join(' ') || '—'} />
-            <InfoRow label="E-Mail" value={persona.email || '—'} />
-            <InfoRow label="Telefon" value={persona.telefon || '—'} />
-            <InfoRow label="Adresse" value={[persona.strasse, persona.hausnummer, persona.plz, persona.ort].filter(Boolean).join(' ') || '—'} />
-            <InfoRow label="Einzug" value={persona.einzug || '—'} />
-            <InfoRow label="Personen" value={persona.personen ?? '—'} />
-            <InfoRow label="Haustiere" value={persona.haustiere || 'Keine'} />
-            <InfoRow label="Beschäftigung" value={persona.beschaeftigung || '—'} />
-            <InfoRow label="Einkommen" value={persona.einkommen ? `${persona.einkommen} €` : '—'} />
-            <InfoRow label="Unterlagen" value={persona.unterlagen || '—'} />
-          </div>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading persona...</p>
         )}
       </Section>
 
       {/* ── 2. Message Template ──────────────────────────────────── */}
       <Section title="Message Template">
         <textarea
-          className="input min-h-[100px] resize-y text-sm font-mono"
+          className="input resize-y text-sm font-mono leading-6"
+          rows={templateRows}
           value={templateDraft}
           onChange={(e) => setTemplateDraft(e.target.value)}
-          onBlur={saveTemplate}
-          placeholder="Sehr geehrte Damen und Herren,\nich interessiere mich für {{title}} in {{address}}...\n\nMit freundlichen Grüßen\n{{name}}"
+          placeholder={"Sehr geehrte Damen und Herren,\nich interessiere mich für {{title}} in {{address}}...\n\nMit freundlichen Grüßen\n{{name}}"}
         />
         <div className="mt-2 flex gap-2 items-center mb-2">
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Variables:</span>
@@ -369,140 +413,119 @@ export default function SettingsTab() {
             name: [persona.anrede, persona.vorname, persona.nachname].filter(Boolean).join(' ') || 'Max Mustermann',
           })}
         </div>
+        <div className="pt-3">
+          <button className="btn btn-primary text-xs" onClick={saveTemplate}>
+            Save
+          </button>
+        </div>
       </Section>
 
       {/* ── 3. Timing ────────────────────────────────────────────── */}
       <Section title="Timing">
-        <div className="grid grid-cols-3 gap-4">
-          <div>
-            <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Speed</label>
-            <select
-              className="select text-sm"
-              value={timingDraft.speed}
-              onChange={(e) => saveTimingField('speed', e.target.value)}
-            >
-              <option value="fast">Fast</option>
-              <option value="balanced">Balanced</option>
-              <option value="slow">Slow</option>
-            </select>
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              {timingDraft.speed === 'fast' ? 'Minimum delays, higher captcha risk' : timingDraft.speed === 'slow' ? 'Maximum delays, safest' : 'Default balance'}
-            </p>
+        <div className="flex items-start justify-between">
+          <div className="flex gap-4 flex-1">
+            <div className="flex-1">
+              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Speed</label>
+              <select
+                className="select text-sm w-full"
+                value={timingDraft.speed}
+                onChange={(e) => updateTimingField('speed', e.target.value)}
+              >
+                <option value="fast">Fast</option>
+                <option value="balanced">Balanced</option>
+                <option value="slow">Slow</option>
+              </select>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                {timingDraft.speed === 'fast' ? 'Minimum delays, higher captcha risk' : timingDraft.speed === 'slow' ? 'Maximum delays, safest' : 'Default balance'}
+              </p>
+            </div>
+            <div className="flex-1">
+              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Poll interval (min)</label>
+              <input
+                className="input text-sm w-full"
+                type="number"
+                min={5}
+                step={1}
+                value={timingDraft.poll_interval}
+                onChange={(e) => updateTimingField('poll_interval', e.target.value)}
+              />
+              <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>How often to check for new listings</p>
+            </div>
           </div>
-          <div>
-            <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Max sends per run</label>
-            <input
-              className="input text-sm"
-              type="number"
-              min={1}
-              value={timingDraft.max_sends_per_run}
-              onChange={(e) => saveTimingField('max_sends_per_run', parseInt(e.target.value) || 1)}
-            />
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Stops after N applications per cycle</p>
-          </div>
-          <div>
-            <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Poll interval (s)</label>
-            <input
-              className="input text-sm"
-              type="number"
-              min={60}
-              step={30}
-              value={timingDraft.poll_interval}
-              onChange={(e) => saveTimingField('poll_interval', parseInt(e.target.value) || 60)}
-            />
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>How often to check for new listings</p>
+          <div className="flex items-end ml-4" style={{ paddingTop: '1.65rem' }}>
+            <button className="btn btn-primary text-xs" onClick={saveTiming}>
+              Save
+            </button>
           </div>
         </div>
       </Section>
 
-      {/* ── 4. Connections ───────────────────────────────────────── */}
-      <Section
-        title="Connections"
-        action={
-          <button className="btn btn-ghost text-xs" onClick={refreshChromeStatus}>
-            Refresh
-          </button>
-        }
-      >
-        <div className="space-y-2">
-          {/* IS24 Mobile API */}
-          <div className="flex items-center justify-between py-1.5">
-            <div className="flex items-center gap-2">
-              <StatusDot status="running" />
-              <span className="text-sm">IS24 Mobile API</span>
-            </div>
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Always reachable from desktop</span>
-          </div>
-
-          {/* Chrome CDP */}
-          <div className="flex items-center justify-between py-1.5">
-            <div className="flex items-center gap-2">
-              <StatusDot status={chromeStatus} />
-              <span className="text-sm">Chrome CDP</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {chromeStatus === 'running' ? 'Connected' : 'Not connected'}
-              </span>
-              {chromeStatus !== 'running' && (
-                <button className="btn btn-ghost text-xs" onClick={handleLaunchChrome}>
-                  Launch
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* 2captcha */}
-          <div className="flex items-center justify-between py-1.5">
-            <div className="flex items-center gap-2">
-              <StatusDot status={hasCaptcha ? 'running' : 'error'} />
-              <span className="text-sm">2captcha</span>
-            </div>
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              {hasCaptcha ? 'Configured' : 'Not configured'}
-            </span>
-          </div>
-        </div>
-      </Section>
-
-      {/* ── 5. 2captcha API Key ──────────────────────────────────── */}
+      {/* ── 4. 2captcha API Key ──────────────────────────────────── */}
       <Section title="2captcha API Key">
         <div className="flex items-center gap-3">
           <input
             className="input text-sm flex-1"
-            type="password"
-            placeholder={hasCaptcha ? maskApiKey(config.captcha?.api_key) : 'Enter your 2captcha API key'}
+            type={showCaptcha ? 'text' : 'password'}
+            placeholder="Enter your 2captcha API key"
             value={captchaDraft}
             onChange={(e) => setCaptchaDraft(e.target.value)}
           />
-          <button className="btn btn-primary text-xs" onClick={saveCaptcha} disabled={saving || !captchaDraft}>
-            {saving ? 'Saving...' : hasCaptcha ? 'Change' : 'Save'}
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none" style={{ color: 'var(--text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={showCaptcha}
+              onChange={(e) => setShowCaptcha(e.target.checked)}
+              className="cursor-pointer"
+            />
+            Show
+          </label>
+          <button className="btn btn-primary text-xs" onClick={saveCaptcha} disabled={!captchaDraft}>
+            Save
           </button>
         </div>
-        {hasCaptcha && (
-          <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
-            Key configured: {maskApiKey(config.captcha?.api_key)}
-          </p>
-        )}
       </Section>
 
-      {/* ── 6. Quit ──────────────────────────────────────────────── */}
+      {/* ── 5. Clean All Data ──────────────────────────────────── */}
       <div className="pt-2">
-        <button className="btn btn-danger text-sm w-full" onClick={handleQuit}>
-          Quit Homelander
-        </button>
+        {cleanupStep === null ? (
+          <button className="btn btn-danger text-sm w-full" onClick={handleCleanData}>
+            Clean All Data
+          </button>
+        ) : cleanupStep === 'confirm' ? (
+          <div className="p-4 rounded-lg" style={{ border: '1px solid var(--danger)', background: 'rgba(239,68,68,0.06)' }}>
+            <p className="text-sm mb-3" style={{ color: 'var(--danger)' }}>
+              This will delete all data — listings, config, API keys. Type your email to confirm.
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                className="input text-sm flex-1"
+                type="email"
+                placeholder={config?.persona?.email || 'your@email.com'}
+                value={cleanupEmail}
+                onChange={(e) => { setCleanupEmail(e.target.value); setCleanupError(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmClean(); }}
+              />
+              <button
+                className="btn btn-danger text-xs"
+                onClick={handleConfirmClean}
+                disabled={cleanupStep === 'purging'}
+              >
+                {cleanupStep === 'purging' ? 'Purging...' : 'Continue'}
+              </button>
+              <button className="btn btn-ghost text-xs" onClick={handleCancelClean}>
+                Cancel
+              </button>
+            </div>
+            {cleanupError && (
+              <p className="text-xs mt-2" style={{ color: 'var(--danger)' }}>{cleanupError}</p>
+            )}
+          </div>
+        ) : (
+          <button className="btn btn-danger text-sm w-full" disabled>
+            Purging all data...
+          </button>
+        )}
       </div>
-    </div>
-  );
-}
-
-// ── Small helper ────────────────────────────────────────────────────
-
-function InfoRow({ label, value }) {
-  return (
-    <div className="flex justify-between">
-      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <span className="text-right" style={{ color: 'var(--text-primary)' }}>{value}</span>
     </div>
   );
 }

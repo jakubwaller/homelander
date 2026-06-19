@@ -3,6 +3,15 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../stores/appStore';
+import {
+  IS24_SALUTATION,
+  IS24_MOVE_IN,
+  IS24_PERSONS,
+  IS24_PETS,
+  IS24_EMPLOYMENT,
+  IS24_INCOME,
+  IS24_DOCUMENTS,
+} from '../shared/is24FormOptions';
 
 const STEPS = [
   { id: 'persona', label: 'Persona' },
@@ -12,13 +21,13 @@ const STEPS = [
   { id: 'search', label: 'Search' },
 ];
 
-const ANREDE_OPTIONS = ['Herr', 'Frau', 'Divers'];
-const EINZUG_OPTIONS = ['ab sofort', 'in 1 Monat', 'in 2 Monaten', 'in 3 Monaten', 'flexibel'];
-const PERSONEN_OPTIONS = ['1', '2', '3', '4+'];
-const HAUSTIERE_OPTIONS = ['keine', '1 Katze', '1 Hund', 'andere'];
-const BESCHAEFTIGUNG_OPTIONS = ['Angestellter', 'Beamter', 'Selbstständig', 'Student', 'Rentner'];
-const EINKOMMEN_OPTIONS = ['< 1.500€', '1.500-2.500€', '2.500-3.500€', '3.500-5.000€', '> 5.000€'];
-const UNTERLAGEN_OPTIONS = ['vollständig', 'teilweise', 'folgen'];
+const ANREDE_OPTIONS = IS24_SALUTATION.filter(Boolean);
+const EINZUG_OPTIONS = IS24_MOVE_IN.filter(Boolean);
+const PERSONEN_OPTIONS = IS24_PERSONS.filter(Boolean);
+const HAUSTIERE_OPTIONS = IS24_PETS.filter(Boolean);
+const BESCHAEFTIGUNG_OPTIONS = IS24_EMPLOYMENT.filter(Boolean);
+const EINKOMMEN_OPTIONS = IS24_INCOME.filter(Boolean);
+const UNTERLAGEN_OPTIONS = IS24_DOCUMENTS.filter(Boolean);
 
 const DEFAULT_MESSAGE = [
   'Sehr geehrte Damen und Herren,',
@@ -33,10 +42,21 @@ export default function SetupWizard({ onComplete }) {
   const [step, setStep] = useState(0);
   const [config, setConfig] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
   const [is24Status, setIs24Status] = useState('pending');
   const [captchaValidating, setCaptchaValidating] = useState(false);
   const [searchUrl, setSearchUrl] = useState('');
+
+  // Floating feedback toast (matches SettingsTab pattern)
+  const [feedback, setFeedback] = useState(null);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
+  const showFeedback = (fb) => {
+    setFeedback(fb);
+    requestAnimationFrame(() => setFeedbackVisible(true));
+    setTimeout(() => {
+      setFeedbackVisible(false);
+      setTimeout(() => setFeedback(null), 300);
+    }, 2500);
+  };
 
   const setStoreConfig = useStore((s) => s.setConfig);
   const setStoreSetupComplete = useStore((s) => s.setSetupComplete);
@@ -111,12 +131,60 @@ export default function SetupWizard({ onComplete }) {
 
   const saveAndNext = async () => {
     setSaving(true);
-    setError(null);
 
     try {
       if (!window.homelander) throw new Error('App bridge not ready');
 
+      let configToSave = config;
+      const applyConfigPatch = (patch) => {
+        const merged = { ...configToSave };
+        for (const [key, value] of Object.entries(patch)) {
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            merged[key] = { ...merged[key], ...value };
+          } else {
+            merged[key] = value;
+          }
+        }
+        configToSave = merged;
+        updateConfig(patch);
+        return merged;
+      };
+
       // ── Step-specific validation ────────────────────────────
+      if (step === 0) {
+        // Persona: ALL fields mandatory
+        const errors = [];
+        const p = configToSave.persona || {};
+        if (!p.anrede?.trim()) errors.push('Anrede is required');
+        if (!p.vorname?.trim()) errors.push('Vorname is required');
+        if (!p.nachname?.trim()) errors.push('Nachname is required');
+        if (!p.email?.trim()) errors.push('Email is required');
+        if (p.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email.trim())) {
+          errors.push('Email format is invalid');
+        }
+        if (!p.telefon?.trim()) errors.push('Telefon is required');
+        if (!p.strasse?.trim()) errors.push('Straße is required');
+        if (!p.hausnummer?.trim()) errors.push('Hausnr. is required');
+        if (!p.plz?.trim()) errors.push('PLZ is required');
+        if (p.plz?.trim() && !/^\d{4,5}$/.test(String(p.plz).trim())) {
+          errors.push('PLZ must be 4-5 digits');
+        }
+        if (!p.ort?.trim()) errors.push('Ort is required');
+        if (!p.einzug?.trim()) errors.push('Einzug is required');
+        if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push('Einzug Datum is required');
+        if (!p.personen?.trim()) errors.push('Personen is required');
+        if (!p.haustiere?.trim()) errors.push('Haustiere is required');
+        if (!p.beschaeftigung?.trim()) errors.push('Beschäftigung is required');
+        if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
+        if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
+        if (errors.length > 0) {
+          const msg = errors.length > 3 ? 'All fields are required' : errors.join('; ');
+          showFeedback({ type: 'error', msg });
+          setSaving(false);
+          return;
+        }
+      }
+
       if (step === 2) {
         // IS24 login: launch Chrome if needed, then verify logged in
         let chromeStatus = await window.homelander.getChromeStatus();
@@ -124,7 +192,6 @@ export default function SetupWizard({ onComplete }) {
         if (!chromeStatus.running) {
           // Auto-launch Chrome for the user
           setIs24Status('launching');
-          setError(null);
           try {
             await window.homelander.updateConfig(config);
             const result = await window.homelander.openLoginPage();
@@ -134,13 +201,13 @@ export default function SetupWizard({ onComplete }) {
             await new Promise(r => setTimeout(r, 2000));
             chromeStatus = await window.homelander.getChromeStatus();
             if (!chromeStatus.running) {
-              setError('Chrome failed to start. Is Google Chrome installed?');
+              showFeedback({ type: 'error', msg: 'Chrome failed to start. Is Google Chrome installed?' });
               setIs24Status('chrome_error');
               setSaving(false);
               return;
             }
           } catch (err) {
-            setError('Could not open Chrome: ' + err.message);
+            showFeedback({ type: 'error', msg: 'Could not open Chrome: ' + err.message });
             setIs24Status('chrome_error');
             setSaving(false);
             return;
@@ -150,7 +217,7 @@ export default function SetupWizard({ onComplete }) {
         // Check login status
         const loginCheck = await window.homelander.checkIs24Login();
         if (!loginCheck.loggedIn) {
-          setError('Not logged into IS24 yet. A Chrome window should be open — log in there, then click Continue again.');
+          showFeedback({ type: 'error', msg: 'Not logged into IS24 yet. A Chrome window should be open — log in there, then click Continue again.' });
           setIs24Status('waiting_for_login');
           setSaving(false);
           return;
@@ -161,24 +228,25 @@ export default function SetupWizard({ onComplete }) {
         if (!config.is24?.email) {
           const emailResult = await window.homelander.getIs24Email();
           if (emailResult.email) {
-            updateConfig({ is24: { ...config.is24, email: emailResult.email } });
+            const emailPatch = { is24: { ...configToSave.is24, email: emailResult.email } };
             // Also set persona email if not already set
-            if (!config.persona?.email) {
-              updateConfig({ persona: { ...config.persona, email: emailResult.email } });
+            if (!configToSave.persona?.email) {
+              emailPatch.persona = { ...configToSave.persona, email: emailResult.email };
             }
+            applyConfigPatch(emailPatch);
           }
         }
       }
 
       if (step === 3) {
         // 2captcha: validate the API key if provided (optional)
-        const captchaKey = config.captcha?.api_key || '';
+        const captchaKey = configToSave.captcha?.api_key || '';
         if (captchaKey.trim()) {
           setCaptchaValidating(true);
           const validResult = await window.homelander.validateCaptchaKey(captchaKey.trim());
           setCaptchaValidating(false);
           if (!validResult.valid) {
-            setError(`Invalid 2captcha API key: ${validResult.error}. Get a key at 2captcha.com or leave empty to skip.`);
+            showFeedback({ type: 'error', msg: `Invalid 2captcha API key: ${validResult.error}. Get a key at 2captcha.com or leave empty to skip.` });
             setSaving(false);
             return;
           }
@@ -191,17 +259,22 @@ export default function SetupWizard({ onComplete }) {
         if (searchUrl.trim()) {
           const testResult = await window.homelander.testFilter(searchUrl.trim());
           if (testResult.error) {
-            setError(`Invalid search URL: ${testResult.error}`);
+            showFeedback({ type: 'error', msg: `Invalid search URL: ${testResult.error}` });
             setSaving(false);
             return;
           }
-          // Save the filter
-          await window.homelander.addFilter(searchUrl.trim(), '');
+          // Save the filter before completing setup so new users do not land on an empty dashboard.
+          const addResult = await window.homelander.addFilter(searchUrl.trim(), '');
+          if (addResult?.error) {
+            showFeedback({ type: 'error', msg: `Could not save search URL: ${addResult.error}` });
+            setSaving(false);
+            return;
+          }
         }
       }
 
       // Save config
-      await window.homelander.updateConfig(config);
+      await window.homelander.updateConfig(configToSave);
 
       if (step < 4) {
         setStep(step + 1);
@@ -209,11 +282,11 @@ export default function SetupWizard({ onComplete }) {
         // Final step — complete setup
         await window.homelander.completeSetup();
         setStoreSetupComplete(true);
-        setStoreConfig(config);
+        setStoreConfig(configToSave);
         onComplete();
       }
     } catch (err) {
-      setError(err.message);
+      showFeedback({ type: 'error', msg: err.message });
     } finally {
       setSaving(false);
       setCaptchaValidating(false);
@@ -263,14 +336,23 @@ export default function SetupWizard({ onComplete }) {
         ))}
       </div>
 
+      {/* Feedback toast — fixed overlay (matches SettingsTab pattern) */}
+      {feedback && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
+          style={{
+            background: feedback.type === 'success' ? 'rgba(34,197,94,0.85)' : 'rgba(239,68,68,0.85)',
+            color: '#fff',
+            opacity: feedbackVisible ? 1 : 0,
+            transition: 'opacity 0.3s ease',
+          }}
+        >
+          {feedback.msg}
+        </div>
+      )}
+
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-8 pb-8" style={{ maxWidth: 600, margin: '0 auto', width: '100%' }}>
-        {/* Error banner */}
-        {error && (
-          <div className="mb-4 px-4 py-3 rounded-lg text-sm" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)' }}>
-            {error}
-          </div>
-        )}
 
         {/* ── Step 0: Persona ────────────────────────────────────────── */}
         {step === 0 && (
@@ -280,7 +362,7 @@ export default function SetupWizard({ onComplete }) {
               These details will be filled into the IS24 contact form for every application.
             </p>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Anrede</label>
                 <select className="select" value={persona.anrede || ''} onChange={(e) => updatePersona('anrede', e.target.value)}>
@@ -288,6 +370,13 @@ export default function SetupWizard({ onComplete }) {
                   {ANREDE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>E-Mail</label>
+                <input className="input" type="email" value={persona.email || ''} onChange={(e) => updatePersona('email', e.target.value)} placeholder="your@email.com" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Vorname</label>
                 <input className="input" value={persona.vorname || ''} onChange={(e) => updatePersona('vorname', e.target.value)} />
@@ -298,12 +387,9 @@ export default function SetupWizard({ onComplete }) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Telefon</label>
-                <input className="input" value={persona.telefon || ''} onChange={(e) => updatePersona('telefon', e.target.value)} />
-              </div>
-              <div /> {/* spacer */}
+            <div>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Telefon</label>
+              <input className="input" value={persona.telefon || ''} onChange={(e) => updatePersona('telefon', e.target.value)} />
             </div>
 
             <div className="grid grid-cols-4 gap-3">
@@ -331,8 +417,16 @@ export default function SetupWizard({ onComplete }) {
                 <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Einzug</label>
                 <select className="select" value={persona.einzug || ''} onChange={(e) => updatePersona('einzug', e.target.value)}>
                   <option value="">—</option>
-                  {EINZUG_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  {EINZUG_OPTIONS.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
+                {persona.einzug === 'genaues Datum' && (
+                  <input
+                    className="input mt-2"
+                    type="date"
+                    value={persona.einzug_datum || ''}
+                    onChange={(e) => updatePersona('einzug_datum', e.target.value)}
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Personen</label>
@@ -415,7 +509,6 @@ export default function SetupWizard({ onComplete }) {
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
               IS24 blocks bots from logging in, so you must log in yourself once in Chrome.
               After that, your login session is saved — you won't need to do this again.
-              Your email will be detected automatically.
             </p>
 
             {/* Status card */}
@@ -435,7 +528,7 @@ export default function SetupWizard({ onComplete }) {
                   </p>
                   {is24Status === 'logged_in' && config.is24?.email ? (
                     <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {config.is24.email} · Keep Chrome open
+                      {config.is24.email}
                     </p>
                   ) : (
                     <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -445,8 +538,8 @@ export default function SetupWizard({ onComplete }) {
                       {is24Status === 'chrome_closed' && 'You closed Chrome before logging in. Reopen it to try again.'}
                       {is24Status === 'chrome_error' && 'Make sure Google Chrome is installed. Download from google.com/chrome.'}
                       {is24Status === 'checking' && 'Verifying your IS24 session...'}
-                      {is24Status === 'not_logged_in' && 'Chrome is open but we don\'t detect an IS24 session. Log in first.'}
-                      {is24Status === 'logged_in' && 'Keep Chrome open — it will be used to send applications.'}
+                      {is24Status === 'not_logged_in' && "Chrome is open but we don't detect an IS24 session. Log in first."}
+                      {is24Status === 'logged_in' && ''}
                     </p>
                   )}
                 </div>
@@ -466,7 +559,7 @@ export default function SetupWizard({ onComplete }) {
                     if (result.error) throw new Error(result.error);
                     setIs24Status('waiting_for_login');
                   } catch (err) {
-                    setError('Could not open Chrome: ' + err.message);
+                    showFeedback({ type: 'error', msg: 'Could not open Chrome: ' + err.message });
                     setIs24Status('chrome_error');
                   }
                 }}

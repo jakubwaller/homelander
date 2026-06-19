@@ -48,15 +48,6 @@ function formatDate(iso) {
   }
 }
 
-function formatPrice(price) {
-  if (!price || price === 0) return 'Tausch';
-  return new Intl.NumberFormat('de-DE', {
-    style: 'currency',
-    currency: 'EUR',
-    maximumFractionDigits: 0,
-  }).format(price);
-}
-
 function formatDateTime(iso) {
   if (!iso) return '';
   try {
@@ -74,28 +65,52 @@ function formatDateTime(iso) {
   }
 }
 
+function listingBadges(listing) {
+  const failureReason = (listing.failure_reason || listing.failureReason || '').toLowerCase();
+  const detail = (listing.detail || '').toLowerCase();
+  const outcome = listing.outcome || '';
+  const badges = [];
+  if (outcome === 'DEACTIVATED' || failureReason.includes('deactivated') || detail.includes('deactivated')) badges.push('Deactivated');
+  if (failureReason.includes('captcha') || detail.includes('captcha')) badges.push('Captcha');
+  if (failureReason.includes('premium') || detail.includes('premium') || detail.includes('suchen+')) badges.push('Premium');
+  return badges;
+}
+
 // ── Entry Row ────────────────────────────────────────────────────────────────
 
-function HistoryEntry({ listing, isExpanded, onToggle }) {
+function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcomeFilter }) {
+  const [copied, setCopied] = useState(null);
+  const [requeued, setRequeued] = useState(false);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.exposeId === listing.expose_id) {
+        setRequeued(true);
+        setTimeout(() => setRequeued(false), 4000);
+      }
+    };
+    window.addEventListener('homelander:retry-queued', handler);
+    return () => window.removeEventListener('homelander:retry-queued', handler);
+  }, [listing.expose_id]);
+
   const outcome = listing.outcome || 'FAILED';
 
   const isSent = outcome === 'SENT';
-  const isDeactivated = outcome === 'DEACTIVATED'
-    || (listing.failure_reason || '').includes('DEACTIVATED')
-    || (listing.detail || '').includes('DEACTIVATED');
+  const rawBadges = listingBadges(listing);
+  // Use raw badges for outcome classification (must work regardless of active filter)
+  const isDeactivated = rawBadges.includes('Deactivated');
   const isDryRun = outcome === 'DRY_RUN';
-  const isPremium =
-    (listing.failure_reason || '').toLowerCase().includes('premium') ||
-    (listing.detail || '').toLowerCase().includes('premium');
-  const isCaptcha =
-    (listing.failure_reason || '').toLowerCase().includes('captcha') ||
-    (listing.detail || '').toLowerCase().includes('captcha');
+  const isPremium = rawBadges.includes('Premium');
+  const isCaptcha = rawBadges.includes('Captcha');
+  // Filtered badges for visual rendering only (suppress the badge matching active filter)
+  const showBadges = outcomeFilter
+    ? rawBadges.filter(b => b.toUpperCase() !== outcomeFilter.toUpperCase())
+    : rawBadges;
 
-  // Icon + color always reflect the true outcome
+  // Icon + color — deactivated is its own outcome, not generic "Failed"
   const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : isDryRun ? '○' : '✗';
   const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : isDryRun ? 'var(--text-muted)' : 'var(--danger)';
 
-  // Outcome label always from the real outcome
   const outcomeLabel = isSent ? 'Sent' : isDeactivated ? 'Deactivated' : isDryRun ? 'Dry Run' : 'Failed';
 
   const badgeClass = isSent ? 'badge-success' : isDeactivated ? 'badge-deactivated' : isDryRun ? '' : 'badge-fail';
@@ -124,10 +139,13 @@ function HistoryEntry({ listing, isExpanded, onToggle }) {
             <span className={`badge ${badgeClass} text-xs`}>
               {outcomeLabel}
             </span>
-            {isCaptcha && (
+            {showBadges.includes('Deactivated') && (
+              <span className="badge badge-deactivated text-xs">🪦 Deactivated</span>
+            )}
+            {showBadges.includes('Captcha') && (
               <span className="badge badge-captcha text-xs">🔐 Captcha</span>
             )}
-            {isPremium && (
+            {showBadges.includes('Premium') && (
               <span className="badge badge-premium text-xs">💎 Premium</span>
             )}
           </div>
@@ -138,10 +156,37 @@ function HistoryEntry({ listing, isExpanded, onToggle }) {
           )}
         </div>
 
-        {/* Price */}
-        <span className="text-sm flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>
-          {formatPrice(listing.price)}
-        </span>
+        {/* External link */}
+        {listing.expose_id && (
+          <a
+            href={`https://www.immobilienscout24.de/expose/${listing.expose_id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex-shrink-0"
+            style={{ color: 'var(--accent)', fontSize: '16px' }}
+            onClick={(e) => e.stopPropagation()}
+            title="Open on ImmobilienScout24"
+          >
+            ↗
+          </a>
+        )}
+
+        {/* Retry button */}
+        {!isSent && !isDeactivated && listing.expose_id && onRetry && (
+          requeued ? (
+            <span className="text-xs flex-shrink-0" style={{ color: 'var(--success)' }}>Re-queued →</span>
+          ) : (
+            <button
+              className="btn btn-ghost flex-shrink-0"
+              onClick={(e) => { e.stopPropagation(); onRetry(listing.expose_id); }}
+              disabled={retrying?.has(listing.expose_id)}
+              style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
+              title="Retry this listing"
+            >
+              <span style={{ fontSize: '20px' }}>⟳</span>
+            </button>
+          )
+        )}
 
         {/* Time */}
         <span className="text-xs flex-shrink-0 w-12 text-right" style={{ color: 'var(--text-muted)' }}>
@@ -184,30 +229,32 @@ function HistoryEntry({ listing, isExpanded, onToggle }) {
             {listing.expose_id && (
               <div className="col-span-2">
                 <span style={{ color: 'var(--text-muted)' }}>Exposé ID: </span>
-                <span style={{ color: 'var(--text-secondary)' }} className="font-mono">
+                <button
+                  className="font-mono"
+                  style={{ color: copied === listing.expose_id ? 'var(--success)' : 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(listing.expose_id).catch(() => {});
+                    setCopied(listing.expose_id);
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                  title="Click to copy"
+                >
                   {listing.expose_id}
+                </button>
+                <span
+                  className="ml-2 text-xs"
+                  style={{ color: copied === listing.expose_id ? 'var(--success)' : 'var(--text-muted)', cursor: 'pointer' }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(listing.expose_id).catch(() => {});
+                    setCopied(listing.expose_id);
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                  title="Click to copy"
+                >
+                  {copied === listing.expose_id ? '✓ Copied' : '📋'}
                 </span>
-              </div>
-            )}
-
-            {/* IS24 link */}
-            <div className="col-span-2">
-              <a
-                href={`https://www.immobilienscout24.de/expose/${listing.expose_id}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-medium"
-                style={{ color: 'var(--accent)' }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                ↗ Open on ImmobilienScout24
-              </a>
-            </div>
-
-            {listing.failure_reason && (
-              <div className="col-span-2">
-                <span style={{ color: 'var(--text-muted)' }}>Failure reason: </span>
-                <span style={{ color: 'var(--danger)' }}>{listing.failure_reason}</span>
               </div>
             )}
 
@@ -218,9 +265,17 @@ function HistoryEntry({ listing, isExpanded, onToggle }) {
                   className="mt-0.5 p-2 rounded text-xs whitespace-pre-wrap"
                   style={{
                     background: 'var(--bg-secondary)',
-                    color: 'var(--text-secondary)',
+                    color: copied === listing.detail ? 'var(--success)' : 'var(--text-secondary)',
                     border: '1px solid var(--border)',
+                    cursor: 'pointer',
                   }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard.writeText(listing.detail).catch(() => {});
+                    setCopied(listing.detail);
+                    setTimeout(() => setCopied(null), 1500);
+                  }}
+                  title="Click to copy"
                 >
                   {listing.detail}
                 </p>
@@ -236,8 +291,8 @@ function HistoryEntry({ listing, isExpanded, onToggle }) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function HistoryTab() {
-  const filters = useStore((s) => s.filters);
-  const activeTab = useStore((s) => s.activeTab);
+  const filters = useStore((state) => state.filters);
+  const activeTab = useStore((state) => state.activeTab);
 
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -248,38 +303,21 @@ export default function HistoryTab() {
   const [hasMore, setHasMore] = useState(true);
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [loadingMore, setLoadingMore] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [allTimeStats, setAllTimeStats] = useState(null);
+  const [retrying, setRetrying] = useState(new Set());
   const sentinelRef = useRef(null);
+  const fetchListingsRef = useRef(null);
 
-  // ── Load all-time stats (refetch on tab activation) ────────────────────────
-  const loadStats = useCallback(() => {
+  // ── Load stats (optionally filtered by search) ─────────────────────────────
+  const loadStats = useCallback((forFilterId) => {
     if (!window.homelander) return;
-    window.homelander.getStats().then(({ stats, error }) => {
+    window.homelander.getStats(forFilterId || undefined).then(({ stats, error }) => {
       if (!error && stats) setAllTimeStats(stats);
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (activeTab === 'history') loadStats();
-  }, [activeTab, loadStats]);
-
-  // Listen for daemon listing events — refresh stats + listings while tab is active
-  const fetchListingsRef = useRef(fetchListings);
-  fetchListingsRef.current = fetchListings;
-
-  useEffect(() => {
-    if (!window.homelander) return;
-    const unsub = window.homelander.onListing(() => {
-      if (activeTab === 'history') {
-        loadStats();
-        fetchListingsRef.current(false);
-      }
-    });
-    return unsub;
-  }, [activeTab, loadStats]);
-
   // ── Fetch listings ───────────────────────────────────────────────────────
-
   const fetchListings = useCallback(
     async (append = false) => {
       if (!window.homelander) {
@@ -329,11 +367,35 @@ export default function HistoryTab() {
     [outcomeFilter, filterId, offset]
   );
 
+  fetchListingsRef.current = fetchListings;
+
+  useEffect(() => {
+    if (activeTab === 'history') {
+      loadStats(filterId);
+      fetchListingsRef.current?.(false);
+    }
+  }, [activeTab, filterId, loadStats]);
+
+  // Listen for daemon listing events — refresh stats + listings while tab is active.
+  useEffect(() => {
+    if (!window.homelander) return;
+    const unsub = window.homelander.onListing(() => {
+      if (activeTab === 'history') {
+        loadStats(filterId);
+        fetchListingsRef.current?.(false);
+      }
+    });
+    return unsub;
+  }, [activeTab, filterId, loadStats]);
+
   // Reset and reload when filters change
   useEffect(() => {
     setExpandedIds(new Set());
+    setListings([]);        // clear old data so badges don't flash during reload
+    setOffset(0);
     fetchListings(false);
-  }, [outcomeFilter, filterId]);
+    loadStats(filterId);
+  }, [outcomeFilter, filterId, loadStats]);
 
   // ── Infinite scroll (IntersectionObserver) ────────────────────────────────
 
@@ -368,37 +430,72 @@ export default function HistoryTab() {
     });
   }, []);
 
-  // ── Export CSV ───────────────────────────────────────────────────────────
+  const handleRetry = useCallback(async (exposeId) => {
+    if (!window.homelander) return;
+    setRetrying(prev => new Set(prev).add(exposeId));
+    try {
+      await window.homelander.retryListing(exposeId);
+      window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId } }));
+    } catch {}
+    setTimeout(() => setRetrying(prev => {
+      const next = new Set(prev); next.delete(exposeId); return next;
+    }), 2000);
+  }, []);
 
-  const exportCSV = useCallback(() => {
-    if (listings.length === 0) return;
+  // ── Load all-time stats
+  const exportCSV = useCallback(async () => {
+    if (!window.homelander) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const { listings: exportRows, error: apiError } = await window.homelander.getHistory(
+        1000000,
+        0,
+        filterId || null,
+        outcomeFilter || null
+      );
+      if (apiError) throw new Error(apiError);
+      const rowsToExport = exportRows || [];
+      if (rowsToExport.length === 0) return;
 
-    const header = 'expose_id,title,price,address,outcome,failure_reason,detail,sent_at';
-    const rows = listings
-      .map((l) =>
-        [
-          l.expose_id || '',
-          `"${(l.title || '').replace(/"/g, '""')}"`,
-          l.price || '',
-          `"${(l.address || '').replace(/"/g, '""')}"`,
-          l.outcome || '',
-          `"${(l.failure_reason || '').replace(/"/g, '""')}"`,
-          `"${(l.detail || '').replace(/"/g, '""')}"`,
-          l.sent_at || '',
-        ].join(',')
-      )
-      .join('\n');
+      const escapeCsv = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+      const header = 'expose_id,title,address,outcome,badges,detail,sent_at,filter_id';
+      const rows = rowsToExport
+        .map((l) => {
+          const outcome = l.outcome || '';
+          const badges = listingBadges(l)
+            .filter(b => !outcomeFilter || b.toUpperCase() !== outcomeFilter.toUpperCase())
+            .join('; ');
+          return [
+            l.expose_id || '',
+            escapeCsv(l.title),
+            escapeCsv(l.address),
+            outcome,
+            escapeCsv(badges),
+            escapeCsv(l.detail),
+            l.sent_at || '',
+            l.filter_id || '',
+          ].join(',');
+        })
+        .join('\n');
 
-    const csv = header + '\n' + rows;
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+      const csv = header + '\n' + rows;
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
 
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `homelander-history-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-  }, [listings]);
+      const filterName = filterId ? (filters.find((f) => f.id === filterId)?.name || filterId).replace(/[^a-z0-9_-]+/gi, '-') : 'all-searches';
+      const outcomeName = outcomeFilter || 'all-outcomes';
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `homelander-history-${filterName}-${outcomeName}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || 'CSV export failed');
+    } finally {
+      setExporting(false);
+    }
+  }, [filterId, outcomeFilter, filters]);
 
   // ── Group listings by date ────────────────────────────────────────────────
 
@@ -418,9 +515,11 @@ export default function HistoryTab() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* All time label */}
+      {/* Stats label — reflects active search filter */}
       <div className="flex items-center gap-3 mb-3 flex-shrink-0">
-        <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>All time</span>
+        <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+          {filterId ? (filters.find(f => f.id === filterId)?.name || 'Search') : 'All time'}
+        </span>
       </div>
 
       {/* Toolbar */}
@@ -434,22 +533,22 @@ export default function HistoryTab() {
             return (
               <button
                 key={o.value}
-              className="btn btn-ghost text-xs px-3 py-1.5 whitespace-nowrap"
-              style={
-                isActive
-                  ? {
-                      background: 'var(--accent)',
-                      color: 'white',
-                    }
-                  : o.color
-                    ? { color: o.color }
-                    : { color: 'var(--accent)' }
-              }
-              onClick={() => setOutcomeFilter(o.value)}
-            >
-              {label}
-            </button>
-          );
+                className="btn btn-ghost text-xs px-3 py-1.5 whitespace-nowrap"
+                style={
+                  isActive
+                    ? {
+                        background: 'var(--accent)',
+                        color: 'white',
+                      }
+                    : o.color
+                      ? { color: o.color }
+                      : { color: 'var(--accent)' }
+                }
+                onClick={() => { setListings([]); setOutcomeFilter(o.value); }}
+              >
+                {label}
+              </button>
+            );
           })}
         </div>
 
@@ -476,9 +575,9 @@ export default function HistoryTab() {
         <button
           className="btn btn-secondary text-xs"
           onClick={exportCSV}
-          disabled={listings.length === 0}
+          disabled={exporting || (allTimeStats?.total ?? listings.length) === 0}
         >
-          ⬇ Export CSV
+          {exporting ? 'Exporting…' : '⬇ Export'}
         </button>
       </div>
 
@@ -535,6 +634,9 @@ export default function HistoryTab() {
                       listing={listing}
                       isExpanded={expandedIds.has(listing.expose_id)}
                       onToggle={toggleExpand}
+                      onRetry={handleRetry}
+                      retrying={retrying}
+                      outcomeFilter={outcomeFilter}
                     />
                   ))}
                 </div>

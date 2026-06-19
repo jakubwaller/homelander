@@ -4,7 +4,7 @@
 
 import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage } from 'electron';
 import { fork } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
@@ -36,13 +36,17 @@ const DATA_DIR = join(homedir(), '.homelander');
 const DB_PATH = join(DATA_DIR, 'homelander.db');
 const CONFIG_PATH = join(DATA_DIR, 'config.json');
 const DAEMON_SCRIPT = join(__dirname, '..', 'engine', 'daemon.js');
+const DAEMON_LOG = join(DATA_DIR, 'daemon.log');
 const CDP_URL = 'http://localhost:9222';
+const PAUSE_FLAG = join(DATA_DIR, '.apply-paused');
 
 // ── State ──────────────────────────────────────────────────────
 
 let mainWindow = null;
 let daemonProcess = null;
 let daemonStatus = 'stopped'; // stopped | running | paused
+let daemonStartedAt = 0;      // timestamp of last startDaemon() call
+let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
 let chromeManager = new ChromeManager();
 let config = null;
 let setupComplete = false;
@@ -108,7 +112,6 @@ function getDefaultConfig() {
     ].join('\n'),
     timing: {
       speed: 'balanced',
-      max_sends_per_run: 0,
       overrides: {},
     },
     polling: {
@@ -122,6 +125,9 @@ function getDefaultConfig() {
 
 function startDaemon() {
   if (daemonProcess) return;
+
+  // Cancel any pending stop-SIGKILL to prevent cross-firing on this new daemon
+  if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
 
   // Write current config for daemon to read
   ensureDataDir();
@@ -142,6 +148,10 @@ function startDaemon() {
   });
 
   daemonStatus = 'running';
+  daemonStartedAt = Date.now();
+  if (mainWindow) {
+    mainWindow.webContents.send('homelander:event', { type: 'daemon_started' });
+  }
 
   // Parse stdout JSON lines for events
   let buffer = '';
@@ -162,18 +172,40 @@ function startDaemon() {
   });
 
   daemonProcess.stderr.on('data', (data) => {
-    console.error('[daemon]', data.toString().trim());
+    const text = data.toString().trim();
+    console.error('[daemon]', text);
+    try { appendFileSync(DAEMON_LOG, text + '\n', 'utf8'); } catch {}
   });
 
   daemonProcess.on('exit', (code) => {
     console.log(`[daemon] exited with code ${code}`);
     daemonProcess = null;
+    // Clear any pending SIGKILL timer — process already exited cleanly
+    if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
+    const wasRunning = daemonStatus === 'running' || daemonStatus === 'paused';
     daemonStatus = 'stopped';
     if (mainWindow) {
       mainWindow.webContents.send('homelander:event', {
         type: 'daemon_stopped',
         code,
       });
+    }
+    // Auto-restart on unexpected exit (not user-requested stop).
+    // Only auto-restart if the daemon ran for at least 3 seconds —
+    // immediate crashes indicate a startup bug and restarting would loop.
+    const ranLongEnough = (Date.now() - daemonStartedAt) > 3000;
+    if (wasRunning && !app.isQuitting && ranLongEnough) {
+      console.log('[daemon] auto-restarting in 5s...');
+      daemonStatus = 'restarting';
+      if (mainWindow) {
+        mainWindow.webContents.send('homelander:event', { type: 'daemon_restarting' });
+      }
+      setTimeout(() => {
+        if (!daemonProcess && !app.isQuitting) {
+          console.log('[daemon] restarting...');
+          startDaemon();
+        }
+      }, 5000);
     }
   });
 
@@ -186,10 +218,17 @@ function startDaemon() {
 
 function stopDaemon() {
   if (!daemonProcess) return;
-  daemonProcess.kill('SIGTERM');
-  setTimeout(() => {
-    if (daemonProcess) {
-      daemonProcess.kill('SIGKILL');
+
+  // Clear any previous stop timer
+  if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
+
+  const proc = daemonProcess; // capture reference — never cross-fire on a newer daemon
+  proc.kill('SIGTERM');
+  _stopKillTimer = setTimeout(() => {
+    _stopKillTimer = null;
+    // Only SIGKILL if this is still the SAME process AND still alive
+    if (daemonProcess === proc) {
+      try { proc.kill('SIGKILL'); } catch {}
       daemonProcess = null;
     }
   }, 5000);
@@ -205,12 +244,44 @@ function handleDaemonEvent(event) {
       break;
     case 'listing':
       mainWindow.webContents.send('homelander:listing', event);
-      // Native notification on SENT
-      if (event.outcome === 'SENT' && config.notifications !== false) {
+      // Native notification
+      if (config.notifications !== false) {
+        if (event.outcome === 'SENT') {
+          new Notification({
+            title: '✓ Application Sent',
+            body: `${event.title} — ${event.address || 'no address'}`,
+            silent: true,
+          }).show();
+        } else if (event.outcome === 'FAIL') {
+          new Notification({
+            title: '✗ Application Failed',
+            body: `${event.title} — ${(event.detail || '').substring(0, 80)}`,
+            silent: true,
+          }).show();
+        }
+      }
+      break;
+    case 'captcha_wall':
+      mainWindow.webContents.send('homelander:event', event);
+      if (config.notifications !== false) {
         new Notification({
-          title: 'Application Sent ✓',
-          body: `${event.title} — ${event.address}`,
+          title: '🔐 Captcha Wall Detected',
+          body: `Auto-paused for 15 minutes after ${event.consecutive} captchas`,
           silent: true,
+        }).show();
+      }
+      break;
+    case 'session_expired':
+      daemonStatus = 'paused';
+      mainWindow.webContents.send('homelander:event', {
+        type: 'session_expired',
+        reason: event.reason,
+      });
+      if (config.notifications !== false) {
+        new Notification({
+          title: '⚠ IS24 Session Expired',
+          body: 'Log in again via Settings → IS24 Account',
+          silent: false,
         }).show();
       }
       break;
@@ -223,9 +294,6 @@ function handleDaemonEvent(event) {
       break;
     case 'resumed':
       daemonStatus = 'running';
-      mainWindow.webContents.send('homelander:event', event);
-      break;
-    case 'captcha_wall':
       mainWindow.webContents.send('homelander:event', event);
       break;
     default:
@@ -316,21 +384,32 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('daemon:stop', () => {
+    daemonStatus = 'stopped'; // must be set BEFORE kill — exit handler checks this
+    try { unlinkSync(PAUSE_FLAG); } catch {} // clear pause flag so restart doesn't inherit pause
     stopDaemon();
     return { status: daemonStatus };
   });
 
   ipcMain.handle('daemon:pause', () => {
-    if (daemonProcess) {
-      daemonProcess.kill('SIGSTOP');
+    if (daemonProcess && daemonProcess.connected) {
+      // Write filesystem flag so daemon can check it as belt-and-suspenders
+      writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'manual' }), 'utf8');
+      daemonProcess.send({ type: 'pause_apply' });
+      daemonStatus = 'paused';
+    } else if (!daemonProcess) {
+      // Daemon not running — write flag for when it starts
+      writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'manual' }), 'utf8');
       daemonStatus = 'paused';
     }
     return { status: daemonStatus };
   });
 
   ipcMain.handle('daemon:resume', () => {
-    if (daemonProcess) {
-      daemonProcess.kill('SIGCONT');
+    try { unlinkSync(PAUSE_FLAG); } catch {}
+    if (daemonProcess && daemonProcess.connected) {
+      daemonProcess.send({ type: 'resume_apply' });
+      daemonStatus = 'running';
+    } else if (!daemonProcess) {
       daemonStatus = 'running';
     }
     return { status: daemonStatus };
@@ -341,11 +420,70 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('daemon:poll-now', async (_event, filterId) => {
-    if (daemonProcess) {
-      daemonProcess.send({ type: 'poll_now', filterId });
+    try {
+      const { HomelanderDB } = await import('../engine/db.js');
+      const { fetchListings } = await import('../engine/url-translator.js');
+      const db = new HomelanderDB(DB_PATH);
+      try {
+        const filter = db.getFilter(filterId);
+        if (!filter) return { ok: false, error: 'Search not found' };
+
+        // Multi-page: fetch up to 5 pages, stop when page < 20 or 0 new
+        const MAX_PAGES = 5, PAGE_SIZE = 20;
+        let allInserted = 0, allFetched = 0;
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const { listings, error } = await fetchListings(filter.web_url, page);
+          if (error) break;
+          allFetched += listings.length;
+          const inserted = db.insertListings(listings, filter.id);
+          allInserted += inserted;
+          if (listings.length < PAGE_SIZE) break;
+          if (inserted === 0) break;
+        }
+
+        db.updateFilter(filter.id, {
+          last_polled_at: new Date().toISOString(),
+          total_seen: (filter.total_seen || 0) + allInserted,
+        });
+
+        const stats = db.getStats();
+        if (mainWindow) {
+          mainWindow.webContents.send('homelander:event', { type: 'stats', ...stats });
+          if (allInserted > 0) {
+            mainWindow.webContents.send('homelander:event', {
+              type: 'poll_complete',
+              filter_id: filter.id,
+              inserted: allInserted,
+            });
+          }
+        }
+
+        return { ok: true, inserted: allInserted, fetched: allFetched };
+      } finally {
+        db.close();
+      }
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  // Retry a failed listing via the daemon
+  ipcMain.handle('daemon:retry-listing', async (_event, exposeId) => {
+    if (daemonProcess && daemonProcess.connected) {
+      daemonProcess.send({ type: 'retry_listing', exposeId });
       return { ok: true };
     }
-    return { ok: false, error: 'Daemon not running' };
+    // Fallback: direct DB access when daemon not running
+    try {
+      const { HomelanderDB } = await import('../engine/db.js');
+      const db = new HomelanderDB(DB_PATH);
+      try {
+        const result = db.retryListing(exposeId);
+        return { ok: !result.error, error: result.error };
+      } finally { db.close(); }
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   // Filters
@@ -426,28 +564,44 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('listings:stats', async () => {
+  ipcMain.handle('listings:stats', async (_event, filterId) => {
     try {
       const { HomelanderDB } = await import('../engine/db.js');
       const db = new HomelanderDB(DB_PATH);
-      const stats = db.getStats();
+      const stats = db.getStats(filterId || null);
       const recent = db.getRecentActivity(20);
+      // Compute next poll estimate only when daemon is alive.
+      // When stopped, leave null — the UI shows nothing instead of stale "any moment".
+      let nextPollAt = null;
+      if (daemonProcess && daemonStatus !== 'stopped') {
+        try {
+          const filters = db.getFilters();
+          const pollIntervalMs = (config.polling?.interval_seconds || 120) * 1000;
+          const lastPoll = filters.reduce((max, f) => {
+            const t = f.last_polled_at ? new Date(f.last_polled_at).getTime() : 0;
+            return t > max ? t : max;
+          }, 0);
+          if (lastPoll > 0) {
+            nextPollAt = new Date(lastPoll + pollIntervalMs).toISOString();
+          }
+        } catch {}
+      }
       db.close();
-      return { stats, recent, error: null };
+      return { stats: { ...stats, nextPollAt }, recent, error: null };
     } catch (err) {
-      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0 }, recent: [], error: err.message };
+      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, recent: [], error: err.message };
     }
   });
 
-  ipcMain.handle('listings:todayStats', async () => {
+  ipcMain.handle('listings:todayStats', async (_event, filterId) => {
     try {
       const { HomelanderDB } = await import('../engine/db.js');
       const db = new HomelanderDB(DB_PATH);
-      const stats = db.getTodayStats();
+      const stats = db.getTodayStats(filterId || null);
       db.close();
       return { stats, error: null };
     } catch (err) {
-      return { stats: { seen: 0, sent: 0, failed: 0, deactivated: 0, seen_unapplied: 0, today: 0 }, error: err.message };
+      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0 }, error: err.message };
     }
   });
 
@@ -461,10 +615,23 @@ function registerIpcHandlers() {
     config = deepMerge(config, patch);
     saveConfig();
 
-    // If daemon is running, restart it with new config
+    // Hot-reload everything into the running daemon — no restart needed
     if (daemonProcess) {
-      stopDaemon();
-      setTimeout(() => startDaemon(), 1000);
+      const msg = { type: 'config_update' };
+
+      if (patch.message_template !== undefined) msg.message_template = config.message_template;
+      if (patch.captcha) msg.captcha = config.captcha;
+      if (patch.polling?.interval_seconds !== undefined) msg.poll_interval = config.polling.interval_seconds;
+
+      const personaChanged = patch.persona && Object.keys(patch.persona).length > 0;
+      const timingChanged = patch.timing && Object.keys(patch.timing).length > 0;
+      if (personaChanged) msg.persona = config.persona;
+      if (timingChanged) msg.timing = config.timing;
+
+      if (Object.keys(msg).length > 1) { // more than just 'type'
+        console.log('[main] Hot-reloading config into running daemon');
+        daemonProcess.send(msg);
+      }
     }
 
     return { error: null };
@@ -542,6 +709,38 @@ function registerIpcHandlers() {
     config._setupComplete = true;
     saveConfig();
     return { error: null };
+  });
+
+  ipcMain.handle('app:quit', () => {
+    app.isQuitting = true;
+    app.quit();
+    return { ok: true };
+  });
+
+  ipcMain.handle('data:clean', (_event, confirmEmail) => {
+    // Verify email matches configured email
+    const configuredEmail = config?.persona?.email || config?.is24?.email || '';
+    if (!configuredEmail || confirmEmail !== configuredEmail) {
+      return { error: 'Email does not match.' };
+    }
+
+    // Stop daemon first
+    daemonStatus = 'stopped';
+    try { unlinkSync(PAUSE_FLAG); } catch {}
+    stopDaemon();
+
+    // Shutdown Chrome
+    chromeManager.shutdown().catch(() => {});
+
+    // Delete data files
+    try { unlinkSync(DB_PATH); } catch (err) { console.error('[clean] db delete:', err.message); }
+    try { unlinkSync(CONFIG_PATH); } catch (err) { console.error('[clean] config delete:', err.message); }
+    try { unlinkSync(PAUSE_FLAG); } catch {}
+
+    // Relaunch fresh — config will be recreated with defaults
+    app.relaunch();
+    app.exit(0);
+    return { ok: true };
   });
 }
 

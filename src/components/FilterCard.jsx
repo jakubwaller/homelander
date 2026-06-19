@@ -1,31 +1,13 @@
 // Filter card — displays an IS24 search with stats, pause/remove controls.
-// Also shows a "Poll now" button and countdown to next auto-poll.
+// Also shows a "Poll now" button.
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import StatusDot from './StatusDot';
 
-function useCountdown(targetIso) {
-  const [text, setText] = useState('');
-  useEffect(() => {
-    if (!targetIso) return;
-    function tick() {
-      const diff = new Date(targetIso) - Date.now();
-      if (diff <= 0) return setText('any moment');
-      const m = Math.floor(diff / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      setText(`${m}m ${s}s`);
-    }
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [targetIso]);
-  return text;
-}
-
-export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollError, nextPollAt }) {
+export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollError }) {
   const [confirming, setConfirming] = useState(false);
   const [polling, setPolling] = useState(false);
-  const countdown = useCountdown(nextPollAt);
+  const [pollMessage, setPollMessage] = useState(null);
 
   const handleRemove = () => {
     if (confirming) {
@@ -40,10 +22,22 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
   const handlePollNow = async () => {
     if (!window.homelander || polling) return;
     setPolling(true);
+    setPollMessage(null);
     try {
-      await window.homelander.pollNow(filter.id);
-    } catch {}
-    setTimeout(() => setPolling(false), 3000);
+      const result = await (onPollNow ? onPollNow(filter.id) : window.homelander.pollNow(filter.id));
+      if (result?.error) {
+        setPollMessage({ type: 'error', text: result.error });
+      } else if ((result?.inserted || 0) > 0) {
+        setPollMessage({ type: 'success', text: `Added ${result.inserted} new listing${result.inserted === 1 ? '' : 's'}.` });
+      } else {
+        setPollMessage({ type: 'muted', text: 'No new listings.' });
+      }
+    } catch (err) {
+      setPollMessage({ type: 'error', text: err.message || 'Poll failed' });
+    } finally {
+      setPolling(false);
+      setTimeout(() => setPollMessage(null), 5000);
+    }
   };
 
   return (
@@ -63,9 +57,6 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
             {filter.new_count > 0 && (
               <span className="badge badge-accent">+{filter.new_count} pending</span>
             )}
-            {nextPollAt && filter.enabled && (
-              <span style={{ color: 'var(--text-muted)' }}>· Next poll in {countdown}</span>
-            )}
           </div>
 
           {/* URL preview */}
@@ -79,11 +70,29 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
               ⚠ {pollError}
             </p>
           )}
+
+          {/* Poll status */}
+          {pollMessage && (
+            <p
+              className="text-xs mt-2"
+              style={{
+                color: pollMessage.type === 'error'
+                  ? 'var(--danger)'
+                  : pollMessage.type === 'success'
+                  ? 'var(--success)'
+                  : 'var(--text-muted)',
+                fontStyle: pollMessage.type === 'muted' ? 'italic' : undefined,
+              }}
+            >
+              {pollMessage.text}
+            </p>
+          )}
+
         </div>
 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {filter.enabled && (
+          {!!filter.enabled && (
             <button
               className="btn btn-ghost text-xs"
               onClick={handlePollNow}

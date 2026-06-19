@@ -2,22 +2,26 @@
 // Homelander Daemon — polls IS24 mobile API for new listings,
 // then auto-applies to them via Chrome CDP. Runs continuously.
 //
+// Two independent async loops:
+//   pollLoop  — discovers new listings on a fixed schedule
+//   applyLoop — applies to pending listings round‑robin (respects pauses)
+//
 // Usage: node engine/daemon.js --db=<path> --cdp-url=<url> --config=<path>
 //
 // Communicates status via stdout JSON lines:
-//   {"type":"stats","seen":142,"sent":23,"failed":8,"new":3,"today":5}
-//   {"type":"listing","outcome":"SENT","exposeId":"123","title":"...","price":1200,"address":"...","detail":"..."}
+//   {"type":"stats",...}
+//   {"type":"listing","outcome":"SENT",...}
 //   {"type":"captcha_wall","consecutive":5}
 //   {"type":"paused","reason":"captcha_wall","resume_in_sec":900}
 //   {"type":"resumed"}
 //   {"type":"error","message":"..."}
 //   {"type":"poll_error","filter_id":"...","error":"..."}
+//   {"type":"ready_for_restart"}  // emitted when graceful restart is ready
 
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,7 +31,7 @@ const { values: args } = parseArgs({
     db: { type: 'string' },
     'cdp-url': { type: 'string', default: 'http://localhost:9222' },
     config: { type: 'string' },
-    'poll-interval': { type: 'string', default: '120' }, // seconds, default 2 min
+    'poll-interval': { type: 'string', default: '120' }, // seconds
     'dry-run': { type: 'boolean', default: false },
   },
 });
@@ -35,8 +39,12 @@ const { values: args } = parseArgs({
 const DB_PATH = args.db || join(process.env.HOME || '/tmp', '.homelander', 'homelander.db');
 const CDP_URL = args['cdp-url'];
 const CONFIG_PATH = args.config;
-const POLL_INTERVAL_SEC = parseInt(args['poll-interval'], 10);
 const DRY_RUN = args['dry-run'];
+const PAUSE_FLAG = join(dirname(DB_PATH), '.apply-paused');
+const DAEMON_LOG = join(dirname(DB_PATH), 'daemon.log');
+
+// Mutable poll interval — updated via IPC when user changes it in Settings
+let pollIntervalSec = parseInt(args['poll-interval'], 10);
 
 // Dynamic imports
 const { HomelanderDB } = await import('./db.js');
@@ -51,7 +59,9 @@ function emit(obj) {
 
 function log(msg) {
   const ts = new Date().toISOString().slice(11, 19);
-  process.stderr.write(`[${ts}] ${msg}\n`);
+  const line = `[${ts}] ${msg}`;
+  process.stderr.write(line + '\n');
+  try { appendFileSync(DAEMON_LOG, line + '\n', 'utf8'); } catch {}
 }
 
 function sleep(ms) {
@@ -69,6 +79,42 @@ function personaliseMessage(template, listing) {
     .replace(/\{\{name\}\}/g, `${listing._contact?.vorname || ''} ${listing._contact?.nachname || ''}`.trim());
 }
 
+/** Shallow merge for config patches received via IPC. */
+function mergePatch(target, patch) {
+  for (const key of Object.keys(patch)) {
+    if (patch[key] !== undefined) {
+      target[key] = patch[key];
+    }
+  }
+}
+
+/** Check filesystem pause flag — belt-and-suspenders for IPC pauses. */
+function checkPauseFlag() {
+  try {
+    return existsSync(PAUSE_FLAG);
+  } catch {
+    return false;
+  }
+}
+
+/** Write the filesystem pause flag so restarts remember the pause. */
+function writePauseFlag() {
+  try {
+    writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'manual' }), 'utf8');
+  } catch (err) {
+    log(`Failed to write pause flag: ${err.message}`);
+  }
+}
+
+/** Remove the filesystem pause flag. */
+function removePauseFlag() {
+  try {
+    unlinkSync(PAUSE_FLAG);
+  } catch {
+    // file doesn't exist — that's fine
+  }
+}
+
 // ── Config loading ─────────────────────────────────────────────
 
 function loadConfig() {
@@ -79,7 +125,401 @@ function loadConfig() {
   return JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
 }
 
-// ── Main loop ──────────────────────────────────────────────────
+// ── Shared state between loops ─────────────────────────────────
+// JS is single-threaded — no locks needed.
+
+let applyPaused = false;
+let pauseResumeTime = null;   // null = manual pause; timestamp = auto-resume
+let consecutiveCaptchas = 0;
+
+// contactor is a shared reference so the apply loop can reconnect
+let contactor = null;
+
+// Mutable config — all fields hot-reload without restart
+let currentConfig = null;
+
+// ── Apply one listing ──────────────────────────────────────────
+
+async function applyOne(listing, filterId, db) {
+  // Use currentConfig so template/captcha edits take effect immediately
+  const message = personaliseMessage(currentConfig.message_template, {
+    ...listing,
+    _contact: currentConfig.persona,
+  });
+
+  if (DRY_RUN) {
+    log(`  [DRY RUN] Would apply to: ${listing.title} (${listing.expose_id})`);
+    emit({
+      type: 'listing',
+      outcome: 'DRY_RUN',
+      exposeId: listing.expose_id,
+      title: listing.title,
+      price: listing.price,
+      address: listing.address,
+      detail: 'dry run — not sent',
+    });
+    return;
+  }
+
+  try {
+    const result = await contactor.apply(
+      listing.expose_id,
+      message,
+      currentConfig.captcha?.api_key || ''
+    );
+
+    if (result.success) {
+      const captchaSolved = result.captcha?.solved || result.captcha?.attempts > 0;
+      const failureReason = captchaSolved ? 'captcha_solved' : '';
+      db.markSent(listing.hash, 'SENT', result.detail || 'modal ✓', failureReason);
+      consecutiveCaptchas = 0;
+      log(`  ✓ SENT | ${listing.expose_id} | ${listing.title} | ${result.detail || ''}${captchaSolved ? ' (captcha solved)' : ''}`);
+      emit({
+        type: 'listing',
+        outcome: 'SENT',
+        exposeId: listing.expose_id,
+        title: listing.title,
+        price: listing.price,
+        address: listing.address,
+        detail: result.detail || '',
+        failureReason,
+      });
+    } else {
+      const reason = result.reason || '';
+      const reasonLower = reason.toLowerCase();
+      const isDeactivated = reasonLower.includes('deactivated');
+      const isSessionExpired = reasonLower.includes('session_expired');
+      const isError = reason.startsWith('ERROR:');
+      const failureReason = isSessionExpired ? 'session_expired'
+        : isDeactivated ? 'deactivated'
+        : reasonLower.includes('captcha') ? 'captcha'
+        : reasonLower.includes('premium') || reasonLower.includes('suchen+') ? 'premium'
+        : reasonLower.includes('server_error') || reasonLower.includes('server error') ? 'server_error'
+        : reasonLower.includes('no_form') ? 'no_form'
+        : isError ? 'error'
+        : 'unknown';
+
+      const outcome = isDeactivated ? 'DEACTIVATED' : 'FAIL';
+      db.markSent(listing.hash, outcome, reason, failureReason);
+      log(`  ${isDeactivated ? '◌' : '✗'} ${outcome} | ${listing.expose_id} | ${listing.title} | ${reason}`);
+
+      if (failureReason === 'captcha') {
+        consecutiveCaptchas++;
+      } else {
+        consecutiveCaptchas = 0;
+      }
+
+      if (isSessionExpired) {
+        log('*** IS24 SESSION EXPIRED — pausing apply ***');
+        emit({ type: 'session_expired', reason });
+        applyPaused = true;
+        pauseResumeTime = null;
+      }
+
+      emit({
+        type: 'listing',
+        outcome,
+        exposeId: listing.expose_id,
+        title: listing.title,
+        price: listing.price,
+        address: listing.address,
+        detail: reason,
+        failureReason,
+      });
+    }
+  } catch (err) {
+    log(`  ERROR | ${listing.expose_id} | ${err.message}`);
+    db.markSent(listing.hash, 'FAIL', `ERROR: ${err.message}`, 'error');
+    consecutiveCaptchas = 0;
+    emit({
+      type: 'listing',
+      outcome: 'FAIL',
+      exposeId: listing.expose_id,
+      title: listing.title,
+      price: listing.price,
+      address: listing.address,
+      detail: `ERROR: ${err.message}`,
+    });
+  }
+}
+
+// ── Apply loop ─────────────────────────────────────────────────
+// Runs continuously, processing one listing per enabled filter per round.
+// Respects applyPaused / captcha wall / session expiry / pendingRestart.
+// Polling is completely independent — it runs in pollLoop().
+
+async function applyLoop(db) {
+  log('Apply loop started');
+
+  while (true) {
+    // ── Wait if paused ───────────────────────────────────────
+    // Honour both in-memory flag (IPC set) and filesystem flag (belt-and-suspenders)
+    if (applyPaused || checkPauseFlag()) {
+      if (!applyPaused && checkPauseFlag()) {
+        // Filesystem flag found but in-memory not set — sync
+        applyPaused = true;
+        pauseResumeTime = null;
+        log('Apply paused via filesystem flag');
+        emit({ type: 'paused', reason: 'manual' });
+      }
+      // Periodically re-check the filesystem flag even when paused in-memory.
+      // If the flag was removed externally (e.g. resume IPC), auto-resume.
+      if (applyPaused && !checkPauseFlag() && pauseResumeTime === null) {
+        log('Pause flag removed — auto-resuming');
+        applyPaused = false;
+        consecutiveCaptchas = 0;
+        emit({ type: 'resumed' });
+        continue;
+      }
+      if (pauseResumeTime != null && Date.now() >= pauseResumeTime) {
+        log('Captcha wall cooldown elapsed — resuming apply');
+        applyPaused = false;
+        consecutiveCaptchas = 0;
+        removePauseFlag();
+        emit({ type: 'resumed' });
+        continue;
+      }
+      await sleep(1000);
+      continue;
+    }
+
+    // ── Ensure contactor is connected ────────────────────────
+    if (!contactor || !contactor.browser || !contactor.browser.isConnected()) {
+      log(`CDP check — contactor=${!!contactor} browser=${!!contactor?.browser} connected=${!!contactor?.browser?.isConnected?.()}`);
+      if (contactor) {
+        try {
+          await contactor.connect();
+          log('CDP reconnected');
+        } catch (err) {
+          log(`CDP reconnect failed: ${err.message}`);
+          await sleep(5000);
+          continue;
+        }
+      } else {
+        await sleep(5000);
+        continue;
+      }
+    }
+
+    // ── Gather pending listings (round‑robin across filters) ─
+    const filters = db.getFilters().filter(f => f.enabled);
+    if (filters.length === 0) {
+      await sleep(5000);
+      continue;
+    }
+
+    let didWork = false;
+    for (const filter of filters) {
+      if (applyPaused) break;
+
+      const queue = db.getSeenListings(filter.id);
+      if (queue.length === 0) continue;
+
+      // Check captcha wall before each listing
+      if (consecutiveCaptchas >= 5) {
+        log('Captcha wall detected — pausing apply for 15 minutes');
+        applyPaused = true;
+        pauseResumeTime = Date.now() + 15 * 60 * 1000;
+        emit({ type: 'captcha_wall', consecutive: consecutiveCaptchas });
+        emit({ type: 'paused', reason: 'captcha_wall', resume_in_sec: 900 });
+        break;
+      }
+
+      const listing = queue[0];
+      log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
+      await applyOne(listing, filter.id, db);
+      didWork = true;
+
+      if (!applyPaused) await jitter(2000, 5000);
+    }
+
+    if (!didWork) await sleep(5000);
+  }
+}
+
+// ── Poll loop ──────────────────────────────────────────────────
+
+async function pollLoop(db) {
+  log('Poll loop started');
+
+  // Emit an immediate heartbeat so the UI countdown appears right away
+  const nextPollAt = new Date(Date.now() + pollIntervalSec * 1000).toISOString();
+  emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
+
+  while (true) {
+    const cycleStart = Date.now();
+
+    // ── Poll all enabled filters ─────────────────────────────
+    log('Polling for new listings...');
+    const filters = db.getFilters().filter(f => f.enabled);
+
+    let totalNew = 0;
+    for (const filter of filters) {
+      try {
+        const MAX_PAGES = 5, PAGE_SIZE = 20;
+        let filterNew = 0, filterFetched = 0;
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const { listings, error } = await fetchListings(filter.web_url, page);
+          if (error) {
+            if (page === 1) {
+              log(`Poll error [${filter.id}]: ${error}`);
+              emit({ type: 'poll_error', filter_id: filter.id, error });
+            }
+            break;
+          }
+          filterFetched += listings.length;
+          const inserted = db.insertListings(listings, filter.id);
+          filterNew += inserted;
+          if (listings.length < PAGE_SIZE) break;
+          if (inserted === 0) break;
+        }
+
+        if (filterNew > 0) {
+          log(`  ${filter.name || filter.id}: ${filterNew} new listings (${filterFetched} fetched across pages)`);
+          totalNew += filterNew;
+        }
+
+        db.updateFilter(filter.id, {
+          last_polled_at: new Date().toISOString(),
+          total_seen: (filter.total_seen || 0) + filterNew,
+        });
+      } catch (err) {
+        log(`Poll error [${filter.id}]: ${err.message}`);
+        emit({ type: 'poll_error', filter_id: filter.id, error: err.message });
+      }
+    }
+
+    log(`Poll complete — ${totalNew} new listings across ${filters.length} filters`);
+
+    // ── Emit stats with next_poll_at based on poll schedule ──
+    const elapsed = Date.now() - cycleStart;
+    const sleepMs = Math.max(0, (pollIntervalSec * 1000) - elapsed);
+    const nextPollAt = new Date(Date.now() + sleepMs).toISOString();
+    emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
+
+    // ── Sleep until next scheduled poll ──────────────────────
+    await sleep(sleepMs);
+  }
+}
+
+// ── IPC message handler (from Electron parent) ──────────────────
+
+function setupIpc(db) {
+  process.on('message', async (msg) => {
+    if (!msg) return;
+
+    // ── Manual poll-now for a specific filter ────────────────
+    if (msg.type === 'poll_now' && msg.filterId) {
+      try {
+        const filter = db.getFilter(msg.filterId);
+        if (!filter) { log(`Poll-now: filter ${msg.filterId} not found`); return; }
+        log(`Manual poll for: ${filter.name || filter.id}`);
+
+        const MAX_PAGES = 5, PAGE_SIZE = 20;
+        let allInserted = 0, allFetched = 0;
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const { listings, error } = await fetchListings(filter.web_url, page);
+          if (error) {
+            if (page === 1) {
+              log(`Poll-now error [${filter.id}]: ${error}`);
+              emit({ type: 'poll_error', filter_id: filter.id, error });
+            }
+            break;
+          }
+          allFetched += listings.length;
+          const inserted = db.insertListings(listings, filter.id);
+          allInserted += inserted;
+          if (listings.length < PAGE_SIZE) break;
+          if (inserted === 0) break;
+        }
+        if (allInserted > 0) log(`  ${filter.name || filter.id}: ${allInserted} new listings (${allFetched} fetched across pages)`);
+        db.updateFilter(filter.id, {
+          last_polled_at: new Date().toISOString(),
+          total_seen: (filter.total_seen || 0) + allInserted,
+        });
+        emit({ type: 'stats', ...db.getTodayStats() });
+        if (allInserted > 0) {
+          emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted });
+        }
+      } catch (err) {
+        log(`Poll-now error [${msg.filterId}]: ${err.message}`);
+        emit({ type: 'poll_error', filter_id: msg.filterId, error: err.message });
+      }
+    }
+
+    // ── Retry a failed listing ───────────────────────────────
+    if (msg.type === 'retry_listing' && msg.exposeId) {
+      const result = db.retryListing(msg.exposeId);
+      if (result.error) {
+        log(`Retry: ${result.error} for expose ${msg.exposeId}`);
+        emit({ type: 'retry_error', exposeId: msg.exposeId, error: result.error });
+      } else if (result.already_seen) {
+        log(`Retry: expose ${msg.exposeId} already in queue`);
+      } else {
+        log(`Retry: expose ${msg.exposeId} reset to seen`);
+        emit({ type: 'retry_queued', exposeId: msg.exposeId, hash: result.hash });
+        emit({ type: 'stats', ...db.getTodayStats() });
+      }
+    }
+
+    // ── Pause applying (polling continues) ───────────────────
+    if (msg.type === 'pause_apply') {
+      log('Apply paused by user');
+      applyPaused = true;
+      pauseResumeTime = null;
+      writePauseFlag();
+      emit({ type: 'paused', reason: 'manual' });
+    }
+
+    // ── Resume applying ──────────────────────────────────────
+    if (msg.type === 'resume_apply') {
+      log('Apply resumed by user');
+      applyPaused = false;
+      consecutiveCaptchas = 0;
+      removePauseFlag();
+      emit({ type: 'resumed' });
+    }
+
+    // ── Config update (hot-reload all fields, no restart needed) ──
+    if (msg.type === 'config_update') {
+      let changed = false;
+      if (msg.message_template !== undefined) {
+        currentConfig.message_template = msg.message_template;
+        log('Config hot-reload: message template updated');
+        changed = true;
+      }
+      if (msg.captcha) {
+        if (!currentConfig.captcha) currentConfig.captcha = {};
+        mergePatch(currentConfig.captcha, msg.captcha);
+        if (contactor) contactor.updateCaptcha(currentConfig.captcha);
+        log('Config hot-reload: captcha config updated');
+        changed = true;
+      }
+      if (msg.poll_interval !== undefined) {
+        pollIntervalSec = msg.poll_interval;
+        log(`Config hot-reload: poll interval → ${pollIntervalSec}s`);
+        changed = true;
+      }
+      if (msg.persona) {
+        currentConfig.persona = msg.persona;
+        if (contactor) contactor.updateContact(msg.persona);
+        log('Config hot-reload: persona updated');
+        changed = true;
+      }
+      if (msg.timing) {
+        currentConfig.timing = msg.timing;
+        if (contactor) contactor.updateTiming(msg.timing.speed || 'balanced', msg.timing.overrides || {});
+        log('Config hot-reload: timing updated');
+        changed = true;
+      }
+      if (changed) {
+        emit({ type: 'config_applied' });
+      }
+    }
+  });
+}
+
+// ── Main ───────────────────────────────────────────────────────
 
 async function main() {
   log('Homelander daemon starting...');
@@ -94,273 +534,58 @@ async function main() {
   process.env.HOMELANDER_DEBUG_DIR = debugDir;
 
   // Load config
-  const config = loadConfig();
-  log(`Config loaded: ${config.persona?.email || 'unknown'}, speed=${config.timing?.speed || 'balanced'}`);
+  currentConfig = loadConfig();
+  log(`Config loaded: ${currentConfig.persona?.email || 'unknown'}, speed=${currentConfig.timing?.speed || 'balanced'}`);
 
   // Open database
   const db = new HomelanderDB(DB_PATH);
   log('Database opened');
 
   // Connect to Chrome
-  let contactor;
   try {
     contactor = new IS24Contactor(
       CDP_URL,
-      config.persona || {},
-      config.timing?.speed || 'balanced',
-      config.timing?.overrides || {},
-      { api_key: config.captcha?.api_key || '' }
+      currentConfig.persona || {},
+      currentConfig.timing?.speed || 'balanced',
+      currentConfig.timing?.overrides || {},
+      { api_key: currentConfig.captcha?.api_key || '' }
     );
     await contactor.connect();
     log('Chrome CDP connected');
   } catch (err) {
     log(`Chrome CDP connection failed: ${err.message}`);
     emit({ type: 'error', message: `Chrome unavailable: ${err.message}` });
-    // Continue — poller can still work, just can't apply
     contactor = null;
   }
 
-  // Captcha wall tracking
-  let consecutiveCaptchas = 0;
-  let applyPaused = false;
-  let pauseResumeTime = 0;
+  // Set up IPC from Electron parent
+  setupIpc(db);
 
-  // ── Manual poll-now handler (IPC from Electron) ──────────────
-  process.on('message', async (msg) => {
-    if (msg && msg.type === 'poll_now' && msg.filterId) {
-      try {
-        const filter = db.getFilter(msg.filterId);
-        if (!filter) { log(`Poll-now: filter ${msg.filterId} not found`); return; }
-        log(`Manual poll for: ${filter.name || filter.id}`);
-        const { listings, error } = await fetchListings(filter.web_url);
-        if (error) {
-          log(`Poll-now error [${filter.id}]: ${error}`);
-          emit({ type: 'poll_error', filter_id: filter.id, error });
-          return;
-        }
-        const inserted = db.insertListings(listings, filter.id);
-        if (inserted > 0) log(`  ${filter.name || filter.id}: ${inserted} new listings`);
-        db.updateFilter(filter.id, {
-          last_polled_at: new Date().toISOString(),
-          total_seen: (filter.total_seen || 0) + inserted,
-        });
-        const stats = db.getTodayStats();
-        emit({ type: 'stats', ...stats });
-      } catch (err) {
-        log(`Poll-now error [${msg.filterId}]: ${err.message}`);
-        emit({ type: 'poll_error', filter_id: msg.filterId, error: err.message });
-      }
-    }
-  });
-
-  // ── Main daemon loop ─────────────────────────────────────────
-  while (true) {
-    const cycleStart = Date.now();
-
-    // ── PHASE 1: Poll ──────────────────────────────────────────
-    log('Polling for new listings...');
-    const filters = db.getFilters().filter(f => f.enabled);
-
-    let totalNew = 0;
-    for (const filter of filters) {
-      try {
-        const { listings, error } = await fetchListings(filter.web_url);
-        if (error) {
-          log(`Poll error [${filter.id}]: ${error}`);
-          emit({ type: 'poll_error', filter_id: filter.id, error });
-          continue;
-        }
-
-        const inserted = db.insertListings(listings, filter.id);
-        if (inserted > 0) {
-          log(`  ${filter.name || filter.id}: ${inserted} new listings`);
-          totalNew += inserted;
-        }
-
-        db.updateFilter(filter.id, {
-          last_polled_at: new Date().toISOString(),
-          total_seen: (filter.total_seen || 0) + inserted,
-        });
-      } catch (err) {
-        log(`Poll error [${filter.id}]: ${err.message}`);
-        emit({ type: 'poll_error', filter_id: filter.id, error: err.message });
-      }
-    }
-
-    log(`Poll complete — ${totalNew} new listings across ${filters.length} filters`);
-
-    // ── PHASE 2: Apply (round‑robin across filters) ──────────
-    // Each filter gets its own queue of unapplied listings.
-    // We pick one from each filter in turn — A, B, C, A, B, C…
-    // so no single search starves the others.
-    if (contactor && !applyPaused) {
-      const filterIds = filters.map(f => f.id);
-      const queues = {};
-      let totalPending = 0;
-      for (const fid of filterIds) {
-        queues[fid] = db.getSeenListings(fid);
-        totalPending += queues[fid].length;
-      }
-
-      if (totalPending > 0) {
-        log(`Applying to ${totalPending} pending listings across ${filterIds.length} searches (round‑robin)...`);
-
-        let globalIdx = 0;
-        let anyLeft = true;
-        while (anyLeft) {
-          anyLeft = false;
-          for (const fid of filterIds) {
-            const queue = queues[fid];
-            if (globalIdx >= queue.length) continue;
-            anyLeft = true;
-
-            const listing = queue[globalIdx];
-
-            // Check if we should pause (captcha wall)
-            if (consecutiveCaptchas >= 5) {
-              log('Captcha wall detected — pausing apply for 15 minutes');
-              applyPaused = true;
-              pauseResumeTime = Date.now() + 15 * 60 * 1000;
-              emit({ type: 'captcha_wall', consecutive: consecutiveCaptchas });
-              emit({ type: 'paused', reason: 'captcha_wall', resume_in_sec: 900 });
-              // Break out of both loops by forcing anyLeft false
-              anyLeft = false;
-              break;
-            }
-
-            try {
-              const message = personaliseMessage(config.message_template, {
-                ...listing,
-                _contact: config.persona,
-              });
-
-              if (DRY_RUN) {
-                log(`  [DRY RUN] Would apply to: ${listing.title} (${listing.expose_id})`);
-                emit({
-                  type: 'listing',
-                  outcome: 'DRY_RUN',
-                  exposeId: listing.expose_id,
-                  title: listing.title,
-                  price: listing.price,
-                  address: listing.address,
-                  detail: 'dry run — not sent',
-                });
-                continue;
-              }
-
-              // Reconnect if needed
-              if (!contactor.browser || !contactor.browser.isConnected()) {
-                try {
-                  await contactor.connect();
-                  log('CDP reconnected');
-                } catch (err) {
-                  log(`CDP reconnect failed: ${err.message}`);
-                  emit({ type: 'error', message: `Chrome reconnect failed: ${err.message}` });
-                  contactor = null;
-                  anyLeft = false;
-                  break;
-                }
-              }
-
-              const result = await contactor.apply(
-                listing.expose_id,
-                message,
-                config.captcha?.api_key || ''
-              );
-
-              if (result.success) {
-                const captchaSolved = result.captcha?.solved || result.captcha?.attempts > 0;
-                const failureReason = captchaSolved ? 'captcha_solved' : '';
-                db.markSent(listing.hash, 'SENT', result.detail || 'modal ✓', failureReason);
-                consecutiveCaptchas = 0;
-                log(`  ✓ SENT | ${listing.expose_id} | ${listing.title} | ${result.detail || ''}${captchaSolved ? ' (captcha solved)' : ''}`);
-                emit({
-                  type: 'listing',
-                  outcome: 'SENT',
-                  exposeId: listing.expose_id,
-                  title: listing.title,
-                  price: listing.price,
-                  address: listing.address,
-                  detail: result.detail || '',
-                  failureReason,
-                });
-              } else {
-                const reason = result.reason || '';
-                const isDeactivated = reason.includes('DEACTIVATED');
-                const failureReason = isDeactivated ? 'deactivated'
-                  : reason.includes('captcha') ? 'captcha'
-                  : reason.includes('PREMIUM') ? 'premium'
-                  : reason.includes('NO_FORM') ? 'no_form'
-                  : reason.includes('server_error') ? 'server_error'
-                  : 'unknown';
-
-                const outcome = isDeactivated ? 'DEACTIVATED' : 'FAIL';
-                db.markSent(listing.hash, outcome, reason, failureReason);
-                log(`  ${isDeactivated ? '◌' : '✗'} ${outcome} | ${listing.expose_id} | ${listing.title} | ${reason}`);
-
-                if (failureReason === 'captcha') {
-                  consecutiveCaptchas++;
-                } else {
-                  consecutiveCaptchas = 0;
-                }
-
-                emit({
-                  type: 'listing',
-                  outcome,
-                  exposeId: listing.expose_id,
-                  title: listing.title,
-                  price: listing.price,
-                  address: listing.address,
-                  detail: reason,
-                  failureReason,
-                });
-              }
-            } catch (err) {
-              log(`  ERROR | ${listing.expose_id} | ${err.message}`);
-              db.markSent(listing.hash, 'FAIL', `ERROR: ${err.message}`, 'error');
-              consecutiveCaptchas = 0;
-              emit({
-                type: 'listing',
-                outcome: 'FAIL',
-                exposeId: listing.expose_id,
-                title: listing.title,
-                price: listing.price,
-                address: listing.address,
-                detail: `ERROR: ${err.message}`,
-              });
-            }
-          }
-          globalIdx++;
-          // Pause check at the end of each row (outer loop)
-          if (applyPaused) break;
-        }
-      }
-    } else if (applyPaused && Date.now() >= pauseResumeTime) {
-      // Auto-resume after captcha wall cooldown
-      log('Captcha wall cooldown elapsed — resuming apply');
-      applyPaused = false;
-      consecutiveCaptchas = 0;
-      emit({ type: 'resumed' });
-    }
-
-    // ── PHASE 3: Stats (today only for the live dashboard) ────
-    const stats = db.getTodayStats();
-    const elapsed = Date.now() - cycleStart;
-    const sleepMs = Math.max(0, (POLL_INTERVAL_SEC * 1000) - elapsed);
-    const nextPollAt = new Date(Date.now() + sleepMs).toISOString();
-    emit({
-      type: 'stats',
-      ...stats,
-      next_poll_at: nextPollAt,
-    });
-
-    // ── PHASE 4: Sleep ─────────────────────────────────────────
-    log(`Cycle complete. Sleeping ${Math.round(sleepMs / 1000)}s until next poll.`);
-    await sleep(sleepMs);
+  // ── Check for persisted pause flag ─────────────────────────
+  if (checkPauseFlag()) {
+    applyPaused = true;
+    pauseResumeTime = null;
+    log('Starting in paused state (pause flag found on disk)');
+    emit({ type: 'paused', reason: 'manual' });
   }
+
+  // ── Start both independent loops ───────────────────────────
+  log('Starting poll + apply loops...');
+  await Promise.all([
+    pollLoop(db),
+    applyLoop(db),
+  ]);
+
+  // If we get here, it was a graceful shutdown (pendingRestart or manual stop)
+  log('Both loops exited — daemon shutting down cleanly');
 }
 
 // ── Startup ────────────────────────────────────────────────────
+
+// Prevent unhandled promise rejections from crashing the daemon
+process.on('unhandledRejection', (reason) => {
+  log(`Unhandled rejection: ${reason?.message || reason}`);
+});
 
 main().catch((err) => {
   log(`FATAL: ${err.message}`);
@@ -368,7 +593,7 @@ main().catch((err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
+// Forceful shutdown (user clicked Stop)
 process.on('SIGTERM', () => {
   log('SIGTERM received — shutting down');
   process.exit(0);

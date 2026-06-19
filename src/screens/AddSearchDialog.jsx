@@ -1,6 +1,31 @@
 // Add Search dialog — paste IS24 URL, test it, save.
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+
+/** Derive a human-readable name from an IS24 search URL. */
+function deriveName(url) {
+  try {
+    // Add https:// if missing — new URL() requires absolute URL
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    const u = new URL(url);
+    if (!u.hostname.includes('immobilienscout24')) return '';
+    const parts = u.pathname.split('/').filter(Boolean);
+    // Path: /Suche/de/{state?}/{city}/{type}
+    const sucheIdx = parts.findIndex(p => p.toLowerCase() === 'suche');
+    if (sucheIdx < 0) return '';
+    // The type is the last segment (ends with -mieten, -kaufen, etc.)
+    const rawType = parts[parts.length - 1] || '';
+    // City is the segment before the type
+    const city = parts[parts.length - 2] || '';
+    const cityName = city.charAt(0).toUpperCase() + city.slice(1).replace(/-/g, ' ');
+    const typeName = rawType.replace(/-/g, ' ').replace(/mieten/, 'zur Miete').replace(/kaufen/, 'zum Kauf');
+    if (!cityName && !typeName) return '';
+    if (!typeName) return cityName;
+    return `${cityName} · ${typeName}`;
+  } catch {
+    return '';
+  }
+}
 
 export default function AddSearchDialog({ onCancel, onAdd }) {
   const [url, setUrl] = useState('');
@@ -8,6 +33,8 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [testError, setTestError] = useState(null);
+
+  const suggestedName = useMemo(() => deriveName(url), [url]);
 
   const handleTest = async () => {
     if (!url.trim()) return;
@@ -33,9 +60,42 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
     }
   };
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!url.trim()) return;
-    onAdd(url.trim(), name.trim() || '');
+
+    // Auto-test first if not yet tested
+    if (testResult === null && !testing) {
+      setTesting(true);
+      setTestError(null);
+      try {
+        if (!window.homelander) {
+          setTestError('API bridge not available');
+          setTesting(false);
+          return;
+        }
+        const result = await window.homelander.testFilter(url.trim());
+        if (result.error) {
+          setTestError(result.error);
+          setTesting(false);
+          return;
+        }
+        setTestResult(result.total);
+        setTesting(false);
+        // Now add with the result
+        const finalName = name.trim() || suggestedName;
+        onAdd(url.trim(), finalName);
+        onCancel();
+        return;
+      } catch (err) {
+        setTestError(err.message);
+        setTesting(false);
+        return;
+      }
+    }
+
+    if (testResult === null) return;
+    const finalName = name.trim() || suggestedName;
+    onAdd(url.trim(), finalName);
     onCancel();
   };
 
@@ -67,14 +127,14 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
           autoFocus
         />
 
-        {/* Name (optional) */}
+        {/* Name — optional, auto-generated from URL */}
         <label className="block text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
-          Name (optional)
+          Name <span style={{ color: 'var(--text-muted)' }}>— auto-generated from URL</span>
         </label>
         <input
           type="text"
           className="input mb-4"
-          placeholder="e.g. Berlin 2-3 rooms under €1,500"
+          placeholder={suggestedName || 'e.g. Berlin 2-3 rooms under €1,500'}
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -110,9 +170,9 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
           <button
             className="btn btn-primary"
             onClick={handleAdd}
-            disabled={!url.trim() || testResult === null}
+            disabled={!url.trim() || testing}
           >
-            Add search
+            {testing ? 'Testing...' : 'Add search'}
           </button>
         </div>
       </div>

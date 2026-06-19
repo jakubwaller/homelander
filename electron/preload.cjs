@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('homelander', {
   resumeDaemon: () => ipcRenderer.invoke('daemon:resume'),
   getDaemonStatus: () => ipcRenderer.invoke('daemon:status'),
   pollNow: (filterId) => ipcRenderer.invoke('daemon:poll-now', filterId),
+  retryListing: (exposeId) => ipcRenderer.invoke('daemon:retry-listing', exposeId),
 
   // ── Filters ───────────────────────────────────────────────
   getFilters: () => ipcRenderer.invoke('filters:list'),
@@ -23,8 +24,8 @@ contextBridge.exposeInMainWorld('homelander', {
   // ── Listings / History ────────────────────────────────────
   getHistory: (limit, offset, filterId, outcome) =>
     ipcRenderer.invoke('listings:history', limit, offset, filterId, outcome),
-  getStats: () => ipcRenderer.invoke('listings:stats'),
-  getTodayStats: () => ipcRenderer.invoke('listings:todayStats'),
+  getStats: (filterId) => ipcRenderer.invoke('listings:stats', filterId),
+  getTodayStats: (filterId) => ipcRenderer.invoke('listings:todayStats', filterId),
 
   // ── Config ────────────────────────────────────────────────
   getConfig: () => ipcRenderer.invoke('config:get'),
@@ -65,4 +66,8 @@ contextBridge.exposeInMainWorld('homelander', {
     ipcRenderer.on('homelander:error', handler);
     return () => ipcRenderer.removeListener('homelander:error', handler);
   },
+
+  // ── App lifecycle ───────────────────────────────────────────
+  quit: () => ipcRenderer.invoke('app:quit'),
+  cleanData: (email) => ipcRenderer.invoke('data:clean', email),
 });

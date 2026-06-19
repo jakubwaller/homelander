@@ -1,18 +1,47 @@
 // Homelander — Main App component.
 // Tab-based navigation: Searches, History, Settings.
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from './stores/appStore';
 import SearchTab from './screens/SearchTab';
 import HistoryTab from './screens/HistoryTab';
 import SettingsTab from './screens/SettingsTab';
 import SetupWizard from './screens/SetupWizard';
+import StatusDot from './components/StatusDot';
 
 const TABS = [
   { id: 'searches', label: 'Searches' },
   { id: 'history', label: 'History' },
   { id: 'settings', label: 'Settings' },
 ];
+
+function normalizeStats(stats) {
+  if (!stats) return stats;
+  if (stats.total != null) {
+    return {
+      seen: (stats.total || 0) + (stats.seen_unapplied || 0),
+      sent: stats.sent || 0,
+      failed: stats.failed || 0,
+      deactivated: stats.deactivated || 0,
+      premium: stats.premium || 0,
+      captcha: stats.captcha || 0,
+      seen_unapplied: stats.seen_unapplied || 0,
+      today: stats.today || 0,
+      nextPollAt: stats.nextPollAt || null,
+    };
+  }
+  return {
+    seen: stats.seen || 0,
+    sent: stats.sent || 0,
+    failed: stats.failed || 0,
+    deactivated: stats.deactivated || 0,
+    premium: stats.premium || 0,
+    captcha: stats.captcha || 0,
+    seen_unapplied: stats.seen_unapplied || 0,
+    today: stats.today || 0,
+    nextPollAt: stats.nextPollAt || stats.next_poll_at || null,
+  };
+}
 
 export default function App() {
   const activeTab = useStore((s) => s.activeTab);
@@ -39,15 +68,17 @@ export default function App() {
 
       const { stats, recent, error } = await window.homelander.getStats();
       if (!error) {
-        setStats(stats);
+        setStats(normalizeStats(stats));
         if (recent) {
           for (const item of recent) {
             addActivity({
               outcome: item.outcome,
+              exposeId: item.expose_id || item.exposeId,
               title: item.title,
               price: item.price,
               address: item.address,
               detail: item.detail,
+              failureReason: item.failure_reason || item.failureReason,
               time: item.sent_at,
             });
           }
@@ -70,15 +101,7 @@ export default function App() {
     const unsubs = [];
 
     unsubs.push(window.homelander.onStats((data) => {
-      setStats({
-        seen: data.seen,
-        sent: data.sent,
-        failed: data.failed,
-        deactivated: data.deactivated || 0,
-        seen_unapplied: data.seen_unapplied,
-        today: data.today,
-        nextPollAt: data.next_poll_at || null,
-      });
+      setStats(normalizeStats(data));
       // Refresh per-search counts so FilterCards stay live
       window.homelander.getFilters().then(({ filters }) => {
         if (filters) setFilters(filters);
@@ -99,13 +122,59 @@ export default function App() {
     }));
 
     unsubs.push(window.homelander.onEvent((data) => {
+      if (data.type === 'daemon_started') setDaemonStatus('running');
+      if (data.type === 'daemon_restarting') setDaemonStatus('restarting');
       if (data.type === 'paused') setDaemonStatus('paused');
       if (data.type === 'resumed') setDaemonStatus('running');
       if (data.type === 'daemon_stopped') setDaemonStatus('stopped');
+      if (data.type === 'session_expired') setDaemonStatus('paused');
+      if (data.type === 'config_applied') {
+        // Brief flash — clears after animation
+        setDaemonStatus((prev) => prev === 'restarting' ? prev : prev);
+        window.dispatchEvent(new CustomEvent('homelander:config-applied'));
+      }
+      if (data.type === 'retry_queued') {
+        window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId: data.exposeId } }));
+      }
     }));
 
     return () => unsubs.forEach(fn => fn());
   }, []);
+
+  // ── Daemon controls (global, visible from all tabs) ──────────
+  const [daemonError, setDaemonError] = useState(null);
+
+  const daemonControlDisabled = daemonStatus === 'restarting';
+
+  const handleToggleDaemon = useCallback(async () => {
+    if (!window.homelander) return;
+    try {
+      if (daemonStatus === 'stopped') {
+        const { status } = await window.homelander.startDaemon();
+        setDaemonStatus(status || 'running');
+      } else if (daemonStatus === 'running') {
+        const { status } = await window.homelander.pauseDaemon();
+        setDaemonStatus(status || 'paused');
+      } else if (daemonStatus === 'paused') {
+        const { status } = await window.homelander.resumeDaemon();
+        setDaemonStatus(status || 'running');
+      }
+      setDaemonError(null);
+    } catch (err) {
+      setDaemonError(err.message || 'Daemon action failed');
+    }
+  }, [daemonStatus, setDaemonStatus]);
+
+  const handleStopDaemon = useCallback(async () => {
+    if (!window.homelander) return;
+    try {
+      const { status } = await window.homelander.stopDaemon();
+      setDaemonStatus(status || 'stopped');
+      setDaemonError(null);
+    } catch (err) {
+      setDaemonError(err.message || 'Failed to stop daemon');
+    }
+  }, [setDaemonStatus]);
 
   // Show setup wizard on first launch
   if (!setupComplete) {
@@ -119,8 +188,53 @@ export default function App() {
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pb-2">
-        <h1 className="text-lg font-semibold tracking-tight">Homelander</h1>
+        {/* Left: title + controls grouped */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🏠</span>
+            <h1 className="text-lg font-semibold tracking-tight">Homelander</h1>
+          </div>
+          <div
+            className="flex items-center gap-3 px-2.5 py-1 rounded"
+          >
+          <StatusDot status={daemonStatus} />
+          <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+            {daemonStatus === 'running' ? 'Active'
+              : daemonStatus === 'paused' ? 'Paused'
+              : daemonStatus === 'restarting' ? 'Restarting…'
+              : 'Stopped'}
+          </span>
+          <button
+            className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
+            onClick={handleToggleDaemon}
+            disabled={daemonControlDisabled}
+            title={daemonStatus === 'stopped' ? 'Start' : daemonStatus === 'running' ? 'Pause' : daemonStatus === 'restarting' ? 'Restarting…' : 'Resume'}
+            style={{
+              fontSize: '13px',
+              background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
+              color: daemonStatus === 'stopped' ? 'var(--accent)' : daemonStatus === 'running' ? 'var(--warning)' : daemonStatus === 'restarting' ? 'var(--text-muted)' : 'var(--accent)',
+              opacity: daemonControlDisabled ? 0.4 : 1,
+            }}
+          >
+            {daemonStatus === 'stopped' ? '▶' : daemonStatus === 'running' ? '⏸' : daemonStatus === 'restarting' ? '⏳' : '▶'}
+          </button>
+          {daemonStatus !== 'stopped' && daemonStatus !== 'restarting' && (
+            <button
+              className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
+              onClick={handleStopDaemon}
+              title="Stop"
+              style={{ fontSize: '13px', background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}
+            >
+              ⏹
+            </button>
+          )}
+          {daemonError && (
+            <span className="text-xs" style={{ color: 'var(--danger)' }}>{daemonError}</span>
+          )}
+        </div>
+        </div>
 
+        {/* Right: tabs */}
         <nav className="flex gap-1">
           {TABS.map((tab) => (
             <button

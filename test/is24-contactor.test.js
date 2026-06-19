@@ -4,7 +4,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { IS24Contactor } from '../src/is24-contactor.js';
+import { IS24Contactor } from '../engine/is24-contactor.js';
 
 /** Create a contactor with a mocked page. */
 function mockContactor() {
@@ -68,6 +68,33 @@ describe('_isBlocked() — captcha detection', () => {
 });
 
 // ============================================================================
+// _waitForForm() tests
+// ============================================================================
+describe('_waitForForm() — form variants', () => {
+  it('accepts contact form without message textarea', async () => {
+    const c = mockContactor();
+    c.page.evaluate = async () => true;
+    assert.equal(await c._waitForForm(1), true);
+  });
+
+  it('clicks visible Nachricht CTA when form is not open yet', async () => {
+    const c = mockContactor();
+    let checks = 0;
+    let opened = false;
+    c._isContactFormOpen = async () => {
+      checks++;
+      return opened;
+    };
+    c._openContactFormIfNeeded = async () => {
+      opened = true;
+      return true;
+    };
+    assert.equal(await c._waitForForm(100), true);
+    assert.ok(checks >= 2);
+  });
+});
+
+// ============================================================================
 // _verifySubmission() tests
 // ============================================================================
 describe('_verifySubmission() — failure branches', () => {
@@ -94,25 +121,13 @@ describe('_verifySubmission() — failure branches', () => {
     assert.match(r.detail, /premium upsell/);
   });
 
-  it('server error (rate-limit) — retries, eventually times out', async () => {
+  it('server error (rate-limit) — treated as premium immediately', async () => {
     const c = mockContactor();
-    // Server error with form still present → retries keep looping.
-    // After 5s deadline, formGone=false → "no confirmation"
-    let call = 0;
-    c.page.evaluate = async () => {
-      call++;
-      // Poll loop: 1 iteration fits in 5s with 2-4s server-error jitter
-      if (call === 1) {
-        return { confirmed: false, formGone: false, captcha: false, serverError: true, premium: false, hasErrors: false, validationText: false };
-      }
-      // Deadline check 1: formGone (must return boolean)
-      if (call === 2) return false;
-      // Deadline check 2: bodyText
-      return '';
-    };
+    // Server error = premium, no retries
+    c.page.evaluate = evaluateSeq(failState({ serverError: true }));
     const r = await c._verifySubmission();
     assert.equal(r.verified, false);
-    assert.match(r.detail, /no confirmation/);
+    assert.match(r.detail, /premium/);
   });
 
   it('validation errors (hasErrors)', async () => {
@@ -147,112 +162,84 @@ describe('_verifySubmission() — success branches', () => {
     assert.match(r.detail, /modal/);
   });
 
-  it('form disappears → SUCCESS', async () => {
+  it('explicit success text → SUCCESS', async () => {
+    const c = mockContactor();
+    c.page.evaluate = evaluateSeq(okState({ successText: true }));
+    const r = await c._verifySubmission();
+    assert.equal(r.verified, true);
+    assert.match(r.detail, /success text/);
+  });
+
+  it('form disappears without confirmation → FAILURE', async () => {
     const c = mockContactor();
     c.page.evaluate = evaluateSeq(okState({ formGone: true }));
     const r = await c._verifySubmission();
-    assert.equal(r.verified, true);
-    assert.match(r.detail, /form removed/);
+    assert.equal(r.verified, false);
+    assert.match(r.detail, /SUBMIT_UNCONFIRMED/);
   });
 
-  it('form disappears + thanks → SUCCESS (thanks is ignored)', async () => {
+  it('form disappears while logged out → SESSION_EXPIRED', async () => {
     const c = mockContactor();
-    c.page.evaluate = evaluateSeq(okState({ formGone: true, thanks: true }));
+    c.page.evaluate = evaluateSeq(okState({ formGone: true, loggedOut: true }));
     const r = await c._verifySubmission();
-    assert.equal(r.verified, true);
-    assert.match(r.detail, /form removed/);
-  });
-
-  it('form disappears + sent → SUCCESS (sent is ignored)', async () => {
-    const c = mockContactor();
-    c.page.evaluate = evaluateSeq(okState({ formGone: true, sent: true }));
-    const r = await c._verifySubmission();
-    assert.equal(r.verified, true);
-    assert.match(r.detail, /form removed/);
+    assert.equal(r.verified, false);
+    assert.match(r.detail, /SESSION_EXPIRED/);
   });
 });
 
 describe('_verifySubmission() — deadline timeout', () => {
-  // The poll loop runs for ~5s. To test deadline behavior without waiting,
-  // we feed states that keep the loop going (no clear signal) until it expires,
-  // then provide final evaluate() results for the deadline checks.
-  //
-  // The deadline makes 2 evaluate() calls: (1) check formGone, (2) read bodyText.
-  // We provide enough "no signal" states for the polling loop + 2 for deadline.
+  // The poll loop runs until deadline. To test deadline behavior without waiting,
+  // set verifyDeadlineMs=0 and return the final structural fallback state.
 
-  it('formGone + any text at deadline → SUCCESS (text is ignored)', async () => {
+  it('formGone + explicit success text at deadline → SUCCESS', async () => {
     const c = mockContactor();
+    c.verifyDeadlineMs = 0;
     c.page.evaluate = evaluateSeq(
-      // Poll loop — no clear signal, keeps going
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      // Deadline check #1: formGone = true
-      () => true,
-      // Deadline check #2: any text (no longer relevant — formGone is enough)
-      () => 'Vielen Dank für Ihre Nachricht!',
+      () => ({ formGone: true, premium: false, loggedOut: false, successText: true, serverError: false }),
     );
     const r = await c._verifySubmission();
     assert.equal(r.verified, true);
-    assert.match(r.detail, /form removed/);
+    assert.match(r.detail, /success text/);
   });
 
-  it('formGone + Suchen+ at deadline → FAILURE', async () => {
+  it('formGone + generic Suchen+ marketing text at deadline → FAILURE, not premium', async () => {
     const c = mockContactor();
+    c.verifyDeadlineMs = 0;
     c.page.evaluate = evaluateSeq(
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      () => true,           // formGone
-      () => 'Suchen+ Tarif wählen Jetzt Plus Mitgliedschaft',  // premium text
+      () => ({ formGone: true, premium: false, loggedOut: false, successText: false, serverError: false }),
+    );
+    const r = await c._verifySubmission();
+    assert.equal(r.verified, false);
+    assert.match(r.detail, /SUBMIT_UNCONFIRMED/);
+  });
+
+  it('formGone + structural premium gate at deadline → FAILURE', async () => {
+    const c = mockContactor();
+    c.verifyDeadlineMs = 0;
+    c.page.evaluate = evaluateSeq(
+      () => ({ formGone: true, premium: true, serverError: false }),
     );
     const r = await c._verifySubmission();
     assert.equal(r.verified, false);
     assert.match(r.detail, /premium upsell/);
   });
 
-  it('formGone but no text at deadline → SUCCESS (formGone is enough)', async () => {
+  it('formGone but no confirmation at deadline → FAILURE', async () => {
     const c = mockContactor();
+    c.verifyDeadlineMs = 0;
     c.page.evaluate = evaluateSeq(
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      () => true,           // formGone
-      () => 'Keine Bestätigung sichtbar auf dieser Seite',  // irrelevant
+      () => ({ formGone: true, premium: false, loggedOut: false, successText: false, serverError: false }),
     );
     const r = await c._verifySubmission();
-    assert.equal(r.verified, true);
-    assert.match(r.detail, /form removed/);
+    assert.equal(r.verified, false);
+    assert.match(r.detail, /SUBMIT_UNCONFIRMED/);
   });
 
   it('no signal at all at deadline → FAILURE', async () => {
     const c = mockContactor();
+    c.verifyDeadlineMs = 0;
     c.page.evaluate = evaluateSeq(
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      { confirmed: false, formGone: false, captcha: false,
-        serverError: false, premium: false, hasErrors: false, validationText: false },
-      () => false,          // formGone = false
-      () => '',             // empty bodyText
+      () => ({ formGone: false, premium: false, serverError: false }),
     );
     const r = await c._verifySubmission();
     assert.equal(r.verified, false);

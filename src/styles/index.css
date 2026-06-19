@@ -143,6 +143,7 @@ body {
 }
 .status-dot.active { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .status-dot.paused { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.status-dot.restarting { background: var(--warning); box-shadow: 0 0 6px var(--warning); animation: pulse 1.2s ease-in-out infinite; }
 .status-dot.error { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
 
 /* Live feed animation */
@@ -152,6 +153,25 @@ body {
 }
 .feed-item-enter {
   animation: slideIn 0.2s ease-out;
+}
+
+/* Config-applied flash */
+@keyframes fadeOut {
+  0%   { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.animate-fade-out {
+  animation: fadeOut 1.8s ease-out forwards;
+}
+
+/* Restarting pulse */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.animate-pulse {
+  animation: pulse 1.2s ease-in-out infinite;
 }
 
 /* Badge */

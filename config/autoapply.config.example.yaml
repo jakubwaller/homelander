@@ -14,7 +14,6 @@ chrome:
 
 polling:
   interval_seconds: 60
-  max_sends_per_run: 15                   # safety cap per run; 0 = no limit
 
 speed: "balanced"                          # "fast", "balanced", or "slow"
 

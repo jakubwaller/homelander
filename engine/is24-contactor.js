@@ -72,6 +72,7 @@ const SPEEDS = {
 };
 
 function jitter(min, max) {
+  if (process.env.HOMELANDER_TEST_FAST === '1') return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, min + Math.random() * (max - min)));
 }
 
@@ -88,8 +89,12 @@ function deepMergeTiming(preset, overrides) {
  * Drive the host's Chrome to auto-apply to IS24 listings.
  */
 export class IS24Contactor {
-  /** SINGLE source of truth for Suchen+/premium detection. */
-  static PREMIUM_RE = /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus|Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied|zum PLUS-Mitglied)/i;
+  /**
+   * Broad Plus words appear in normal IS24 chrome/marketing, so they are NOT enough.
+   * Premium detection must find an actual visible gate/CTA, never generic page text.
+   */
+  static PLUS_TEXT_RE = /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus)/i;
+  static PLUS_GATE_RE = /(Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied werden|zum PLUS-Mitglied|Kontakt nur|nur mit .{0,30}Plus|exklusiv .{0,30}Plus|Plus .{0,30}kontaktieren)/i;
 
   constructor(cdpUrl, contact, speed = 'balanced', timingOverrides = {}, captchaCfg = {}) {
     this.cdpUrl = cdpUrl;
@@ -99,6 +104,22 @@ export class IS24Contactor {
     this.t = deepMergeTiming(preset, timingOverrides);
     this.browser = null;
     this.page = null;
+  }
+
+  /** Hot-reload persona fields without restarting the daemon. */
+  updateContact(persona) {
+    this.contact = persona;
+  }
+
+  /** Hot-reload timing speed/overrides without restarting. */
+  updateTiming(speed, overrides = {}) {
+    const preset = SPEEDS[speed] || SPEEDS.balanced;
+    this.t = deepMergeTiming(preset, overrides);
+  }
+
+  /** Hot-reload captcha config without restarting. */
+  updateCaptcha(captchaCfg) {
+    this.captchaCfg = captchaCfg;
   }
 
   async connect() {
@@ -141,6 +162,34 @@ export class IS24Contactor {
 
       await jitter(...this.t.spaRenderWait);
 
+      // Detect session expiry: IS24 redirects unauthenticated users to login
+      try {
+        const currentUrl = this.page.url();
+        const isLoginRedirect = currentUrl.includes('/login')
+          || currentUrl.includes('/registrierung')
+          || currentUrl.includes('sso.immobilienscout24');
+        if (isLoginRedirect || !currentUrl.includes(exposeId)) {
+          const ssDir = DEBUG.screenshotDir();
+          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch {}
+          return {
+            success: false, reason: 'SESSION_EXPIRED (IS24 login required — re-login via Settings)',
+            timing_ms: Date.now() - tStart, timing, captcha, form_state: 'session_expired',
+            fields_typed: 0, field_retries: 0,
+          };
+        }
+      } catch {}
+
+      const loggedOutSession = await this._isLoggedOutSession();
+      if (loggedOutSession) {
+        const ssDir = DEBUG.screenshotDir();
+        try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch {}
+        return {
+          success: false, reason: 'SESSION_EXPIRED (IS24 login required — re-login via Settings)',
+          timing_ms: Date.now() - tStart, timing, captcha, form_state: 'session_expired',
+          fields_typed: 0, field_retries: 0,
+        };
+      }
+
       // Detect deactivated listing before trying to find form
       const isDeactivated = await this._isDeactivated();
       if (isDeactivated) {
@@ -154,6 +203,7 @@ export class IS24Contactor {
       }
 
       const tForm = Date.now();
+      await this._openContactFormIfNeeded();
       const formReady = await this._waitForForm(this.t.formWaitTimeout);
       timing.form_wait_ms = Date.now() - tForm;
 
@@ -176,6 +226,28 @@ export class IS24Contactor {
       timing.fill_ms = Date.now() - tFill;
       fieldCount = fillResult.filled;
       fieldRetries = fillResult.retries;
+
+      let formStillOpen = await this._isContactFormOpen();
+      if (!formStillOpen) {
+        // Some IS24 variants close/return to the expose page during SPA transitions.
+        // If a visible "Nachricht" contact button is present, reopen, refill once, then submit.
+        const reopened = await this._openContactFormIfNeeded();
+        if (reopened && await this._waitForForm(Math.min(this.t.formWaitTimeout, 10_000))) {
+          const refillResult = await this._fillForm(message);
+          fieldCount += refillResult.filled;
+          fieldRetries += refillResult.retries;
+          formStillOpen = await this._isContactFormOpen();
+        }
+      }
+      if (!formStillOpen) {
+        const ssDir = DEBUG.screenshotDir();
+        try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_form_closed_before_submit.png`), fullPage: true }); } catch {}
+        return {
+          success: false, reason: 'SUBMIT_FAILED (contact form closed before submit)',
+          timing_ms: Date.now() - tStart, timing, captcha, form_state: 'form_closed_before_submit',
+          fields_typed: fieldCount, field_retries: fieldRetries,
+        };
+      }
 
       await this._clickAbschicken();
 
@@ -218,18 +290,39 @@ export class IS24Contactor {
         fields_typed: fieldCount, field_retries: fieldRetries,
       };
     } finally {
-      // Close tab — but keep at least one alive so Chrome doesn't exit
+      // Clean up the per-listing tab while keeping Chrome alive.
+      // Closing the final tab can make Chrome exit and lose the IS24 session;
+      // navigate it to about:blank instead. With 2+ tabs, close only the tab
+      // created for this application so expose tabs cannot accumulate.
       try {
-        const pages = await this.browser.pages();
-        if (pages.length <= 1) {
-          // Last tab: navigate to blank instead of closing
-          await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
-        } else {
-          await this.page.close();
+        if (this.page && this.browser?.isConnected()) {
+          const pages = await this.browser.pages();
+          if (pages.length <= 1) {
+            await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+          } else {
+            await this.page.close();
+          }
         }
       } catch {}
       this.page = null;
     }
+  }
+
+  async _isLoggedOutSession() {
+    try {
+      return await this.page.evaluate(() => {
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        return Array.from(document.querySelectorAll('a, button'))
+          .filter(visible)
+          .some((el) => /^\s*(Anmelden|Jetzt einloggen|Einloggen)\s*$/i.test(el.textContent || ''));
+      });
+    } catch { return false; }
   }
 
   async _isBlocked() {
@@ -244,8 +337,20 @@ export class IS24Contactor {
   async _isPremiumListing() {
     try {
       return await this.page.evaluate(() => {
-        const text = document.body?.innerText || '';
-        return /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus|Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied|zum PLUS-Mitglied)/i.test(text);
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const plusTextRe = /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus)/i;
+        const plusGateRe = /(Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied werden|zum PLUS-Mitglied|Kontakt nur|nur mit .{0,30}Plus|exklusiv .{0,30}Plus|Plus .{0,30}kontaktieren)/i;
+        const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], [class*="modal"], [class*="Modal"], [class*="upsell"], [class*="Upsell"], [class*="paywall"], [class*="Paywall"]'))
+          .filter(visible)
+          .map((el) => el.textContent?.trim() || '')
+          .filter(Boolean);
+        return candidates.some((text) => plusTextRe.test(text) && plusGateRe.test(text));
       });
     } catch { return false; }
   }
@@ -267,15 +372,38 @@ export class IS24Contactor {
   async _waitForForm(timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const found = await this.page.evaluate(() => {
-        const ta = document.querySelector('textarea[name="message"]');
-        const fn = document.querySelector('input[name="firstName"]');
-        return !!(ta && fn);
-      });
+      const found = await this._isContactFormOpen();
       if (found) return true;
+      await this._openContactFormIfNeeded();
       await jitter(500, 1500);
     }
     return false;
+  }
+
+  async _openContactFormIfNeeded() {
+    try {
+      if (await this._isContactFormOpen()) return true;
+      const clicked = await this.page.evaluate(() => {
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const buttons = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+        const btn = buttons.find((el) => {
+          const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          return visible(el) && /^(Nachricht|Kontakt aufnehmen|Anbieter kontaktieren|Vermieter kontaktieren)$/i.test(text);
+        });
+        if (!btn) return false;
+        btn.scrollIntoView({ block: 'center', inline: 'center' });
+        btn.click();
+        return true;
+      });
+      if (clicked) await jitter(800, 1500);
+      return clicked;
+    } catch { return false; }
   }
 
   async _dismissOverlays() {
@@ -308,6 +436,7 @@ export class IS24Contactor {
         for (const o of el.options) {
           if (o.textContent.trim() === text || o.value === text) {
             el.value = o.value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
             return;
           }
@@ -351,6 +480,120 @@ export class IS24Contactor {
       if (current === val) continue;
       await this.page.evaluate(({ s, v }) => window.__setSelect(s, v), { s: sel, v: val });
       await jitter(...this.t.anredeJitter);
+    }
+
+    // Fill move-in date when einzug is "genaues Datum"
+    if (this.contact.einzug === 'genaues Datum' && this.contact.einzug_datum) {
+      const dateSelector = 'input#moveInDate';
+      // Debug: dump all named inputs on the form
+      const allInputs = await this.page.evaluate(() =>
+        Array.from(document.querySelectorAll('input, select')).map(el => ({
+          tag: el.tagName,
+          name: el.name,
+          type: el.getAttribute('type'),
+          placeholder: el.getAttribute('placeholder'),
+          id: el.id,
+          class: el.className?.slice?.(0, 60) || '',
+        })).filter(i => i.name || i.id || i.class)
+      );
+      process.stderr.write('[contactor] All form inputs: ' + JSON.stringify(allInputs) + '\n');
+      // Retry — React may need a moment to render the date input after select change
+      let exists = false;
+      for (let i = 0; i < 5; i++) {
+        exists = await this.page.evaluate((sel) => !!document.querySelector(sel), dateSelector);
+        if (exists) break;
+        await jitter(200, 400);
+      }
+      process.stderr.write(`[contactor] Date selector "${dateSelector}" exists: ${exists}\n`);
+      if (exists) {
+        // 1) Set the date text via native setter (proven to put text in the field)
+        // 2) Open calendar — IS24 reads the pre-filled value and should pre-select it
+        // 3) Click OK to confirm through the calendar picker (proper React state update)
+        // Block SPA hash changes so the form doesn't close.
+        const parts = this.contact.einzug_datum.split('-');
+        const targetDay = parseInt(parts[2], 10);
+        const targetMonth = parseInt(parts[1], 10);
+        const targetYear = parseInt(parts[0], 10);
+        const germanDate = parts.length === 3 ? `${parts[2]}.${parts[1]}.${parts[0]}` : this.contact.einzug_datum;
+
+        // Step 1: set date text + block hash changes
+        await this.page.evaluate(({ sel, date }) => {
+          // Block hash changes
+          window.__homelander_blockHash = true;
+          window.__homelander_originalHash = location.hash;
+          const _ps = history.pushState, _rs = history.replaceState;
+          history.pushState = function (...a) { if (window.__homelander_blockHash) return; return _ps.apply(this, a); };
+          history.replaceState = function (...a) { if (window.__homelander_blockHash) return; return _rs.apply(this, a); };
+          // Set the date text in the input
+          const el = document.querySelector(sel);
+          if (!el) return;
+          const ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          ns.call(el, date);
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, { sel: dateSelector, date: germanDate });
+        await jitter(200, 400);
+
+        // Step 2: focus to open calendar (should see the pre-filled date)
+        await this.page.evaluate((sel) => document.querySelector(sel)?.focus(), dateSelector);
+        await jitter(500, 800);
+
+        // Step 3: click OK to confirm
+        await this.page.evaluate(() => {
+          document.querySelector('.DatePicker_datepicker-okay-button__JxpMI')?.click();
+        });
+        await jitter(400, 600);
+
+        // If calendar still open after OK, retry with manual navigation + day pick
+        const stillOpen = await this.page.evaluate(() =>
+          !!document.querySelector('.DatePicker_datepicker-days-wrapper__qCgH-')
+        );
+        if (stillOpen) {
+          process.stderr.write('[contactor] Calendar still open — retrying with day pick\n');
+          await this.page.evaluate(({ day, month, year }) => {
+            const months = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+            const getDisp = () => {
+              const el = document.querySelector('.DatePicker_datepicker-current-month__HB2Ak');
+              if (!el) return null;
+              const p = el.textContent.trim().split(/\s+/);
+              const m = months.indexOf(p[0]);
+              return m >= 0 ? { month: m + 1, year: parseInt(p[1]) } : null;
+            };
+            let cur = getDisp();
+            if (!cur) return;
+            const next = () => document.querySelector('.DatePicker_datepicker-next-month-button__V6X0I');
+            const prev = () => document.querySelector('.DatePicker_datepicker-previous-month-button__N37Co');
+            for (let c = 0; c < 24 && !(cur.year === year && cur.month === month); c++) {
+              (cur.year < year || (cur.year === year && cur.month < month)) ? next()?.click() : prev()?.click();
+              const t = Date.now(); while (Date.now() - t < 150) {}
+              const nextCur = getDisp();
+              if (!nextCur) break;
+              cur = nextCur;
+            }
+            if (cur && cur.month === month && cur.year === year) {
+              const btns = document.querySelectorAll('.DatePicker_datepicker-day-cell__Bomtx');
+              for (const b of btns) {
+                if (b.textContent.trim() === String(day) && !b.disabled) {
+                  b.click();
+                  const t = Date.now(); while (Date.now() - t < 150) {}
+                  break;
+                }
+              }
+            }
+            document.querySelector('.DatePicker_datepicker-okay-button__JxpMI')?.click();
+          }, { day: targetDay, month: targetMonth, year: targetYear });
+          await jitter(400, 600);
+        }
+
+        // Unblock hash changes + restore form
+        await this.page.evaluate(() => {
+          window.__homelander_blockHash = false;
+          if (!location.hash.includes('basicContact')) {
+            location.hash = window.__homelander_originalHash || '#/basicContact/email';
+          }
+        });
+        await jitter(300, 500);
+      }
     }
 
     // Text inputs — only stringify non-undefined values (never "undefined" in the DOM)
@@ -420,48 +663,56 @@ export class IS24Contactor {
       filled++;
     }
 
-    // Message textarea
+    // Do NOT fill global expose-page helpers like `vonplz`/`nachplz` here.
+    // Those names are used by IS24's "Was kostet ein Umzug?" calculator outside
+    // the contact form; clicking them closes the contact form and scrolls to the page body.
+
+    // Message textarea (optional — not every IS24 listing has one)
     const textareaSel = 'textarea[name="message"]';
-    const currentMsg = await this.page.evaluate((s) => document.querySelector(s)?.value || '', textareaSel);
+    const hasTextarea = await this.page.evaluate((s) => !!document.querySelector(s), textareaSel);
 
-    if (currentMsg && currentMsg.length > 0) {
-      await this.page.click(textareaSel);
-      await jitter(100, 200);
-      await this.page.keyboard.down('Meta');
-      await this.page.keyboard.press('KeyA');
-      await this.page.keyboard.up('Meta');
-      await jitter(80, 150);
-      await this.page.keyboard.press('Backspace');
-      await jitter(150, 300);
-    } else {
-      await this.page.click(textareaSel);
-      await jitter(100, 200);
-    }
+    if (hasTextarea) {
+      const currentMsg = await this.page.evaluate((s) => document.querySelector(s)?.value || '', textareaSel);
 
-    const kbdDelay = Array.isArray(this.t.typeDelay)
-      ? this.t.typeDelay[0] + Math.random() * (this.t.typeDelay[1] - this.t.typeDelay[0])
-      : this.t.typeDelay;
-    await this.page.keyboard.type(message, { delay: Math.round(kbdDelay) });
-    await jitter(200, 400);
+      if (currentMsg && currentMsg.length > 0) {
+        await this.page.click(textareaSel);
+        await jitter(100, 200);
+        await this.page.keyboard.down('Meta');
+        await this.page.keyboard.press('KeyA');
+        await this.page.keyboard.up('Meta');
+        await jitter(80, 150);
+        await this.page.keyboard.press('Backspace');
+        await jitter(150, 300);
+      } else {
+        await this.page.click(textareaSel);
+        await jitter(100, 200);
+      }
 
-    const actualMsg = await this.page.evaluate((s) => document.querySelector(s)?.value || '', textareaSel);
-    if (actualMsg !== message) {
-      await this.page.evaluate(({ sel, msg }) => {
-        const el = document.querySelector(sel);
-        if (!el) return;
-        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-        nativeSetter.call(el, '');
-        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContent' }));
-        return new Promise((resolve) => {
-          requestAnimationFrame(() => {
-            nativeSetter.call(el, msg);
-            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-            resolve(true);
-          });
-        });
-      }, { sel: textareaSel, msg: message });
+      const kbdDelay = Array.isArray(this.t.typeDelay)
+        ? this.t.typeDelay[0] + Math.random() * (this.t.typeDelay[1] - this.t.typeDelay[0])
+        : this.t.typeDelay;
+      await this.page.keyboard.type(message, { delay: Math.round(kbdDelay) });
       await jitter(200, 400);
-      retries++;
+
+      const actualMsg = await this.page.evaluate((s) => document.querySelector(s)?.value || '', textareaSel);
+      if (actualMsg !== message) {
+        await this.page.evaluate(({ sel, msg }) => {
+          const el = document.querySelector(sel);
+          if (!el) return;
+          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          nativeSetter.call(el, '');
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContent' }));
+          return new Promise((resolve) => {
+            requestAnimationFrame(() => {
+              nativeSetter.call(el, msg);
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+              resolve(true);
+            });
+          });
+        }, { sel: textareaSel, msg: message });
+        await jitter(200, 400);
+        retries++;
+      }
     }
 
     // Final verify: IS24 auto-fill can asynchronously revert fields after the bot types.
@@ -485,32 +736,95 @@ export class IS24Contactor {
     return { filled, retries };
   }
 
+  async _isContactFormOpen() {
+    try {
+      return await this.page.evaluate(() => {
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const hasSubmit = Array.from(document.querySelectorAll('button')).some((b) => visible(b) && /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || ''));
+        // Message textarea is optional; some IS24 forms also use alternate email/phone names.
+        const fieldSelectors = [
+          'input[name="firstName"]',
+          'input[name="lastName"]',
+          'input[name="emailAddress"]',
+          'input[name="email"]',
+          'input[type="email"]',
+          'input[name="phoneNumber"]',
+          'input[name="phone"]',
+          'input[type="tel"]',
+          'textarea[name="message"]',
+          'select[name="salutation"]',
+        ];
+        const hasField = fieldSelectors.some((sel) => visible(document.querySelector(sel)));
+        return hasSubmit && hasField;
+      });
+    } catch { return false; }
+  }
+
   async _clickAbschicken() {
-    await this.page.evaluate(() => {
+    const clicked = await this.page.evaluate(() => {
+      const visible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
       const buttons = Array.from(document.querySelectorAll('button'));
-      const btn = buttons.find((b) => b.textContent.includes('Abschicken'));
-      if (btn) btn.click();
+      const btn = buttons.find((b) => visible(b) && !b.disabled && /^(Abschicken|Senden|Kontaktanfrage senden)$/i.test((b.textContent || '').trim()));
+      if (!btn) return false;
+      btn.click();
+      return true;
     });
+    if (!clicked) throw new Error('Submit button not found or not clickable');
   }
 
   async _verifySubmission(exposeId, captchaStats = {}) {
     await jitter(1500, 2500);
-    let deadline = Date.now() + 5_000;
+    const verifyDeadlineMs = this.verifyDeadlineMs ?? (process.env.HOMELANDER_TEST_FAST === '1' ? 1 : 5_000);
+    let deadline = Date.now() + verifyDeadlineMs;
     let captchaRetries = 0;
     let serverRetries = 0;
     let deadlineExtended = false;
+    let sawValidation = false;
 
     while (Date.now() < deadline) {
       const state = await this.page.evaluate(() => {
         const allText = document.body?.innerText || '';
-        const msg = document.querySelector('textarea[name="message"]');
+        const msgTextarea = document.querySelector('textarea[name="message"]');
+        const submitBtn = Array.from(document.querySelectorAll('button')).find(b => /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || ''));
         const confirmed = document.querySelector('[class*="StatusMessage_status-confirm"]') !== null;
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const plusTextRe = /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus)/i;
+        const plusGateRe = /(Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied werden|zum PLUS-Mitglied|Kontakt nur|nur mit .{0,30}Plus|exklusiv .{0,30}Plus|Plus .{0,30}kontaktieren)/i;
+        const premium = Array.from(document.querySelectorAll('button, a, [role="button"], [class*="modal"], [class*="Modal"], [class*="upsell"], [class*="Upsell"], [class*="paywall"], [class*="Paywall"]'))
+          .filter(visible)
+          .some((el) => {
+            const text = el.textContent?.trim() || '';
+            return plusTextRe.test(text) && plusGateRe.test(text);
+          });
+        const loggedOut = /\bAnmelden\b|Jetzt einloggen|Einloggen|Loggen Sie sich ein|Bitte melden Sie sich an/i.test(allText)
+          || Array.from(document.querySelectorAll('a, button')).some((el) => /\bAnmelden\b|Jetzt einloggen|Einloggen/i.test(el.textContent || ''));
+        const successText = /Kontaktanfrage.{0,80}(gesendet|verschickt|erfolgreich)|Nachricht.{0,80}(gesendet|verschickt)|Vielen Dank.{0,120}(Nachricht|Kontaktanfrage)/i.test(allText);
         return {
           confirmed,
-          formGone: !msg,
+          successText,
+          loggedOut,
+          formGone: !msgTextarea && !submitBtn,
           captcha: /Roboter|Sicherheitsprüfung|Sicherheitsabfrage/i.test(allText),
           serverError: /Es ist ein Fehler aufgetreten/i.test(allText),
-          premium: /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus|Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied|zum PLUS-Mitglied)/i.test(allText),
+          premium,
           hasErrors: (() => {
             const errs = document.querySelectorAll('[class*="error"], [class*="invalid"], [aria-invalid="true"]');
             return errs.length > 0;
@@ -523,7 +837,11 @@ export class IS24Contactor {
         };
       });
 
-      if (state.confirmed) return { verified: true, detail: 'confirmed (modal)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+      if (state.confirmed || state.successText) return { verified: true, detail: state.confirmed ? 'confirmed (modal)' : 'confirmed (success text)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+
+      if (state.loggedOut && state.formGone) {
+        return { verified: false, detail: 'SESSION_EXPIRED (login required — form closed to expose page)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
+      }
 
       // Deactivated — listing vanished during submission
       if (/nicht mehr verfügbar|Anzeige.{0,20}nicht gefunden|wurde deaktiviert|wurde bereits vergeben|ist bereits vergeben/i.test(state.errorText || '')) {
@@ -536,7 +854,7 @@ export class IS24Contactor {
         captchaStats.attempts = captchaRetries;
         const solved = await this._solveCaptcha(captchaStats);
         if (solved) {
-          deadline = Date.now() + 5_000;
+          deadline = Date.now() + verifyDeadlineMs;
           deadlineExtended = true;
           await jitter(800, 1500);
           continue;
@@ -548,13 +866,14 @@ export class IS24Contactor {
 
       if (state.serverError) {
         if (state.premium && state.formGone) return { verified: false, detail: 'premium upsell (Suchen+)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
-        if (state.formGone) return { verified: false, detail: `server error (account blocked?): ${state.errorText || 'unknown'}`, captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
-        serverRetries++;
-        await jitter(2000, 4000);
-        continue;
+        if (state.formGone) return { verified: false, detail: `premium (IS24 generic submit error after closing form): ${state.errorText || 'unknown'}`, captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
+
+        // Generic "Es ist ein Fehler aufgetreten" means premium — no retries
+        return { verified: false, detail: `premium (IS24 generic submit error): ${state.errorText || 'unknown'}`, captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
       }
 
       if (state.hasErrors || state.validationText) {
+        sawValidation = true;
         // IS24 often flashes validation highlights during async submission.
         // Don't bail — the form may have submitted successfully despite transient errors.
         // Wait and re-check; only fail if errors persist and form is still present at deadline.
@@ -563,22 +882,51 @@ export class IS24Contactor {
       }
 
       if (state.formGone) {
-        await jitter(1200, 1800);
-        continue;
+        return { verified: false, detail: 'SUBMIT_UNCONFIRMED (form closed without confirmation)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
       }
 
       await jitter(800, 1200);
     }
 
-    // Deadline fallback
-    const formGone = await this.page.evaluate(() => !document.querySelector('textarea[name="message"]'));
-    const bodyText = await this.page.evaluate(() => document.body?.innerText || '');
-    const isPremium = IS24Contactor.PREMIUM_RE.test(bodyText);
-    const isServerError = /Es ist ein Fehler aufgetreten/i.test(bodyText);
+    // Deadline fallback — form is gone only when both optional textarea AND submit button vanished.
+    const fallbackState = await this.page.evaluate(() => {
+      const hasTextarea = !!document.querySelector('textarea[name="message"]');
+      const hasSubmit = Array.from(document.querySelectorAll('button')).some(b => /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || ''));
+      const visible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      };
+      const plusTextRe = /(MieterPlus|Mieter\+|Plus-Mitglied|Premium-Mitglied|Plus Mitgliedschaft|Suchen\+|Suchen Plus)/i;
+      const plusGateRe = /(Tarif wählen|Mitgliedschaft wählen|Jetzt Plus|Plus buchen|PLUS-Mitglied werden|zum PLUS-Mitglied|Kontakt nur|nur mit .{0,30}Plus|exklusiv .{0,30}Plus|Plus .{0,30}kontaktieren)/i;
+      const premium = Array.from(document.querySelectorAll('button, a, [role="button"], [class*="modal"], [class*="Modal"], [class*="upsell"], [class*="Upsell"], [class*="paywall"], [class*="Paywall"]'))
+        .filter(visible)
+        .some((el) => {
+          const text = el.textContent?.trim() || '';
+          return plusTextRe.test(text) && plusGateRe.test(text);
+        });
+      const allText = document.body?.innerText || '';
+      return {
+        formGone: !hasTextarea && !hasSubmit,
+        premium,
+        loggedOut: /\bAnmelden\b|Jetzt einloggen|Einloggen|Loggen Sie sich ein|Bitte melden Sie sich an/i.test(allText)
+          || Array.from(document.querySelectorAll('a, button')).some((el) => /\bAnmelden\b|Jetzt einloggen|Einloggen/i.test(el.textContent || '')),
+        successText: /Kontaktanfrage.{0,80}(gesendet|verschickt|erfolgreich)|Nachricht.{0,80}(gesendet|verschickt)|Vielen Dank.{0,120}(Nachricht|Kontaktanfrage)/i.test(allText),
+        serverError: /Es ist ein Fehler aufgetreten/i.test(allText),
+      };
+    });
+    const formGone = fallbackState?.formGone === true;
+    const isPremium = fallbackState?.premium === true;
+    const isServerError = fallbackState?.serverError === true;
 
+    if (fallbackState?.successText === true) return { verified: true, detail: 'confirmed (success text)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    if (formGone && fallbackState?.loggedOut === true) return { verified: false, detail: 'SESSION_EXPIRED (login required — form closed to expose page)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (formGone && isPremium) return { verified: false, detail: 'premium upsell (Suchen+)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
-    if (formGone) return { verified: true, detail: 'form removed (modal dismissed)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
-    if (isServerError && !formGone) return { verified: false, detail: 'server error (premium gate?)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    if (formGone) return { verified: false, detail: 'SUBMIT_UNCONFIRMED (form closed without confirmation)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    if (isServerError && !formGone) return { verified: false, detail: 'premium (IS24 generic submit error)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    if (sawValidation) return { verified: false, detail: 'validation errors persisted', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     return { verified: false, detail: 'no confirmation after 5s', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
   }
 

@@ -74,7 +74,6 @@ chrome:
 
 polling:
   interval_seconds: 60
-  max_sends_per_run: 15
 
 speed: "fast"
 

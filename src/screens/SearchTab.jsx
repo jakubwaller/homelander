@@ -4,7 +4,6 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from '../stores/appStore';
 import FilterCard from '../components/FilterCard';
 import ActivityFeed from '../components/ActivityFeed';
-import StatusDot from '../components/StatusDot';
 
 export default function SearchTab() {
   // ── Store ──────────────────────────────────────────────────────
@@ -12,8 +11,6 @@ export default function SearchTab() {
   const setFilters = useStore((s) => s.setFilters);
   const stats = useStore((s) => s.stats);
   const setStats = useStore((s) => s.setStats);
-  const daemonStatus = useStore((s) => s.daemonStatus);
-  const setDaemonStatus = useStore((s) => s.setDaemonStatus);
   const pollErrors = useStore((s) => s.pollErrors);
   const setPollError = useStore((s) => s.setPollError);
   const clearPollError = useStore((s) => s.clearPollError);
@@ -22,6 +19,37 @@ export default function SearchTab() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const normalizeStats = useCallback((fresh) => {
+    if (!fresh) return fresh;
+    // getStats() returns all-time counters as { total, seen_unapplied, ... }.
+    // The dashboard renders queue-style Processed X/Y, so expose a stable
+    // `seen` denominator for both all-time and live daemon/today payloads.
+    if (fresh.total != null) {
+      return {
+        seen: (fresh.total || 0) + (fresh.seen_unapplied || 0),
+        sent: fresh.sent || 0,
+        failed: fresh.failed || 0,
+        deactivated: fresh.deactivated || 0,
+        premium: fresh.premium || 0,
+        captcha: fresh.captcha || 0,
+        seen_unapplied: fresh.seen_unapplied || 0,
+        today: fresh.today || 0,
+        nextPollAt: fresh.nextPollAt || null,
+      };
+    }
+    return {
+      seen: fresh.seen || 0,
+      sent: fresh.sent || 0,
+      failed: fresh.failed || 0,
+      deactivated: fresh.deactivated || 0,
+      premium: fresh.premium || 0,
+      captcha: fresh.captcha || 0,
+      seen_unapplied: fresh.seen_unapplied || 0,
+      today: fresh.today || 0,
+      nextPollAt: fresh.nextPollAt || null,
+    };
+  }, []);
 
   // ── Load filters on mount ──────────────────────────────────────
   const loadFilters = useCallback(async () => {
@@ -50,7 +78,7 @@ export default function SearchTab() {
     loadFilters();
   }, [loadFilters]);
 
-  // Also load today stats and filters on mount, then every 30s
+  // Load today's stats and filters on mount, then every 30s.
   useEffect(() => {
     async function refresh() {
       if (!window.homelander) return;
@@ -59,7 +87,7 @@ export default function SearchTab() {
         window.homelander.getFilters(),
       ]);
       if (!statsErr && fresh) {
-        setStats(fresh);
+        setStats(normalizeStats(fresh));
         for (const f of (freshFilters || filters)) clearPollError(f.id);
       }
       if (!filtErr && freshFilters) setFilters(freshFilters);
@@ -67,7 +95,7 @@ export default function SearchTab() {
     refresh();
     const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
-  }, [setStats, setFilters, filters, clearPollError]);
+  }, [setStats, setFilters, filters, clearPollError, normalizeStats]);
 
   // ── Filter actions ─────────────────────────────────────────────
   const handleAddFilter = useCallback(async (webUrl, name) => {
@@ -124,43 +152,56 @@ export default function SearchTab() {
     }
   }, [filters, setFilters, clearPollError]);
 
-  // ── Daemon controls ────────────────────────────────────────────
-  const handleToggleDaemon = useCallback(async () => {
-    if (!window.homelander) return;
+  const handlePollNow = useCallback(async (id) => {
+    if (!window.homelander) return { error: 'Homelander API unavailable' };
     try {
-      if (daemonStatus === 'stopped') {
-        const { status } = await window.homelander.startDaemon();
-        setDaemonStatus(status || 'running');
-      } else if (daemonStatus === 'running') {
-        const { status } = await window.homelander.pauseDaemon();
-        setDaemonStatus(status || 'paused');
-      } else if (daemonStatus === 'paused') {
-        const { status } = await window.homelander.resumeDaemon();
-        setDaemonStatus(status || 'running');
+      const result = await window.homelander.pollNow(id);
+      if (!result?.ok) {
+        const msg = result?.error || 'Poll failed';
+        setPollError(id, msg);
+        return { ...result, error: msg };
       }
-      setError(null);
+      clearPollError(id);
+      const [{ filters: freshFilters }, { stats: freshStats }] = await Promise.all([
+        window.homelander.getFilters(),
+        window.homelander.getTodayStats(),
+      ]);
+      if (freshFilters) setFilters(freshFilters);
+      if (freshStats) setStats(normalizeStats(freshStats));
+      return result;
     } catch (err) {
-      setError(err.message || 'Daemon action failed');
+      const msg = err.message || 'Poll failed';
+      setPollError(id, msg);
+      return { error: msg };
     }
-  }, [daemonStatus, setDaemonStatus]);
+  }, [setFilters, setStats, setPollError, clearPollError, normalizeStats]);
 
-  const handleStopDaemon = useCallback(async () => {
-    if (!window.homelander) return;
-    try {
-      const { status } = await window.homelander.stopDaemon();
-      setDaemonStatus(status || 'stopped');
-      setError(null);
-    } catch (err) {
-      setError(err.message || 'Failed to stop daemon');
+  // ── Countdown for next auto-poll ──────────────────────────────
+  const [nextPollCountdown, setNextPollCountdown] = useState('');
+
+  // ── Config-applied flash ─────────────────────────────────────
+  useEffect(() => {
+    const handler = () => {
+      setConfigAppliedFlash(true);
+      setTimeout(() => setConfigAppliedFlash(false), 2000);
+    };
+    window.addEventListener('homelander:config-applied', handler);
+    return () => window.removeEventListener('homelander:config-applied', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!stats.nextPollAt) { setNextPollCountdown(''); return; }
+    function tick() {
+      const diff = new Date(stats.nextPollAt) - Date.now();
+      if (diff <= 0) return setNextPollCountdown('any moment');
+      const m = Math.floor(diff / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      setNextPollCountdown(`${m}m ${s}s`);
     }
-  }, [setDaemonStatus]);
-
-  // ── Daemon control label ───────────────────────────────────────
-  const daemonLabel = daemonStatus === 'stopped'
-    ? '▶ Start'
-    : daemonStatus === 'running'
-    ? '⏸ Pause'
-    : '▶ Resume';
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [stats.nextPollAt]);
 
   // ── Stat badge helper ──────────────────────────────────────────
   const StatBadge = ({ label, value, color }) => (
@@ -180,44 +221,17 @@ export default function SearchTab() {
   // ── Render ─────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-6">
-      {/* ── Stats row (today) ──────────────────────────────────── */}
-      <div className="flex items-center gap-3 flex-wrap">
+      {/* ── Stats row ──────────────────────────────────────────── */}
+      <div className="flex items-center gap-3 flex-wrap mt-2">
         <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Today</span>
         <StatBadge label="Processed" value={`${(stats.sent + stats.failed + (stats.deactivated || 0))}/${stats.seen}`} color="var(--accent)" />
         <StatBadge label="Sent" value={stats.sent} color="var(--success)" />
         <StatBadge label="Failed" value={stats.failed} color="var(--danger)" />
         <StatBadge label="Deactivated" value={stats.deactivated || 0} color="var(--text-muted)" />
+        <StatBadge label="Premium" value={stats.premium || 0} color="#a855f7" />
+        <StatBadge label="Captcha" value={stats.captcha || 0} color="#f59e0b" />
 
-        {/* Global daemon controls */}
-        <div className="flex items-center gap-2 ml-auto">
-          <StatusDot status={daemonStatus} />
-          <span
-            className="text-xs font-medium"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            {daemonStatus === 'running'
-              ? 'Active'
-              : daemonStatus === 'paused'
-              ? 'Paused'
-              : 'Stopped'}
-          </span>
-          <button
-            className="btn btn-primary text-xs px-3 py-1.5"
-            onClick={handleToggleDaemon}
-          >
-            {daemonLabel}
-          </button>
-          {daemonStatus !== 'stopped' && (
-            <button
-              className="btn btn-ghost text-xs px-3 py-1.5"
-              onClick={handleStopDaemon}
-              style={{ color: 'var(--danger)' }}
-            >
-              ⏹ Stop
-            </button>
-          )}
         </div>
-      </div>
 
       {/* ── Error banner ──────────────────────────────────────── */}
       {error && (
@@ -243,9 +257,16 @@ export default function SearchTab() {
       {/* ── Your searches ─────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
-            Your searches
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
+              Your searches
+            </h2>
+            {nextPollCountdown && (
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                · Next poll in {nextPollCountdown}
+              </span>
+            )}
+          </div>
           <button
             className="btn btn-primary text-sm"
             onClick={() => setShowAddDialog(true)}
@@ -283,8 +304,8 @@ export default function SearchTab() {
                 filter={filter}
                 onPause={handlePauseFilter}
                 onRemove={handleRemoveFilter}
+                onPollNow={handlePollNow}
                 pollError={pollErrors[filter.id] || null}
-                nextPollAt={stats.nextPollAt || null}
               />
             ))}
           </div>

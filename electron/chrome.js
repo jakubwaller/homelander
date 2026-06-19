@@ -238,40 +238,87 @@ export class ChromeManager {
    * @returns {Promise<{loggedIn: boolean, cookies: string[]}>}
    */
   async checkIs24Login() {
+    let browser = null;
     try {
+      // Verify CDP is reachable
       const versionResp = await fetch(`http://localhost:${CDP_PORT}/json/version`);
       if (!versionResp.ok) return { loggedIn: false, cookies: [] };
       const { webSocketDebuggerUrl } = await versionResp.json();
       if (!webSocketDebuggerUrl) return { loggedIn: false, cookies: [] };
 
-      // Connect to any open page or create one
-      const pagesResp = await fetch(`http://localhost:${CDP_PORT}/json/list`);
-      const pages = await pagesResp.json();
-      const page = pages.find(p => p.type === 'page' && p.url.includes('immobilienscout24'));
-      
-      if (!page) {
-        // No IS24 page open — can't check cookies without a page on the domain
-        return { loggedIn: false, cookies: [] };
+      // Connect via Puppeteer
+      browser = await puppeteer.connect({
+        browserURL: `http://localhost:${CDP_PORT}`,
+        defaultViewport: null,
+      });
+
+      const pages = await browser.pages();
+      const is24Page = pages.find(p => {
+        try { return p.url().includes('immobilienscout24'); } catch { return false; }
+      });
+
+      if (!is24Page) return { loggedIn: false, cookies: [] };
+
+      // Strategy 1: CDP Network.getCookies (reads HttpOnly cookies that document.cookie misses)
+      let cdpCookies = [];
+      let hasSessionCookie = false;
+      try {
+        const cdpSession = await is24Page.createCDPSession();
+        const result = await cdpSession.send('Network.getCookies', {
+          urls: ['https://www.immobilienscout24.de/'],
+        });
+        cdpCookies = result.cookies || [];
+        await cdpSession.detach();
+
+        // IS24 auth cookies typically have long values; tracking/cookie-consent cookies are short
+        hasSessionCookie = cdpCookies.some(c =>
+          (c.name.length > 3 && c.value.length > 20) ||
+          /(is24|session|sso|login|auth|token|remember)/i.test(c.name)
+        );
+      } catch {}
+
+      // Strategy 2: Hidden tab — navigate to Mein Konto, check for redirect
+      let navigatedOk = false;
+      let hiddenPage = null;
+      try {
+        hiddenPage = await browser.newPage();
+        const resp = await hiddenPage.goto('https://www.immobilienscout24.de/meinkonto', {
+          waitUntil: 'domcontentloaded',
+          timeout: 8000,
+        });
+        const finalUrl = hiddenPage.url();
+        // If we stayed on /meinkonto (or /mein-konto etc.), user is logged in.
+        // If redirected to /login, /anmelden, or the homepage, user is NOT logged in.
+        navigatedOk = (
+          resp && resp.ok() &&
+          /mein.?konto/i.test(finalUrl) &&
+          !/(\/login|\/anmelden)/i.test(finalUrl)
+        );
+      } catch {} finally {
+        if (hiddenPage) {
+          try { await hiddenPage.close(); } catch {}
+        }
       }
 
-      // Use fetch to send CDP command to get cookies for IS24 domain
-      const cdpResp = await fetch(
-        `http://localhost:${CDP_PORT}/json/protocol`,
-        { method: 'GET' }
-      );
+      // Strategy 3: DOM check on the visible IS24 page
+      const domLoggedIn = await is24Page.evaluate(() => {
+        const hasMeinKonto = Array.from(document.querySelectorAll('a, button, [role="link"]'))
+          .some(el => /Mein\s*Konto/i.test(el.textContent || ''));
+        const hasAnmelden = Array.from(document.querySelectorAll('a, button'))
+          .some(el => /\bAnmelden\b/i.test(el.textContent || ''));
+        const isLoginPage = /(\/login|\/anmelden)/i.test(window.location.pathname);
+        return hasMeinKonto && !hasAnmelden && !isLoginPage;
+      });
 
-      // Use CDP to evaluate JS in the IS24 page to check auth state
-      // Connect via WebSocket-like REST endpoint
-      const wsUrl = page.webSocketDebuggerUrl;
-      // Since we can't do WebSocket from Node easily here, use a simpler check:
-      // Just verify the page title doesn't say "Anmelden" (login page)
-      if (page.title && /Anmelden|Login|Registrieren/i.test(page.title)) {
-        return { loggedIn: false, cookies: [] };
-      }
+      // Logged in = CDP session cookie present OR hidden tab stayed on mein konto OR DOM shows logged in
+      const loggedIn = hasSessionCookie || navigatedOk || domLoggedIn;
 
-      // If the page loaded and doesn't show login, assume logged in
-      return { loggedIn: true, cookies: ['session_present'] };
+      await browser.disconnect();
+      return { loggedIn, cookies: loggedIn ? ['session_present'] : [] };
     } catch (err) {
+      if (browser) {
+        try { await browser.disconnect(); } catch {}
+      }
       return { loggedIn: false, cookies: [], error: err.message };
     }
   }
