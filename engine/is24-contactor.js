@@ -482,6 +482,26 @@ export class IS24Contactor {
       await jitter(...this.t.anredeJitter);
     }
 
+    // Fill pet details when haustiere is "Ja"
+    if (this.contact.haustiere === 'Ja' && this.contact.haustiere_zusatz) {
+      const petSel = 'input[name="petsInHousehold"]';
+      const petExists = await this.page.evaluate((s) => !!document.querySelector(s), petSel);
+      if (petExists) {
+        process.stderr.write(`[contactor] Filling petsInHousehold: "${this.contact.haustiere_zusatz}"\n`);
+        await this.page.evaluate((s) => document.querySelector(s)?.focus(), petSel);
+        await jitter(100, 200);
+        await this.page.evaluate(({ s, v }) => {
+          const el = document.querySelector(s);
+          if (!el) return;
+          const ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          ns.call(el, v);
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, { s: petSel, v: this.contact.haustiere_zusatz });
+        await jitter(...this.t.postTypeJitter);
+      }
+    }
+
     // Fill move-in date when einzug is "genaues Datum"
     if (this.contact.einzug === 'genaues Datum' && this.contact.einzug_datum) {
       const dateSelector = 'input#moveInDate';

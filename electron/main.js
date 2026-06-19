@@ -91,6 +91,7 @@ function getDefaultConfig() {
       einzug: '',
       personen: '',
       haustiere: '',
+      haustiere_zusatz: '',
       beschaeftigung: '',
       einkommen: '',
       unterlagen: '',

@@ -156,6 +156,7 @@ async function applyOne(listing, filterId, db) {
       title: listing.title,
       price: listing.price,
       address: listing.address,
+      imageUrl: listing.image_url,
       detail: 'dry run — not sent',
     });
     return;
@@ -181,6 +182,7 @@ async function applyOne(listing, filterId, db) {
         title: listing.title,
         price: listing.price,
         address: listing.address,
+        imageUrl: listing.image_url,
         detail: result.detail || '',
         failureReason,
       });
@@ -223,6 +225,7 @@ async function applyOne(listing, filterId, db) {
         title: listing.title,
         price: listing.price,
         address: listing.address,
+        imageUrl: listing.image_url,
         detail: reason,
         failureReason,
       });
@@ -238,6 +241,7 @@ async function applyOne(listing, filterId, db) {
       title: listing.title,
       price: listing.price,
       address: listing.address,
+      imageUrl: listing.image_url,
       detail: `ERROR: ${err.message}`,
     });
   }

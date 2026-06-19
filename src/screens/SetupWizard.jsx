@@ -174,6 +174,7 @@ export default function SetupWizard({ onComplete }) {
         if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push('Einzug Datum is required');
         if (!p.personen?.trim()) errors.push('Personen is required');
         if (!p.haustiere?.trim()) errors.push('Haustiere is required');
+        if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push('Anzahl und Tierart is required');
         if (!p.beschaeftigung?.trim()) errors.push('Beschäftigung is required');
         if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
         if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
@@ -444,6 +445,15 @@ export default function SetupWizard({ onComplete }) {
                   <option value="">—</option>
                   {HAUSTIERE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
+                {persona.haustiere === 'Ja' && (
+                  <input
+                    className="input mt-2"
+                    type="text"
+                    placeholder="Anzahl und Tierart"
+                    value={persona.haustiere_zusatz || ''}
+                    onChange={(e) => updatePersona('haustiere_zusatz', e.target.value)}
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Beschäftigung</label>

@@ -78,7 +78,7 @@ function listingBadges(listing) {
 
 // ── Entry Row ────────────────────────────────────────────────────────────────
 
-function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcomeFilter }) {
+function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcomeFilter, onImageHover, onImageMove, onImageLeave }) {
   const [copied, setCopied] = useState(null);
   const [requeued, setRequeued] = useState(false);
 
@@ -122,6 +122,22 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcom
     >
       {/* Summary row */}
       <div className="flex items-center gap-3 px-3 py-2.5">
+        {/* Thumbnail */}
+        {listing.image_url && (
+          <img
+            src={listing.image_url}
+            alt=""
+            className="flex-shrink-0 rounded object-cover"
+            style={{ width: 40, height: 40 }}
+            loading="lazy"
+            onMouseEnter={(e) => {
+              onImageHover?.(listing.image_url);
+              onImageMove?.({ x: e.clientX, y: e.clientY });
+            }}
+            onMouseMove={(e) => onImageMove?.({ x: e.clientX, y: e.clientY })}
+            onMouseLeave={() => onImageLeave?.()}
+          />
+        )}
         {/* Status icon */}
         <span
           className={`flex-shrink-0 w-5 text-center ${isDeactivated ? 'text-base' : 'text-sm'}`}
@@ -308,6 +324,8 @@ export default function HistoryTab() {
   const [retrying, setRetrying] = useState(new Set());
   const sentinelRef = useRef(null);
   const fetchListingsRef = useRef(null);
+  const [hoveredImage, setHoveredImage] = useState(null);
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
 
   // ── Load stats (optionally filtered by search) ─────────────────────────────
   const loadStats = useCallback((forFilterId) => {
@@ -637,6 +655,9 @@ export default function HistoryTab() {
                       onRetry={handleRetry}
                       retrying={retrying}
                       outcomeFilter={outcomeFilter}
+                      onImageHover={setHoveredImage}
+                      onImageMove={setHoverPos}
+                      onImageLeave={() => setHoveredImage(null)}
                     />
                   ))}
                 </div>
@@ -665,6 +686,24 @@ export default function HistoryTab() {
           </div>
         )}
       </div>
+
+      {/* Hover preview */}
+      {hoveredImage && (
+        <div
+          className="fixed pointer-events-none z-50"
+          style={{
+            left: hoverPos.x + 16,
+            top: hoverPos.y - 80,
+          }}
+        >
+          <img
+            src={hoveredImage}
+            alt="Preview"
+            className="rounded shadow-lg object-cover"
+            style={{ width: 360, height: 270 }}
+          />
+        </div>
+      )}
     </div>
   );
 }

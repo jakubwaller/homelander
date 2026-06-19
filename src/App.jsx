@@ -80,6 +80,7 @@ export default function App() {
               detail: item.detail,
               failureReason: item.failure_reason || item.failureReason,
               time: item.sent_at,
+              imageUrl: item.image_url,
             });
           }
         }
@@ -118,6 +119,7 @@ export default function App() {
         detail: data.detail,
         failureReason: data.failureReason,
         time: new Date().toISOString(),
+        imageUrl: data.imageUrl,
       });
     }));
 

@@ -28,6 +28,8 @@ export default function ActivityFeed() {
   const [retrying, setRetrying] = useState(new Set());
   const [copied, setCopied] = useState(null);
   const [requeued, setRequeued] = useState(new Set());
+  const [hoveredImage, setHoveredImage] = useState(null);
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
 
   // Listen for daemon retry_queued events
   useEffect(() => {
@@ -109,6 +111,22 @@ export default function ActivityFeed() {
           >
             {/* Summary row */}
             <div className="flex items-center gap-3 px-3 py-2">
+              {/* Thumbnail */}
+              {item.imageUrl && (
+                <img
+                  src={item.imageUrl}
+                  alt=""
+                  className="flex-shrink-0 rounded object-cover"
+                  style={{ width: 40, height: 40 }}
+                  loading="lazy"
+                  onMouseEnter={(e) => {
+                    setHoveredImage(item.imageUrl);
+                    setHoverPos({ x: e.clientX, y: e.clientY });
+                  }}
+                  onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
+                  onMouseLeave={() => setHoveredImage(null)}
+                />
+              )}
               {/* Status icon */}
               <span className={`flex-shrink-0 w-5 text-center ${isDeactivated ? 'text-base' : 'text-sm'}`} style={{ color: statusColor }}>
                 {statusIcon}
@@ -241,6 +259,24 @@ export default function ActivityFeed() {
           </div>
         );
       })}
+
+      {/* Hover preview */}
+      {hoveredImage && (
+        <div
+          className="fixed pointer-events-none z-50"
+          style={{
+            left: hoverPos.x + 16,
+            top: hoverPos.y - 80,
+          }}
+        >
+          <img
+            src={hoveredImage}
+            alt="Preview"
+            className="rounded shadow-lg object-cover"
+            style={{ width: 360, height: 270 }}
+          />
+        </div>
+      )}
     </div>
   );
 }

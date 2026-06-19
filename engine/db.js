@@ -284,7 +284,7 @@ export class HomelanderDB {
 
   getRecentActivity(limit = 50) {
     return this.db.prepare(`
-      SELECT hash, expose_id, title, price, address, outcome, failure_reason, detail, sent_at
+      SELECT hash, expose_id, title, price, address, outcome, failure_reason, detail, sent_at, image_url
       FROM listings
       WHERE outcome IS NOT NULL
       ORDER BY COALESCE(sent_at, discovered_at) DESC, rowid DESC

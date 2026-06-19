@@ -95,6 +95,7 @@ export default function SettingsTab() {
       einzug_datum: p.einzug_datum || '',
       personen: p.personen ?? '',
       haustiere: p.haustiere ?? '',
+      haustiere_zusatz: p.haustiere_zusatz || '',
       beschaeftigung: p.beschaeftigung || '',
       einkommen: p.einkommen ?? '',
       unterlagen: p.unterlagen ?? '',
@@ -182,6 +183,7 @@ export default function SettingsTab() {
     if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push('Einzug Datum is required');
     if (!p.personen?.trim()) errors.push('Personen is required');
     if (!p.haustiere?.trim()) errors.push('Haustiere is required');
+    if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push('Anzahl und Tierart is required');
     if (!p.beschaeftigung?.trim()) errors.push('Beschäftigung is required');
     if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
     if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
@@ -357,6 +359,15 @@ export default function SettingsTab() {
                 <select className="select text-sm" value={personaDraft.haustiere} onChange={(e) => updatePersonaField('haustiere', e.target.value)}>
                   {IS24_PETS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
+                {personaDraft.haustiere === 'Ja' && (
+                  <input
+                    className="input mt-2 text-sm"
+                    type="text"
+                    placeholder="Anzahl und Tierart"
+                    value={personaDraft.haustiere_zusatz}
+                    onChange={(e) => updatePersonaField('haustiere_zusatz', e.target.value)}
+                  />
+                )}
               </div>
               <div>
                 <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Beschäftigung</label>
