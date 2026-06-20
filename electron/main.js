@@ -878,10 +878,25 @@ function registerIpcHandlers() {
       const { HomelanderDB } = await import('../engine/db.js');
       const db = new HomelanderDB(DB_PATH);
       const stats = db.getTodayStats(filterId || null);
+      // Same nextPollAt computation as listings:stats — so the dashboard countdown works.
+      let nextPollAt = null;
+      if (daemonProcess && daemonStatus !== 'stopped') {
+        try {
+          const filters = db.getFilters();
+          const pollIntervalMs = (config.polling?.interval_seconds || 120) * 1000;
+          const lastPoll = filters.reduce((max, f) => {
+            const t = f.last_polled_at ? new Date(f.last_polled_at).getTime() : 0;
+            return t > max ? t : max;
+          }, 0);
+          if (lastPoll > 0) {
+            nextPollAt = new Date(lastPoll + pollIntervalMs).toISOString();
+          }
+        } catch {}
+      }
       db.close();
-      return { stats, error: null };
+      return { stats: { ...stats, nextPollAt }, error: null };
     } catch (err) {
-      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0 }, ...gracefulFailure('listings:todayStats', err, { code: 'DATABASE_ERROR' }) };
+      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, ...gracefulFailure('listings:todayStats', err, { code: 'DATABASE_ERROR' }) };
     }
   });
 
