@@ -23,7 +23,7 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
 
       - name: Install setuptools (for node-gyp on Python 3.12+)
-        run: pip3 install setuptools
+        run: pip3 install --break-system-packages setuptools
 
       - name: Test
         run: npm test
