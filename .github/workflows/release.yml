@@ -46,9 +46,17 @@ jobs:
 
       - name: Install
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
-        run: npm ci
+        run: npm ci --ignore-scripts
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: Rebuild native modules for Electron
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
+        run: npm run rebuild:electron
+
+      - name: Verify native module arch
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
+        run: file node_modules/better-sqlite3/build/Release/better_sqlite3.node
 
       - name: Build
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
