@@ -3,6 +3,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useStore } from '../stores/appStore';
+import { userErrorText } from '../shared/userErrors';
 
 function formatTime(iso) {
   if (!iso) return '';
@@ -26,6 +27,7 @@ export default function ActivityFeed() {
   const activity = useStore((s) => s.activity);
   const [expanded, setExpanded] = useState(new Set());
   const [retrying, setRetrying] = useState(new Set());
+  const [supportBusyId, setSupportBusyId] = useState(null);
   const [copied, setCopied] = useState(null);
   const [requeued, setRequeued] = useState(new Set());
   const [hoveredImage, setHoveredImage] = useState(null);
@@ -80,6 +82,27 @@ export default function ActivityFeed() {
     setTimeout(() => setCopied(null), 1500);
   }, []);
 
+  const handleSupportBundle = useCallback(async (item, exposeId) => {
+    if (!window.homelander?.createSupportBundle || !exposeId) return;
+    setSupportBusyId(exposeId);
+    try {
+      await window.homelander.createSupportBundle({
+        scope: 'entry',
+        listing: {
+          expose_id: exposeId,
+          title: item.title,
+          address: item.address,
+          outcome: item.outcome,
+          detail: item.detail,
+          failure_reason: item.failureReason || item.failure_reason,
+          sent_at: item.time,
+          image_url: item.imageUrl,
+        },
+      });
+    } catch {}
+    setTimeout(() => setSupportBusyId(null), 1500);
+  }, []);
+
   if (activity.length === 0) {
     return (
       <div className="py-8 text-center" style={{ color: 'var(--text-muted)' }}>
@@ -105,6 +128,7 @@ export default function ActivityFeed() {
           || failureReason.toLowerCase().includes('premium');
         const isCaptcha = (item.detail || '').toLowerCase().includes('captcha')
           || failureReason.toLowerCase().includes('captcha');
+        const safeDetail = item.detail ? userErrorText(item.detail, { operation: 'listing apply' }) : '';
         const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : 'var(--danger)';
         const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : '✗';
         const outcomeLabel = isSent ? 'Sent' : isDeactivated ? 'Deactivated' : 'Failed';
@@ -119,19 +143,32 @@ export default function ActivityFeed() {
             <div className="flex items-center gap-3 px-3 py-2">
               {/* Thumbnail */}
               {item.imageUrl && (
-                <img
-                  src={item.imageUrl}
-                  alt=""
-                  className="flex-shrink-0 rounded object-cover"
-                  style={{ width: 40, height: 40 }}
-                  loading="lazy"
-                  onMouseEnter={(e) => {
-                    setHoveredImage(item.imageUrl);
-                    setHoverPos({ x: e.clientX, y: e.clientY });
-                  }}
-                  onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
-                  onMouseLeave={() => setHoveredImage(null)}
-                />
+                <div className="relative flex-shrink-0" style={{ width: 40, height: 40 }}>
+                  <img
+                    src={item.imageUrl}
+                    alt=""
+                    className="rounded object-cover bg-gray-700"
+                    style={{ width: 40, height: 40 }}
+                    loading="lazy"
+                    onError={(e) => {
+                      e.currentTarget.style.display = 'none';
+                      const fb = e.currentTarget.nextElementSibling;
+                      if (fb) fb.style.display = 'flex';
+                    }}
+                    onMouseEnter={(e) => {
+                      setHoveredImage(item.imageUrl);
+                      setHoverPos({ x: e.clientX, y: e.clientY });
+                    }}
+                    onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
+                    onMouseLeave={() => setHoveredImage(null)}
+                  />
+                  <div
+                    className="absolute inset-0 rounded bg-gray-700 items-center justify-center text-gray-500 text-xs font-medium"
+                    style={{ display: 'none' }}
+                  >
+                    {(item.title || '?')[0]}
+                  </div>
+                </div>
               )}
               {/* Status icon */}
               <span className={`flex-shrink-0 w-5 text-center ${isDeactivated ? 'text-base' : 'text-sm'}`} style={{ color: statusColor }}>
@@ -164,19 +201,16 @@ export default function ActivityFeed() {
                 )}
               </div>
 
-              {/* External link */}
+              {/* Open in controlled Chromium */}
               {exposeId && (
-                <a
-                  href={`https://www.immobilienscout24.de/expose/${exposeId}`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
                   className="flex-shrink-0"
-                  style={{ color: 'var(--accent)', fontSize: '16px' }}
-                  onClick={(e) => e.stopPropagation()}
-                  title="Open on ImmobilienScout24"
+                  style={{ color: 'var(--accent)', fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  onClick={(e) => { e.stopPropagation(); window.homelander?.openListingInChrome?.(exposeId); }}
+                  title="Open in Homelander Chromium"
                 >
                   ↗
-                </a>
+                </button>
               )}
 
               {/* Retry button (visible on summary row for quick access) */}
@@ -243,20 +277,36 @@ export default function ActivityFeed() {
                     </div>
                   )}
 
-                  {item.detail && (
+                  {safeDetail && (
                     <div className="col-span-2 mt-1">
                       <span style={{ color: 'var(--text-muted)' }}>Detail: </span>
                       <p
                         className="mt-0.5 p-2 rounded text-xs whitespace-pre-wrap"
                         style={{
                           background: 'var(--bg-secondary)',
-                          color: copied === item.detail ? 'var(--success)' : 'var(--text-secondary)',
+                          color: copied === safeDetail ? 'var(--success)' : 'var(--text-secondary)',
                           border: '1px solid var(--border)',
                           cursor: 'pointer',
                         }}
-                        onClick={(e) => { e.stopPropagation(); handleCopy(item.detail); }}
+                        onClick={(e) => { e.stopPropagation(); handleCopy(safeDetail); }}
                         title="Click to copy"
-                      >{item.detail}</p>
+                      >{safeDetail}</p>
+                    </div>
+                  )}
+
+                  {exposeId && (
+                    <div className="col-span-2">
+                      <button
+                        className="btn btn-ghost text-xs"
+                        style={{ color: supportBusyId === exposeId ? 'var(--success)' : 'var(--accent)', padding: '3px 8px' }}
+                        onClick={(e) => { e.stopPropagation(); if (supportBusyId !== exposeId) handleSupportBundle(item, exposeId); }}
+                        disabled={supportBusyId === exposeId}
+                      >
+                        {supportBusyId === exposeId ? '✓ Debug bundle exported' : '📦 Export Debug Bundle'}
+                      </button>
+                      <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                        screenshot + HTML + entry logs
+                      </span>
                     </div>
                   )}
                 </div>
@@ -296,11 +346,13 @@ export default function ActivityFeed() {
           <img
             src={hoveredImage}
             alt="Preview"
-            className="rounded shadow-lg object-cover"
+            className="rounded shadow-lg object-cover bg-gray-700"
             style={{ width: 360, height: 270 }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
         </div>
       )}
     </div>
   );
 }
+

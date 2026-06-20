@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '../stores/appStore';
 import FilterCard from '../components/FilterCard';
 import ActivityFeed from '../components/ActivityFeed';
+import { userErrorText } from '../shared/userErrors';
 
 export default function SearchTab() {
   // ── Store ──────────────────────────────────────────────────────
@@ -132,7 +133,7 @@ export default function SearchTab() {
         }
       }
     } catch (err) {
-      setError(err.message || 'Failed to load filters');
+      setError(userErrorText(err.userError || err, { operation: 'filters load' }));
     } finally {
       setLoading(false);
     }
@@ -177,7 +178,7 @@ export default function SearchTab() {
       setError(null);
       return true;
     } catch (err) {
-      setError(err.message || 'Failed to add search');
+      setError(userErrorText(err.userError || err, { operation: 'search add' }));
       return false;
     }
   }, [filters, setFilters]);
@@ -187,7 +188,7 @@ export default function SearchTab() {
     try {
       const { error: apiError } = await window.homelander.updateFilter(id, { enabled: enable });
       if (apiError) {
-        setPollError(id, apiError);
+        setPollError(id, userErrorText(apiError.userError || apiError, { operation: 'search update' }));
         return;
       }
       clearPollError(id);
@@ -196,7 +197,7 @@ export default function SearchTab() {
         f.id === id ? { ...f, enabled: enable } : f
       ));
     } catch (err) {
-      setPollError(id, err.message || 'Failed to update search');
+      setPollError(id, userErrorText(err.userError || err, { operation: 'search update' }));
     }
   }, [filters, setFilters, setPollError, clearPollError]);
 
@@ -212,16 +213,16 @@ export default function SearchTab() {
       setFilters(filters.filter((f) => f.id !== id));
       setError(null);
     } catch (err) {
-      setError(err.message || 'Failed to remove search');
+      setError(userErrorText(err.userError || err, { operation: 'search remove' }));
     }
   }, [filters, setFilters, clearPollError]);
 
   const handlePollNow = useCallback(async (id) => {
-    if (!window.homelander) return { error: 'Homelander API unavailable' };
+    if (!window.homelander) return { error: userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }) };
     try {
       const result = await window.homelander.pollNow(id);
       if (!result?.ok) {
-        const msg = result?.error || 'Poll failed';
+        const msg = userErrorText(result?.userError || result, { operation: 'poll search' });
         setPollError(id, msg);
         return { ...result, error: msg };
       }
@@ -234,7 +235,7 @@ export default function SearchTab() {
       if (freshStats) setStats(normalizeStats(freshStats));
       return result;
     } catch (err) {
-      const msg = err.message || 'Poll failed';
+      const msg = userErrorText(err.userError || err, { operation: 'poll search' });
       setPollError(id, msg);
       return { error: msg };
     }

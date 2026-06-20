@@ -12,6 +12,7 @@ import {
   IS24_INCOME,
   IS24_DOCUMENTS,
 } from '../shared/is24FormOptions';
+import { userErrorText } from '../shared/userErrors';
 
 const STEPS = [
   { id: 'persona', label: 'Persona' },
@@ -72,49 +73,6 @@ export default function SetupWizard({ onComplete }) {
     load();
   }, []);
 
-  // Poll IS24 login status when on Step 2 and Chrome is open
-  useEffect(() => {
-    if (step !== 2) return;
-    if (is24Status !== 'waiting_for_login' && is24Status !== 'launching') return;
-    if (!window.homelander) return;
-
-    let cancelled = false;
-    const poll = async () => {
-      if (cancelled) return;
-      try {
-        const status = await window.homelander.getChromeStatus();
-        if (!status.running) {
-          // Only show "closed" if Chrome was previously running (not during initial launch)
-          if (!cancelled && is24Status === 'waiting_for_login') {
-            setIs24Status('chrome_closed');
-          }
-          if (!cancelled) setTimeout(poll, 3000);
-          return;
-        }
-        const loginCheck = await window.homelander.checkIs24Login();
-        if (loginCheck.loggedIn && !cancelled) {
-          setIs24Status('logged_in');
-          // Auto-detect email
-          if (!config?.is24?.email) {
-            const emailResult = await window.homelander.getIs24Email();
-            if (emailResult.email && !cancelled) {
-              const patch = { is24: { ...config.is24, email: emailResult.email } };
-              if (!config.persona?.email) {
-                patch.persona = { ...config.persona, email: emailResult.email };
-              }
-              updateConfig(patch);
-            }
-          }
-        }
-      } catch {
-        // Chrome not reachable — will retry
-      }
-      if (!cancelled) setTimeout(poll, 3000);
-    };
-    poll();
-    return () => { cancelled = true; };
-  }, [step, is24Status]);
-
   const updateConfig = useCallback((patch) => {
     setConfig((prev) => {
       const merged = { ...prev };
@@ -133,22 +91,9 @@ export default function SetupWizard({ onComplete }) {
     setSaving(true);
 
     try {
-      if (!window.homelander) throw new Error('App bridge not ready');
+      if (!window.homelander) throw { userError: { code: 'BACKEND_UNAVAILABLE', title: 'Backend unavailable', message: 'Homelander is still starting up. Try again in a moment.' } };
 
       let configToSave = config;
-      const applyConfigPatch = (patch) => {
-        const merged = { ...configToSave };
-        for (const [key, value] of Object.entries(patch)) {
-          if (value && typeof value === 'object' && !Array.isArray(value)) {
-            merged[key] = { ...merged[key], ...value };
-          } else {
-            merged[key] = value;
-          }
-        }
-        configToSave = merged;
-        updateConfig(patch);
-        return merged;
-      };
 
       // ── Step-specific validation ────────────────────────────
       if (step === 0) {
@@ -187,55 +132,39 @@ export default function SetupWizard({ onComplete }) {
       }
 
       if (step === 2) {
-        // IS24 login: launch Chrome if needed, then verify logged in
+        // IS24 login: do not inspect or verify the account page. IS24 login/SSO
+        // is sensitive to automation, so this step trusts the user's confirmation.
         let chromeStatus = await window.homelander.getChromeStatus();
         
         if (!chromeStatus.running) {
-          // Auto-launch Chrome for the user
+          // Auto-launch plain Chromium for the user, then stop here. The user
+          // should log in manually and click Continue only after the page shows
+          // them as logged in.
           setIs24Status('launching');
           try {
             await window.homelander.updateConfig(config);
             const result = await window.homelander.openLoginPage();
-            if (result.error) throw new Error(result.error);
+            if (result.error) throw result;
             setIs24Status('waiting_for_login');
-            // Give Chrome a moment to load IS24
-            await new Promise(r => setTimeout(r, 2000));
-            chromeStatus = await window.homelander.getChromeStatus();
-            if (!chromeStatus.running) {
-              showFeedback({ type: 'error', msg: 'Chrome failed to start. Is Google Chrome installed?' });
-              setIs24Status('chrome_error');
-              setSaving(false);
-              return;
-            }
+            showFeedback({ type: 'success', msg: 'Log in, then click Continue.' });
+            setSaving(false);
+            return;
           } catch (err) {
-            showFeedback({ type: 'error', msg: 'Could not open Chrome: ' + err.message });
+            showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }) });
             setIs24Status('chrome_error');
             setSaving(false);
             return;
           }
         }
 
-        // Check login status
-        const loginCheck = await window.homelander.checkIs24Login();
-        if (!loginCheck.loggedIn) {
-          showFeedback({ type: 'error', msg: 'Not logged into IS24 yet. A Chrome window should be open — log in there, then click Continue again.' });
-          setIs24Status('waiting_for_login');
-          setSaving(false);
-          return;
-        }
-        setIs24Status('logged_in');
-        
-        // Try to auto-detect the IS24 email from Chrome and populate both fields
-        if (!config.is24?.email) {
-          const emailResult = await window.homelander.getIs24Email();
-          if (emailResult.email) {
-            const emailPatch = { is24: { ...configToSave.is24, email: emailResult.email } };
-            // Also set persona email if not already set
-            if (!configToSave.persona?.email) {
-              emailPatch.persona = { ...configToSave.persona, email: emailResult.email };
-            }
-            applyConfigPatch(emailPatch);
-          }
+        // User clicked Continue after confirming the manual login. If this is
+        // still the plain login browser, close it and relaunch the same profile
+        // under CDP for applying. No login probes, no email scraping.
+        if (chromeStatus.manualLogin && !chromeStatus.cdpHealthy) {
+          setIs24Status('preparing');
+          const finalize = await window.homelander.finalizeManualLogin();
+          if (finalize?.error) throw finalize;
+          await new Promise(r => setTimeout(r, 800));
         }
       }
 
@@ -247,7 +176,7 @@ export default function SetupWizard({ onComplete }) {
           const validResult = await window.homelander.validateCaptchaKey(captchaKey.trim());
           setCaptchaValidating(false);
           if (!validResult.valid) {
-            showFeedback({ type: 'error', msg: `Invalid 2captcha API key: ${validResult.error}. Get a key at 2captcha.com or leave empty to skip.` });
+            showFeedback({ type: 'error', msg: userErrorText(validResult.userError || validResult, { operation: 'captcha validate' }) });
             setSaving(false);
             return;
           }
@@ -260,14 +189,14 @@ export default function SetupWizard({ onComplete }) {
         if (searchUrl.trim()) {
           const testResult = await window.homelander.testFilter(searchUrl.trim());
           if (testResult.error) {
-            showFeedback({ type: 'error', msg: `Invalid search URL: ${testResult.error}` });
+            showFeedback({ type: 'error', msg: userErrorText(testResult.userError || testResult, { operation: 'search test' }) });
             setSaving(false);
             return;
           }
           // Save the filter before completing setup so new users do not land on an empty dashboard.
           const addResult = await window.homelander.addFilter(searchUrl.trim(), '');
           if (addResult?.error) {
-            showFeedback({ type: 'error', msg: `Could not save search URL: ${addResult.error}` });
+            showFeedback({ type: 'error', msg: userErrorText(addResult.userError || addResult, { operation: 'search add' }) });
             setSaving(false);
             return;
           }
@@ -287,7 +216,7 @@ export default function SetupWizard({ onComplete }) {
         onComplete();
       }
     } catch (err) {
-      showFeedback({ type: 'error', msg: err.message });
+      showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'setup' }) });
     } finally {
       setSaving(false);
       setCaptchaValidating(false);
@@ -516,75 +445,52 @@ export default function SetupWizard({ onComplete }) {
         {step === 2 && (
           <div className="space-y-4">
             <h2 className="text-base font-semibold">IS24 Account</h2>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              IS24 blocks bots from logging in, so you must log in yourself once in Chrome.
-              After that, your login session is saved — you won't need to do this again.
-            </p>
 
-            {/* Status card */}
             <div className="card p-4">
               <div className="flex items-center gap-3">
                 <StatusIndicator status={is24Status} />
                 <div className="flex-1">
                   <p className="text-sm font-medium">
-                    {is24Status === 'pending' && 'Chrome not opened yet'}
-                    {is24Status === 'launching' && 'Starting Chrome...'}
-                    {is24Status === 'waiting_for_login' && 'Waiting for login...'}
-                    {is24Status === 'chrome_closed' && 'Chrome was closed'}
-                    {is24Status === 'chrome_error' && 'Could not open Chrome'}
-                    {is24Status === 'checking' && 'Checking login status...'}
-                    {is24Status === 'not_logged_in' && 'Not logged in yet'}
-                    {is24Status === 'logged_in' && 'Logged in ✓'}
+                    {is24Status === 'pending' && 'Open IS24'}
+                    {is24Status === 'launching' && 'Opening Chromium…'}
+                    {is24Status === 'waiting_for_login' && 'Log in, then continue'}
+                    {is24Status === 'preparing' && 'Saving session…'}
+                    {is24Status === 'chrome_closed' && 'Chromium closed'}
+                    {is24Status === 'chrome_error' && 'Could not open Chromium'}
                   </p>
-                  {is24Status === 'logged_in' && config.is24?.email ? (
-                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {config.is24.email}
-                    </p>
-                  ) : (
-                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {is24Status === 'pending' && 'Click the button below. A Chrome window will open at immobilienscout24.de.'}
-                      {is24Status === 'launching' && 'Chrome should appear on your screen momentarily.'}
-                      {is24Status === 'waiting_for_login' && 'Log in with your IS24 credentials in the Chrome window.'}
-                      {is24Status === 'chrome_closed' && 'You closed Chrome before logging in. Reopen it to try again.'}
-                      {is24Status === 'chrome_error' && 'Make sure Google Chrome is installed. Download from google.com/chrome.'}
-                      {is24Status === 'checking' && 'Verifying your IS24 session...'}
-                      {is24Status === 'not_logged_in' && "Chrome is open but we don't detect an IS24 session. Log in first."}
-                      {is24Status === 'logged_in' && ''}
-                    </p>
-                  )}
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {is24Status === 'pending' && 'Open Chromium and log in to IS24.'}
+                    {is24Status === 'launching' && 'Chromium is starting.'}
+                    {is24Status === 'waiting_for_login' && 'Only click Continue after IS24 shows you are logged in.'}
+                    {is24Status === 'preparing' && 'Keeping this login for future applications.'}
+                    {is24Status === 'chrome_closed' && 'Reopen Chromium to log in.'}
+                    {is24Status === 'chrome_error' && 'Try again after Chromium is available.'}
+                  </p>
                 </div>
               </div>
             </div>
 
-            {/* Primary action button */}
             {(is24Status === 'pending' || is24Status === 'chrome_closed' || is24Status === 'chrome_error') && (
               <button
                 className="btn btn-primary w-full"
                 onClick={async () => {
                   setIs24Status('launching');
                   try {
-                    if (!window.homelander) throw new Error('App bridge not ready');
+                    if (!window.homelander) throw { userError: { code: 'BACKEND_UNAVAILABLE', title: 'Backend unavailable', message: 'Homelander is still starting up. Try again in a moment.' } };
                     await window.homelander.updateConfig(config);
                     const result = await window.homelander.openLoginPage();
-                    if (result.error) throw new Error(result.error);
+                    if (result.error) throw result;
                     setIs24Status('waiting_for_login');
                   } catch (err) {
-                    showFeedback({ type: 'error', msg: 'Could not open Chrome: ' + err.message });
+                    showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }) });
                     setIs24Status('chrome_error');
                   }
                 }}
               >
-                {is24Status === 'chrome_closed' ? '🖥 Reopen Chrome' :
+                {is24Status === 'chrome_closed' ? '🖥 Reopen Chromium' :
                  is24Status === 'chrome_error' ? '🖥 Try again' :
-                 '🖥 Open Chrome & log in to IS24'}
+                 '🖥 Open Chromium'}
               </button>
-            )}
-
-            {/* After Chrome is open: brief hint — validation happens on Continue */}
-            {(is24Status === 'waiting_for_login' || is24Status === 'not_logged_in' || is24Status === 'checking') && (
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Click Continue when you're logged in — it will verify your session.
-              </p>
             )}
           </div>
         )}
@@ -660,13 +566,10 @@ export default function SetupWizard({ onComplete }) {
 
 // Small status indicator for IS24 login state
 function StatusIndicator({ status }) {
-  if (status === 'logged_in') {
-    return <span className="status-dot active" />;
-  }
-  if (status === 'launching' || status === 'checking') {
+  if (status === 'launching' || status === 'preparing') {
     return <span className="status-dot paused" />;
   }
-  if (status === 'not_logged_in' || status === 'waiting_for_login') {
+  if (status === 'waiting_for_login') {
     return <span className="status-dot paused" style={{ opacity: 0.6 }} />;
   }
   if (status === 'chrome_closed' || status === 'chrome_error') {

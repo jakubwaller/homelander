@@ -3,6 +3,7 @@
 
 import React, { useState } from 'react';
 import StatusDot from './StatusDot';
+import { userErrorText } from '../shared/userErrors';
 
 export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollError }) {
   const [confirming, setConfirming] = useState(false);
@@ -33,7 +34,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
         setPollMessage({ type: 'muted', text: 'No new listings.' });
       }
     } catch (err) {
-      setPollMessage({ type: 'error', text: err.message || 'Poll failed' });
+      setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'poll search' }) });
     } finally {
       setPolling(false);
       setTimeout(() => setPollMessage(null), 5000);

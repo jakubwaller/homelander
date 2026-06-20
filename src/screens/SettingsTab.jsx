@@ -12,6 +12,7 @@ import {
   IS24_INCOME,
   IS24_DOCUMENTS,
 } from '../shared/is24FormOptions';
+import { userErrorText } from '../shared/userErrors';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ export default function SettingsTab() {
   const [cleanupStep, setCleanupStep] = useState(null); // null | 'confirm' | 'purging'
   const [cleanupEmail, setCleanupEmail] = useState('');
   const [cleanupError, setCleanupError] = useState(null);
+  const [supportBusy, setSupportBusy] = useState(false);
   const [feedback, setFeedback] = useState(null); // { type: 'success'|'error', msg }
   const [feedbackVisible, setFeedbackVisible] = useState(false);
 
@@ -113,41 +115,14 @@ export default function SettingsTab() {
     setCaptchaDraft(config.captcha?.api_key || '');
   }, [config]);
 
-  // Auto-detect IS24 email from Chrome if persona email is empty
-  useEffect(() => {
-    if (!config?.persona) return;
-    if (config.persona.email) return; // already set
-    if (!window.homelander) return;
-
-    let cancelled = false;
-    async function tryDetect() {
-      try {
-        const status = await window.homelander.getChromeStatus();
-        if (!status?.running) return;
-        const result = await window.homelander.getIs24Email();
-        if (result?.email && !cancelled) {
-          const fresh = await window.homelander.getConfig();
-          const patch = {
-            persona: { ...fresh.persona, email: result.email },
-            is24: { ...fresh.is24, email: result.email },
-          };
-          await window.homelander.updateConfig(patch);
-          setConfig({ ...fresh, ...patch });
-        }
-      } catch {}
-    }
-    tryDetect();
-    return () => { cancelled = true; };
-  }, [config?.persona?.email]);
-
   const save = async (patch) => {
     if (!window.homelander) {
-      showFeedback({ type: 'error', msg: 'No backend connection.' });
+      showFeedback({ type: 'error', msg: userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }) });
       return;
     }
     const res = await window.homelander.updateConfig(patch);
     if (res?.error) {
-      showFeedback({ type: 'error', msg: res.error });
+      showFeedback({ type: 'error', msg: userErrorText(res.userError || res, { operation: 'config:update' }) });
     } else {
       const fresh = await window.homelander.getConfig();
       setConfig(fresh);
@@ -200,7 +175,7 @@ export default function SettingsTab() {
   const saveTemplate = () => save({ message_template: templateDraft });
 
   // ── Timing handlers ──────────────────────────────────────────────
-
+  // ── Timing handlers ──────────────────────────────────────────────
   const updateTimingField = (field, value) => {
     setTimingDraft((prev) => ({ ...prev, [field]: value }));
   };
@@ -218,6 +193,23 @@ export default function SettingsTab() {
   // ── Captcha handler ─────────────────────────────────────────────
 
   const saveCaptcha = () => save({ captcha: { api_key: captchaDraft } });
+
+  const handleExportSupportBundle = async () => {
+    if (!window.homelander?.createSupportBundle) {
+      showFeedback({ type: 'error', msg: 'Support bundle unavailable' });
+      return;
+    }
+    setSupportBusy(true);
+    try {
+      const res = await window.homelander.createSupportBundle({ scope: 'global' });
+      if (res?.ok) showFeedback({ type: 'success', msg: `Bundle exported — path copied` });
+      else showFeedback({ type: 'error', msg: userErrorText(res?.userError || res || 'Bundle export failed', { operation: 'support bundle' }) });
+    } catch (err) {
+      showFeedback({ type: 'error', msg: userErrorText(err, { operation: 'support bundle' }) });
+    } finally {
+      setSupportBusy(false);
+    }
+  };
 
   // ── Clean All Data ──────────────────────────────────────────────
 
@@ -244,7 +236,7 @@ export default function SettingsTab() {
       const res = await window.homelander.cleanData(cleanupEmail.trim());
       if (res?.error) {
         setCleanupStep('confirm');
-        setCleanupError(res.error);
+        setCleanupError(userErrorText(res.userError || res, { operation: 'data cleanup' }));
       }
       // On success, app relaunches — no state update needed
     }
@@ -496,7 +488,30 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      {/* ── 5. Clean All Data ──────────────────────────────────── */}
+      {/* ── 5. Support Bundle ──────────────────────────────────── */}
+      <Section title="Support Bundle">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Export redacted logs, config, Chrome status, and recent debug screenshots/HTML.
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Creates a .zip in ~/.homelander/support-bundles, opens the folder, and copies the path.
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Send debug bundles to{' '}
+              <a href="#" onClick={(e) => { e.preventDefault(); window.homelander?.openExternal('mailto:fedurkomykola@gmail.com'); }} style={{ color: 'var(--accent)', textDecoration: 'none', cursor: 'pointer' }} className="hover:underline">
+                fedurkomykola@gmail.com
+              </a>
+            </p>
+          </div>
+          <button className="btn btn-primary text-xs flex-shrink-0" onClick={handleExportSupportBundle} disabled={supportBusy}>
+            {supportBusy ? 'Exporting…' : 'Export Support Bundle'}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── 6. Clean All Data ──────────────────────────────────── */}
       <div className="pt-2">
         {cleanupStep === null ? (
           <button className="btn btn-danger text-sm w-full" onClick={handleCleanData}>

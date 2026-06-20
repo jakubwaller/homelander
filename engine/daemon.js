@@ -98,9 +98,9 @@ function checkPauseFlag() {
 }
 
 /** Write the filesystem pause flag so restarts remember the pause. */
-function writePauseFlag() {
+function writePauseFlag(reason = 'manual') {
   try {
-    writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'manual' }), 'utf8');
+    writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason }), 'utf8');
   } catch (err) {
     log(`Failed to write pause flag: ${err.message}`);
   }
@@ -166,7 +166,8 @@ async function applyOne(listing, filterId, db) {
     const result = await contactor.apply(
       listing.expose_id,
       message,
-      currentConfig.captcha?.api_key || ''
+      currentConfig.captcha?.api_key || '',
+      currentConfig.browser?.max_tabs || 5
     );
 
     if (result.success) {
@@ -216,6 +217,7 @@ async function applyOne(listing, filterId, db) {
         emit({ type: 'session_expired', reason });
         applyPaused = true;
         pauseResumeTime = null;
+        writePauseFlag('session_expired');
       }
 
       emit({
@@ -497,6 +499,14 @@ function setupIpc(db) {
         mergePatch(currentConfig.captcha, msg.captcha);
         if (contactor) contactor.updateCaptcha(currentConfig.captcha);
         log('Config hot-reload: captcha config updated');
+        changed = true;
+      }
+      if (msg.browser) {
+        if (!currentConfig.browser) currentConfig.browser = {};
+        mergePatch(currentConfig.browser, msg.browser);
+        const maxTabs = Math.min(5, Math.max(1, Number(currentConfig.browser.max_tabs || 5)));
+        currentConfig.browser.max_tabs = maxTabs;
+        log(`Config hot-reload: browser config updated (max_tabs=${maxTabs})`);
         changed = true;
       }
       if (msg.poll_interval !== undefined) {

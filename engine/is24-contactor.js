@@ -1,6 +1,6 @@
 // IS24 contactor — connects to host Chrome via CDP, navigates to listings,
-// fills the contact form, and submits. Uses puppeteer-core to drive the
-// already-running host Chrome with its real profile and residential IP.
+// fills the contact form, and submits. Uses Puppeteer over CDP to drive
+// Homelander's bundled Chromium profile.
 // Debug outputs saved to debug/ (html/, screenshots/).
 
 import puppeteer from 'puppeteer';
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IS24_EXPOSE_URL = 'https://www.immobilienscout24.de/expose';
 const DEBUG_DIR = process.env.HOMELANDER_DEBUG_DIR || join(__dirname, '..', 'debug');
+const OFFSCREEN = { windowState: 'normal', left: -32000, top: -32000, width: 1200, height: 850 };
 
 /** Ensure a debug directory exists, return its path. */
 function ensureDir(subdir) {
@@ -137,13 +138,40 @@ export class IS24Contactor {
       browserWSEndpoint: webSocketDebuggerUrl,
       defaultViewport: null,
     });
+    // Pre-create one persistent off-screen page for all background applies.
+    // Reusing it avoids the OS-level app activation that newPage() triggers.
+    await this._ensurePage();
+  }
+
+  /** Get or create the single persistent background page. */
+  async _ensurePage() {
+    if (this.page && !this.page.isClosed()) return this.page;
+    this.page = await this.browser.newPage();
+    // Push off-screen so the initial creation doesn't flash a window
+    await this._setOffscreen(this.page);
+    await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+    return this.page;
+  }
+
+  /** Move a page's Chromium window off-screen via CDP. */
+  async _setOffscreen(page) {
+    if (!page) return;
+    try {
+      const session = await page.target().createCDPSession();
+      try {
+        const { windowId } = await session.send('Browser.getWindowForTarget');
+        await session.send('Browser.setWindowBounds', { windowId, bounds: OFFSCREEN });
+      } finally {
+        await session.detach().catch(() => {});
+      }
+    } catch {}
   }
 
   /**
    * Navigate to an IS24 expose contact form, fill it, and submit.
    * Returns rich metadata for logging.
    */
-  async apply(exposeId, message, captchaApiKey) {
+  async apply(exposeId, message, captchaApiKey, maxTabs = 5) {
     const url = `${IS24_EXPOSE_URL}/${exposeId}#/basicContact/email`;
     const tStart = Date.now();
     const timing = {};
@@ -152,7 +180,7 @@ export class IS24Contactor {
     let fieldCount = 0;
     let fieldRetries = 0;
 
-    this.page = await this.browser.newPage();
+    this.page = await this._ensurePage();
     this._captchaAttempts = 0;
 
     try {
@@ -290,21 +318,13 @@ export class IS24Contactor {
         fields_typed: fieldCount, field_retries: fieldRetries,
       };
     } finally {
-      // Clean up the per-listing tab while keeping Chrome alive.
-      // Closing the final tab can make Chrome exit and lose the IS24 session;
-      // navigate it to about:blank instead. With 2+ tabs, close only the tab
-      // created for this application so expose tabs cannot accumulate.
+      // Keep the persistent page alive — blank it for the next apply.
+      // Closing it would force a newPage() which activates Chromium.
       try {
-        if (this.page && this.browser?.isConnected()) {
-          const pages = await this.browser.pages();
-          if (pages.length <= 1) {
-            await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
-          } else {
-            await this.page.close();
-          }
+        if (this.page && !this.page.isClosed() && this.browser?.isConnected()) {
+          await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
         }
       } catch {}
-      this.page = null;
     }
   }
 
@@ -318,6 +338,12 @@ export class IS24Contactor {
           const rect = el.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         };
+        // Real session expiry redirects to /login or sso.immobilienscout24.
+        // "Anmelden" text on an expose page is usually a Plus-membership upsell.
+        const urlShowsLogin = window.location.href.includes('/login')
+          || window.location.href.includes('/registrierung')
+          || window.location.href.includes('sso.immobilienscout24');
+        if (!urlShowsLogin) return false;
         return Array.from(document.querySelectorAll('a, button'))
           .filter(visible)
           .some((el) => /^\s*(Anmelden|Jetzt einloggen|Einloggen)\s*$/i.test(el.textContent || ''));
@@ -834,8 +860,35 @@ export class IS24Contactor {
             const text = el.textContent?.trim() || '';
             return plusTextRe.test(text) && plusGateRe.test(text);
           });
-        const loggedOut = /\bAnmelden\b|Jetzt einloggen|Einloggen|Loggen Sie sich ein|Bitte melden Sie sich an/i.test(allText)
-          || Array.from(document.querySelectorAll('a, button')).some((el) => /\bAnmelden\b|Jetzt einloggen|Einloggen/i.test(el.textContent || ''));
+        // "Anmelden"/"Einloggen" text on an expose page almost always comes from
+        // a Plus-membership upsell ("Jetzt für Plus anmelden"), not a real logout.
+        // Real session expiry redirects the URL to /login or sso.immobilienscout24.
+        // Only flag loggedOut when the URL confirms it OR when "Anmelden" appears
+        // AND no IS24 user-menu indicator (username/avatar) is present.
+        const currentUrl = window.location.href;
+        const urlShowsLogin = currentUrl.includes('/login')
+          || currentUrl.includes('/registrierung')
+          || currentUrl.includes('sso.immobilienscout24');
+        const hasUserMenu = (() => {
+          // IS24 logged-in header shows a truncated email/username (e.g. "bowiclg454..."),
+          // "Mein Konto", avatar img, or "Abmelden" link — any of these = logged in.
+          const indicators = Array.from(document.querySelectorAll('a, button, span, img'))
+            .filter(visible)
+            .some(el => {
+              const txt = (el.textContent || '').trim();
+              const alt = (el.getAttribute('alt') || '');
+              return /\b(Mein Konto|Mein ImmoScout24|Abmelden|account|user)\b/i.test(txt)
+                || /^[a-z0-9._%-]{3,}\.{3}$/i.test(txt)  // truncated username like "bowiclg454..."
+                || /avatar|user|account|profile/i.test(el.className || '')
+                || /avatar|user|account/i.test(alt);
+            });
+          return indicators;
+        })();
+        const loggedOut = !hasUserMenu && (
+          urlShowsLogin
+          || /\bAnmelden\b|Jetzt einloggen|Einloggen|Loggen Sie sich ein|Bitte melden Sie sich an/i.test(allText)
+          || Array.from(document.querySelectorAll('a, button')).some((el) => /\bAnmelden\b|Jetzt einloggen|Einloggen/i.test(el.textContent || ''))
+        );
         const successText = /Kontaktanfrage.{0,80}(gesendet|verschickt|erfolgreich)|Nachricht.{0,80}(gesendet|verschickt)|Vielen Dank.{0,120}(Nachricht|Kontaktanfrage)/i.test(allText);
         return {
           confirmed,

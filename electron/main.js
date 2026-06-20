@@ -2,14 +2,16 @@
 // Manages app lifecycle, BrowserWindow, daemon child process,
 // Chrome lifecycle, config, and IPC bridge to renderer.
 
-import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage } from 'electron';
-import { fork } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
+import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell, clipboard } from 'electron';
+import { fork, spawnSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, readdirSync, statSync, cpSync, rmSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join, dirname, basename } from 'node:path';
+import { homedir, platform } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ChromeManager } from './chrome.js';
+import { createSupportId, rawErrorText, redact, toUserError } from '../src/shared/userErrors.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -39,12 +41,14 @@ const DAEMON_SCRIPT = join(__dirname, '..', 'engine', 'daemon.js');
 const DAEMON_LOG = join(DATA_DIR, 'daemon.log');
 const CDP_URL = 'http://localhost:9222';
 const PAUSE_FLAG = join(DATA_DIR, '.apply-paused');
+const SUPPORT_DIR = join(DATA_DIR, 'support-bundles');
+const DEBUG_DIR = join(DATA_DIR, 'debug');
 
 // ── State ──────────────────────────────────────────────────────
 
 let mainWindow = null;
 let daemonProcess = null;
-let daemonStatus = 'stopped'; // stopped | running | paused
+let daemonStatus = 'stopped'; // stopped | running | paused | restarting | session_expired
 let daemonStartedAt = 0;      // timestamp of last startDaemon() call
 let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
 let chromeManager = new ChromeManager();
@@ -74,6 +78,242 @@ function loadConfig() {
 function saveConfig() {
   ensureDataDir();
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+}
+
+function logRawError(operation, err, context = {}) {
+  ensureDataDir();
+  const supportId = context.supportId || createSupportId();
+  const raw = redact(rawErrorText(err));
+  const stack = redact(err?.stack || '');
+  const ctx = redact(JSON.stringify(context));
+  const line = `[${new Date().toISOString()}] [${supportId}] ${operation} failed raw=${raw} context=${ctx}`;
+  try { appendFileSync(DAEMON_LOG, `${line}${stack ? `\n${stack}` : ''}\n`, 'utf8'); } catch {}
+  console.error(`[main] ${operation} failed [${supportId}]:`, raw);
+  return supportId;
+}
+
+function gracefulFailure(operation, err, context = {}) {
+  const supportId = logRawError(operation, err, context);
+  const userError = toUserError(err, { ...context, operation, supportId });
+  return { error: userError.message, userError, supportId };
+}
+
+function redactSupportText(text = '') {
+  let out = String(text || '');
+  const sensitive = [];
+  const collect = (obj, path = []) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const [key, value] of Object.entries(obj)) {
+      const nextPath = [...path, key];
+      if (value && typeof value === 'object') collect(value, nextPath);
+      else if (typeof value === 'string' && value.trim().length >= 3) {
+        const keyPath = nextPath.join('.');
+        if (/email|mail|phone|telefon|tel|name|vorname|nachname|strasse|straße|hausnummer|api[_-]?key|token|secret|password/i.test(keyPath)) {
+          sensitive.push([key, value.trim()]);
+        }
+      }
+    }
+  };
+  collect(config || {});
+  for (const [key, value] of sensitive) out = out.split(value).join(`[REDACTED:${key}]`);
+  out = out.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED:email]');
+  out = out.replace(/(clientKey|api[_-]?key|password|token|secret)(["'\s:=]+)([^"'\s,}]+)/gi, '$1$2[REDACTED]');
+  return out;
+}
+
+function redactHtmlSnapshot(text = '') {
+  // HTML pages are multi-MB and often minified. Keep this deliberately linear:
+  // targeted exact replacements + email/API-key patterns only. Broad phone-like
+  // regexes and config-wide replacements can lock the Electron main process.
+  return redactSupportText(String(text || ''));
+}
+
+function redactedConfigSnapshot() {
+  const clone = JSON.parse(JSON.stringify(config || {}));
+  const scrub = (obj) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const [key, value] of Object.entries(obj)) {
+      if (/password|api[_-]?key|token|secret/i.test(key)) obj[key] = value ? '[REDACTED]' : '';
+      else if (value && typeof value === 'object') scrub(value);
+      else if (typeof value === 'string') obj[key] = redactSupportText(value);
+    }
+  };
+  scrub(clone);
+  return clone;
+}
+
+function safeBundleName(value, fallback = 'global') {
+  return String(value || fallback).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || fallback;
+}
+
+function writeSupportFile(root, relativePath, content) {
+  const file = join(root, relativePath);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, content, 'utf8');
+}
+
+async function copySupportArtifact(src, root, relativePath, { redactTextFile = false, htmlSnapshot = false } = {}) {
+  if (!existsSync(src)) return false;
+  const dest = join(root, relativePath);
+  mkdirSync(dirname(dest), { recursive: true });
+  if (redactTextFile) {
+    const raw = await readFile(src, 'utf8');
+    await writeFile(dest, htmlSnapshot ? redactHtmlSnapshot(raw) : redactSupportText(raw), 'utf8');
+  } else cpSync(src, dest);
+  return true;
+}
+
+function tailTextFile(path, maxBytes = 400_000) {
+  if (!existsSync(path)) return '';
+  const raw = readFileSync(path);
+  return raw.slice(Math.max(0, raw.length - maxBytes)).toString('utf8');
+}
+
+function listDebugArtifacts(exposeId = null, limit = 80) {
+  const dirs = [join(DEBUG_DIR, 'screenshots'), join(DEBUG_DIR, 'html')];
+  const files = [];
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      try {
+        const st = statSync(path);
+        if (!st.isFile()) continue;
+        if (exposeId && !name.includes(String(exposeId))) continue;
+        files.push({ path, name, dir: basename(dir), mtimeMs: st.mtimeMs, size: st.size });
+      } catch {}
+    }
+  }
+  return files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, exposeId ? 40 : limit);
+}
+
+function trimArtifactsByBudget(files, maxBytes) {
+  let used = 0;
+  const kept = [];
+  for (const file of files) {
+    if (used + file.size > maxBytes) continue;
+    kept.push(file);
+    used += file.size;
+  }
+  return kept;
+}
+
+function matchingLogLines(exposeId, contextLines = 8) {
+  if (!exposeId || !existsSync(DAEMON_LOG)) return '';
+  const lines = tailTextFile(DAEMON_LOG, 1_000_000).split(/\r?\n/);
+  const keep = new Set();
+  lines.forEach((line, i) => {
+    if (line.includes(String(exposeId))) {
+      for (let j = Math.max(0, i - contextLines); j <= Math.min(lines.length - 1, i + contextLines); j += 1) keep.add(j);
+    }
+  });
+  return [...keep].sort((a, b) => a - b).map(i => lines[i]).join('\n');
+}
+
+async function createSupportBundle(payload = {}) {
+  ensureDataDir();
+  mkdirSync(SUPPORT_DIR, { recursive: true });
+  const scope = payload?.scope === 'entry' ? 'entry' : 'global';
+  const listing = payload?.listing || null;
+  const exposeId = listing?.expose_id || listing?.exposeId || null;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const bundleBase = `homelander-${scope}${exposeId ? `-${safeBundleName(exposeId)}` : ''}-${stamp}`;
+  const tempRoot = join(SUPPORT_DIR, `${bundleBase}.tmp`);
+  const zipPath = join(SUPPORT_DIR, `${bundleBase}.zip`);
+  rmSync(tempRoot, { recursive: true, force: true });
+  mkdirSync(tempRoot, { recursive: true });
+
+  let dbListing = null;
+  if (exposeId) {
+    try {
+      const { HomelanderDB } = await import('../engine/db.js');
+      const db = new HomelanderDB(DB_PATH);
+      try { dbListing = db.getHistory(5000, 0).find((row) => String(row.expose_id) === String(exposeId)) || null; }
+      finally { db.close(); }
+    } catch {}
+  }
+
+  const chromeStatus = await chromeManager.isHealthy()
+    .then(async (healthy) => ({
+      running: healthy || chromeManager.isManualLoginRunning?.() || false,
+      manualLogin: chromeManager.isManualLoginRunning?.() || false,
+      cdpHealthy: healthy,
+      tabCount: healthy ? await chromeManager.getTabCount() : -1,
+      maxTabs: browserOptions().maxTabs,
+      visibility: browserOptions().visibility,
+    }))
+    .catch((err) => ({ error: redactSupportText(err?.message || String(err)) }));
+
+  const gitCommit = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: join(__dirname, '..'), encoding: 'utf8' });
+  const gitStatus = spawnSync('git', ['status', '--short'], { cwd: join(__dirname, '..'), encoding: 'utf8' });
+  const metadata = {
+    created_at: new Date().toISOString(),
+    scope,
+    expose_id: exposeId,
+    listing: dbListing || listing,
+    app: { version: app.getVersion(), isPackaged: app.isPackaged, gitCommit: gitCommit.status === 0 ? gitCommit.stdout.trim() : null },
+    daemon: { status: daemonStatus, processAlive: !!daemonProcess, logPath: DAEMON_LOG },
+    chrome: chromeStatus,
+    configPath: CONFIG_PATH,
+    debugDir: DEBUG_DIR,
+  };
+  writeSupportFile(tempRoot, 'metadata.json', JSON.stringify(JSON.parse(redactSupportText(JSON.stringify(metadata))), null, 2));
+  writeSupportFile(tempRoot, 'config.redacted.json', JSON.stringify(redactedConfigSnapshot(), null, 2));
+  writeSupportFile(tempRoot, 'git-status.txt', redactSupportText(gitStatus.stdout || gitStatus.stderr || ''));
+
+  if (existsSync(PAUSE_FLAG)) writeSupportFile(tempRoot, 'apply-paused.json', redactSupportText(readFileSync(PAUSE_FLAG, 'utf8')));
+  if (existsSync(DAEMON_LOG)) {
+    writeSupportFile(tempRoot, 'logs/daemon-tail.log', redactSupportText(tailTextFile(DAEMON_LOG)));
+    if (exposeId) writeSupportFile(tempRoot, 'logs/entry-context.log', redactSupportText(matchingLogLines(exposeId) || `No daemon.log lines matched expose ${exposeId}.`));
+  }
+
+  const allCandidates = listDebugArtifacts(scope === 'entry' ? exposeId : null, scope === 'entry' ? 40 : 60);
+
+  if (scope === 'entry') {
+    // Per-entry: raw copy everything (instant). Logs/config redacted separately.
+    for (const artifact of allCandidates) {
+      const dest = join(tempRoot, `debug/${artifact.dir}/${artifact.name}`);
+      mkdirSync(dirname(dest), { recursive: true });
+      cpSync(artifact.path, dest);
+    }
+    writeSupportFile(tempRoot, 'included-files.txt', allCandidates.map((f) => `debug/${f.dir}/${f.name} (${Math.round(f.size / 1024)} KB)`).join('\n') || 'No debug artifacts found.');
+  } else {
+    // Global: screenshots raw (instant), HTML listed by name only
+    const screenshots = trimArtifactsByBudget(allCandidates.filter((f) => f.dir === 'screenshots'), 100 * 1024 * 1024);
+    const htmlList = allCandidates.filter((f) => f.dir === 'html');
+    for (const artifact of screenshots) {
+      cpSync(artifact.path, join(tempRoot, `debug/${artifact.dir}/${artifact.name}`));
+    }
+    writeSupportFile(
+      tempRoot,
+      'included-files.txt',
+      [
+        ...screenshots.map((f) => `debug/${f.dir}/${f.name} (${Math.round(f.size / 1024)} KB)`),
+        '',
+        `HTML snapshots not included in global bundle (use per-entry Export Debug Bundle).`,
+        `Found ${htmlList.length} recent HTML snapshots:`,
+        ...htmlList.map((f) => `  debug/${f.dir}/${f.name} (${Math.round(f.size / 1024)} KB)`),
+      ].join('\n')
+    );
+  }
+
+  await new Promise((resolve, reject) => {
+    const args = platform() === 'win32'
+      ? ['-NoProfile', '-Command', `Compress-Archive -Path "${tempRoot}\\*" -DestinationPath "${zipPath}" -Force`]
+      : ['-qr', zipPath, '.'];
+    const cmd = platform() === 'win32' ? 'powershell' : (existsSync('/usr/bin/zip') ? '/usr/bin/zip' : 'zip');
+    const opts = platform() === 'win32' ? {} : { cwd: tempRoot };
+    const child = spawn(cmd, args, opts);
+    child.on('close', (code) => {
+      rmSync(tempRoot, { recursive: true, force: true });
+      if (code !== 0) reject(new Error(`zip exited ${code}`));
+      else resolve();
+    });
+    child.on('error', reject);
+  });
+  clipboard.writeText(zipPath);
+  shell.showItemInFolder(zipPath);
+  return { ok: true, path: zipPath, fileName: basename(zipPath), copiedToClipboard: true, files: allCandidates.length };
 }
 
 function getDefaultConfig() {
@@ -118,7 +358,18 @@ function getDefaultConfig() {
     polling: {
       interval_seconds: 600,
     },
+    browser: {
+      visibility: 'hidden_unless_needed',
+      max_tabs: 5,
+    },
     _setupComplete: false,
+  };
+}
+
+function browserOptions() {
+  return {
+    visibility: config?.browser?.visibility || 'hidden_unless_needed',
+    maxTabs: Math.min(5, Math.max(1, Number(config?.browser?.max_tabs || 5))),
   };
 }
 
@@ -211,7 +462,7 @@ function startDaemon() {
   });
 
   daemonProcess.on('error', (err) => {
-    console.error('[daemon] spawn error:', err.message);
+    logRawError('daemon spawn', err, { code: 'DAEMON_ACTION_FAILED' });
     daemonProcess = null;
     daemonStatus = 'stopped';
   });
@@ -254,9 +505,10 @@ function handleDaemonEvent(event) {
             silent: true,
           }).show();
         } else if (event.outcome === 'FAIL') {
+          const userError = toUserError(event.detail || event.failureReason || 'Application failed', { operation: 'listing apply' });
           new Notification({
-            title: '✗ Application Failed',
-            body: `${event.title} — ${(event.detail || '').substring(0, 80)}`,
+            title: 'Application needs attention',
+            body: `${event.title} — ${userError.title}`,
             silent: true,
           }).show();
         }
@@ -273,7 +525,8 @@ function handleDaemonEvent(event) {
       }
       break;
     case 'session_expired':
-      daemonStatus = 'paused';
+      daemonStatus = 'session_expired';
+      try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'session_expired' }), 'utf8'); } catch {}
       mainWindow.webContents.send('homelander:event', {
         type: 'session_expired',
         reason: event.reason,
@@ -286,9 +539,12 @@ function handleDaemonEvent(event) {
         }).show();
       }
       break;
-    case 'error':
-      mainWindow.webContents.send('homelander:error', event);
+    case 'error': {
+      const supportId = logRawError('daemon event', new Error(event.message || 'Daemon error'), { type: event.type });
+      const userError = toUserError(event.message || event, { operation: 'daemon', supportId });
+      mainWindow.webContents.send('homelander:error', { ...event, message: userError.message, userError, supportId });
       break;
+    }
     case 'paused':
       daemonStatus = 'paused';
       mainWindow.webContents.send('homelander:event', event);
@@ -372,14 +628,17 @@ function registerIpcHandlers() {
   // Daemon
   ipcMain.handle('daemon:start', async () => {
     try {
+      // Start means run now. Never inherit a stale persisted pause from an old
+      // stop/restart/debug session; Pause is the only action allowed to create it.
+      try { unlinkSync(PAUSE_FLAG); } catch {}
+
       // Launch Chrome first
       const email = config?.is24?.email || config?.persona?.email || 'default';
-      await chromeManager.launch(email);
+      await chromeManager.launch(email, browserOptions());
       // Then start the daemon
       startDaemon();
     } catch (err) {
-      console.error('[main] Chrome launch failed:', err.message);
-      return { status: daemonStatus, error: err.message };
+      return { status: daemonStatus, ...gracefulFailure('daemon:start chrome launch', err, { code: 'BROWSER_START_FAILED' }) };
     }
     return { status: daemonStatus };
   });
@@ -464,7 +723,7 @@ function registerIpcHandlers() {
         db.close();
       }
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, ...gracefulFailure('daemon:poll-now', err, { code: 'SEARCH_POLL_FAILED' }) };
     }
   });
 
@@ -480,10 +739,11 @@ function registerIpcHandlers() {
       const db = new HomelanderDB(DB_PATH);
       try {
         const result = db.retryListing(exposeId);
-        return { ok: !result.error, error: result.error };
+        if (result.error) return { ok: false, ...gracefulFailure('daemon:retry-listing', new Error(result.error), { code: 'LISTING_RETRY_FAILED', exposeId }) };
+        return { ok: true, error: null };
       } finally { db.close(); }
     } catch (err) {
-      return { ok: false, error: err.message };
+      return { ok: false, ...gracefulFailure('daemon:retry-listing', err, { code: 'LISTING_RETRY_FAILED', exposeId }) };
     }
   });
 
@@ -496,7 +756,7 @@ function registerIpcHandlers() {
       db.close();
       return { filters, error: null };
     } catch (err) {
-      return { filters: [], error: err.message };
+      return { filters: [], ...gracefulFailure('filters:list', err, { code: 'DATABASE_ERROR' }) };
     }
   });
 
@@ -504,7 +764,7 @@ function registerIpcHandlers() {
     try {
       const { translateUrl } = await import('../engine/url-translator.js');
       const { fullUrl, error } = translateUrl(webUrl);
-      if (error) return { error };
+      if (error) return gracefulFailure('filters:add validate', new Error(error), { code: 'SEARCH_URL_INVALID' });
 
       const { HomelanderDB } = await import('../engine/db.js');
       const db = new HomelanderDB(DB_PATH);
@@ -519,7 +779,7 @@ function registerIpcHandlers() {
       db.close();
       return { filter, error: null };
     } catch (err) {
-      return { error: err.message };
+      return gracefulFailure('ipc action', err);
     }
   });
 
@@ -531,7 +791,7 @@ function registerIpcHandlers() {
       db.close();
       return { error: null };
     } catch (err) {
-      return { error: err.message };
+      return gracefulFailure('filters:remove', err, { code: 'DATABASE_ERROR', filterId: id });
     }
   });
 
@@ -543,13 +803,19 @@ function registerIpcHandlers() {
       db.close();
       return { error: null };
     } catch (err) {
-      return { error: err.message };
+      return gracefulFailure('filters:update', err, { code: 'DATABASE_ERROR', filterId: id });
     }
   });
 
   ipcMain.handle('filters:test', async (_e, webUrl) => {
-    const { getTotalResults } = await import('../engine/url-translator.js');
-    return getTotalResults(webUrl);
+    try {
+      const { getTotalResults } = await import('../engine/url-translator.js');
+      const result = await getTotalResults(webUrl);
+      if (result.error) return { total: 0, ...gracefulFailure('filters:test', new Error(result.error), { code: 'SEARCH_URL_INVALID' }) };
+      return result;
+    } catch (err) {
+      return { total: 0, ...gracefulFailure('filters:test', err, { code: 'SEARCH_POLL_FAILED' }) };
+    }
   });
 
   // Listings
@@ -561,7 +827,7 @@ function registerIpcHandlers() {
       db.close();
       return { listings, error: null };
     } catch (err) {
-      return { listings: [], error: err.message };
+      return { listings: [], ...gracefulFailure('listings:history', err, { code: 'DATABASE_ERROR' }) };
     }
   });
 
@@ -590,7 +856,7 @@ function registerIpcHandlers() {
       db.close();
       return { stats: { ...stats, nextPollAt }, recent, error: null };
     } catch (err) {
-      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, recent: [], error: err.message };
+      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, recent: [], ...gracefulFailure('listings:stats', err, { code: 'DATABASE_ERROR' }) };
     }
   });
 
@@ -602,7 +868,16 @@ function registerIpcHandlers() {
       db.close();
       return { stats, error: null };
     } catch (err) {
-      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0 }, error: err.message };
+      return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0 }, ...gracefulFailure('listings:todayStats', err, { code: 'DATABASE_ERROR' }) };
+    }
+  });
+
+  // Support bundles
+  ipcMain.handle('support:bundle', async (_event, payload) => {
+    try {
+      return await createSupportBundle(payload || { scope: 'global' });
+    } catch (err) {
+      return { ok: false, ...gracefulFailure('support:bundle', err, { code: 'SUPPORT_BUNDLE_FAILED', scope: payload?.scope, exposeId: payload?.listing?.expose_id || payload?.listing?.exposeId }) };
     }
   });
 
@@ -612,9 +887,10 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('config:update', (_e, patch) => {
-    // Deep merge patch into config
-    config = deepMerge(config, patch);
-    saveConfig();
+    try {
+      // Deep merge patch into config
+      config = deepMerge(config, patch);
+      saveConfig();
 
     // Hot-reload everything into the running daemon — no restart needed
     if (daemonProcess) {
@@ -623,6 +899,7 @@ function registerIpcHandlers() {
       if (patch.message_template !== undefined) msg.message_template = config.message_template;
       if (patch.captcha) msg.captcha = config.captcha;
       if (patch.polling?.interval_seconds !== undefined) msg.poll_interval = config.polling.interval_seconds;
+      if (patch.browser) msg.browser = config.browser;
 
       const personaChanged = patch.persona && Object.keys(patch.persona).length > 0;
       const timingChanged = patch.timing && Object.keys(patch.timing).length > 0;
@@ -635,42 +912,69 @@ function registerIpcHandlers() {
       }
     }
 
-    return { error: null };
+      return { error: null };
+    } catch (err) {
+      return gracefulFailure('config:update', err, { code: 'CONFIG_SAVE_FAILED', patchKeys: Object.keys(patch || {}) });
+    }
   });
 
   // Chrome
   ipcMain.handle('chrome:status', async () => {
     const healthy = await chromeManager.isHealthy();
+    const manualLogin = chromeManager.isManualLoginRunning?.() || false;
     const tabCount = healthy ? await chromeManager.getTabCount() : -1;
-    return { running: healthy, tabCount };
+    return { running: healthy || manualLogin, manualLogin, cdpHealthy: healthy, tabCount, maxTabs: browserOptions().maxTabs, visibility: browserOptions().visibility };
   });
 
   ipcMain.handle('chrome:launch', async () => {
     try {
       const email = config?.is24?.email || config?.persona?.email || 'default';
-      const result = await chromeManager.launch(email);
+      const result = await chromeManager.launch(email, browserOptions());
       return { ...result, error: null };
     } catch (err) {
-      return { error: err.message };
+      return gracefulFailure('chrome:launch', err, { code: 'BROWSER_START_FAILED' });
     }
   });
 
   ipcMain.handle('chrome:openLogin', async () => {
     try {
       const email = config?.is24?.email || config?.persona?.email || 'default';
-      const result = await chromeManager.openLoginPage(email);
+      const result = await chromeManager.openLoginPage(email, browserOptions());
       return { ...result, error: null };
     } catch (err) {
-      return { error: err.message };
+      return gracefulFailure('chrome:openLogin', err, { code: 'BROWSER_START_FAILED' });
+    }
+  });
+
+  ipcMain.handle('chrome:finalizeManualLogin', async () => {
+    try {
+      const email = config?.is24?.email || config?.persona?.email || 'default';
+      const result = await chromeManager.finalizeManualLogin(email, browserOptions());
+      return { ...result, error: null };
+    } catch (err) {
+      return gracefulFailure('chrome:finalizeManualLogin', err, { code: 'BROWSER_START_FAILED' });
+    }
+  });
+
+  ipcMain.handle('chrome:openListing', async (_event, exposeIdOrUrl) => {
+    try {
+      const email = config?.is24?.email || config?.persona?.email || 'default';
+      const result = await chromeManager.openListing(exposeIdOrUrl, email, browserOptions());
+      return { ...result, error: null };
+    } catch (err) {
+      return gracefulFailure('chrome:openListing', err, { code: 'BROWSER_START_FAILED', exposeIdOrUrl });
     }
   });
 
   ipcMain.handle('chrome:checkIs24Login', async () => {
     try {
+      if (chromeManager.isManualLoginRunning?.() && !(await chromeManager.isHealthy())) {
+        return { loggedIn: false, manualLogin: true, cookies: [], error: null };
+      }
       const result = await chromeManager.checkIs24Login();
       return { ...result, error: null };
     } catch (err) {
-      return { loggedIn: false, error: err.message };
+      return { loggedIn: false, ...gracefulFailure('chrome:checkIs24Login', err, { code: 'BROWSER_NOT_RESPONDING' }) };
     }
   });
 
@@ -679,7 +983,7 @@ function registerIpcHandlers() {
       const result = await chromeManager.getIs24Email();
       return { ...result, error: null };
     } catch (err) {
-      return { email: null, error: err.message };
+      return { email: null, ...gracefulFailure('chrome:getIs24Email', err, { code: 'BROWSER_NOT_RESPONDING' }) };
     }
   });
 
@@ -696,9 +1000,9 @@ function registerIpcHandlers() {
       if (data.errorId === 0) {
         return { valid: true, balance: data.balance, error: null };
       }
-      return { valid: false, balance: 0, error: data.errorDescription || data.errorText || 'Invalid API key' };
+      return { valid: false, balance: 0, ...gracefulFailure('captcha:validate response', new Error(data.errorDescription || data.errorText || 'Invalid API key'), { code: 'CAPTCHA_KEY_INVALID' }) };
     } catch (err) {
-      return { valid: false, balance: 0, error: err.message };
+      return { valid: false, balance: 0, ...gracefulFailure('captcha:validate', err, { code: 'CAPTCHA_KEY_INVALID' }) };
     }
   });
   ipcMain.handle('setup:complete', () => {
@@ -722,7 +1026,7 @@ function registerIpcHandlers() {
     // Verify email matches configured email
     const configuredEmail = config?.persona?.email || config?.is24?.email || '';
     if (!configuredEmail || confirmEmail !== configuredEmail) {
-      return { error: 'Email does not match.' };
+      return gracefulFailure('data:clean confirm', new Error('Email does not match.'), { code: 'CLEANUP_CONFIRMATION_FAILED' });
     }
 
     // Stop daemon first
@@ -734,8 +1038,8 @@ function registerIpcHandlers() {
     chromeManager.shutdown().catch(() => {});
 
     // Delete data files
-    try { unlinkSync(DB_PATH); } catch (err) { console.error('[clean] db delete:', err.message); }
-    try { unlinkSync(CONFIG_PATH); } catch (err) { console.error('[clean] config delete:', err.message); }
+    try { unlinkSync(DB_PATH); } catch (err) { logRawError('data:clean db delete', err, { code: 'DATABASE_ERROR' }); }
+    try { unlinkSync(CONFIG_PATH); } catch (err) { logRawError('data:clean config delete', err, { code: 'CONFIG_SAVE_FAILED' }); }
     try { unlinkSync(PAUSE_FLAG); } catch {}
 
     // Relaunch fresh — config will be recreated with defaults

@@ -2,7 +2,7 @@
 // Bridges main process ↔ renderer via contextBridge.
 // This MUST be CommonJS (.cjs) for contextBridge to work.
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, shell } = require('electron');
 
 contextBridge.exposeInMainWorld('homelander', {
   // ── Daemon ────────────────────────────────────────────────
@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('homelander', {
     ipcRenderer.invoke('listings:history', limit, offset, filterId, outcome),
   getStats: (filterId) => ipcRenderer.invoke('listings:stats', filterId),
   getTodayStats: (filterId) => ipcRenderer.invoke('listings:todayStats', filterId),
+  createSupportBundle: (payload) => ipcRenderer.invoke('support:bundle', payload || { scope: 'global' }),
 
   // ── Config ────────────────────────────────────────────────
   getConfig: () => ipcRenderer.invoke('config:get'),
@@ -35,6 +36,8 @@ contextBridge.exposeInMainWorld('homelander', {
   getChromeStatus: () => ipcRenderer.invoke('chrome:status'),
   launchChrome: () => ipcRenderer.invoke('chrome:launch'),
   openLoginPage: () => ipcRenderer.invoke('chrome:openLogin'),
+  finalizeManualLogin: () => ipcRenderer.invoke('chrome:finalizeManualLogin'),
+  openListingInChrome: (exposeIdOrUrl) => ipcRenderer.invoke('chrome:openListing', exposeIdOrUrl),
   checkIs24Login: () => ipcRenderer.invoke('chrome:checkIs24Login'),
   getIs24Email: () => ipcRenderer.invoke('chrome:getIs24Email'),
 
@@ -70,4 +73,5 @@ contextBridge.exposeInMainWorld('homelander', {
   // ── App lifecycle ───────────────────────────────────────────
   quit: () => ipcRenderer.invoke('app:quit'),
   cleanData: (email) => ipcRenderer.invoke('data:clean', email),
+  openExternal: (url) => shell.openExternal(url),
 });

@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useStore } from '../stores/appStore';
+import { userErrorText } from '../shared/userErrors';
 
 const PAGE_SIZE = 30;
 const OUTCOME_KEYS = [
@@ -78,7 +79,7 @@ function listingBadges(listing) {
 
 // ── Entry Row ────────────────────────────────────────────────────────────────
 
-function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcomeFilter, onImageHover, onImageMove, onImageLeave, onTipShow, onTipMove, onTipHide }) {
+function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupportBundle, supportBusy, outcomeFilter, onImageHover, onImageMove, onImageLeave, onTipShow, onTipMove, onTipHide }) {
   const [copied, setCopied] = useState(null);
   const [requeued, setRequeued] = useState(false);
 
@@ -114,6 +115,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcom
   const outcomeLabel = isSent ? 'Sent' : isDeactivated ? 'Deactivated' : isDryRun ? 'Dry Run' : 'Failed';
 
   const badgeClass = isSent ? 'badge-success' : isDeactivated ? 'badge-deactivated' : isDryRun ? '' : 'badge-fail';
+  const safeDetail = listing.detail ? userErrorText(listing.detail, { operation: 'listing apply' }) : '';
 
   return (
     <div
@@ -124,19 +126,32 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcom
       <div className="flex items-center gap-3 px-3 py-2.5">
         {/* Thumbnail */}
         {listing.image_url && (
-          <img
-            src={listing.image_url}
-            alt=""
-            className="flex-shrink-0 rounded object-cover"
-            style={{ width: 40, height: 40 }}
-            loading="lazy"
-            onMouseEnter={(e) => {
-              onImageHover?.(listing.image_url);
-              onImageMove?.({ x: e.clientX, y: e.clientY });
-            }}
-            onMouseMove={(e) => onImageMove?.({ x: e.clientX, y: e.clientY })}
-            onMouseLeave={() => onImageLeave?.()}
-          />
+          <div className="relative flex-shrink-0" style={{ width: 40, height: 40 }}>
+            <img
+              src={listing.image_url}
+              alt=""
+              className="rounded object-cover bg-gray-700"
+              style={{ width: 40, height: 40 }}
+              loading="lazy"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const fb = e.currentTarget.nextElementSibling;
+                if (fb) fb.style.display = 'flex';
+              }}
+              onMouseEnter={(e) => {
+                onImageHover?.(listing.image_url);
+                onImageMove?.({ x: e.clientX, y: e.clientY });
+              }}
+              onMouseMove={(e) => onImageMove?.({ x: e.clientX, y: e.clientY })}
+              onMouseLeave={() => onImageLeave?.()}
+            />
+            <div
+              className="absolute inset-0 rounded bg-gray-700 items-center justify-center text-gray-500 text-xs font-medium"
+              style={{ display: 'none' }}
+            >
+              {(listing.title || '?')[0]}
+            </div>
+          </div>
         )}
         {/* Status icon */}
         <span
@@ -172,19 +187,16 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcom
           )}
         </div>
 
-        {/* External link */}
+        {/* Open in controlled Chromium */}
         {listing.expose_id && (
-          <a
-            href={`https://www.immobilienscout24.de/expose/${listing.expose_id}`}
-            target="_blank"
-            rel="noreferrer"
+          <button
             className="flex-shrink-0"
-            style={{ color: 'var(--accent)', fontSize: '16px' }}
-            onClick={(e) => e.stopPropagation()}
-            title="Open on ImmobilienScout24"
+            style={{ color: 'var(--accent)', fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onClick={(e) => { e.stopPropagation(); window.homelander?.openListingInChrome?.(listing.expose_id); }}
+            title="Open in Homelander Chromium"
           >
             ↗
-          </a>
+          </button>
         )}
 
         {/* Retry button */}
@@ -274,27 +286,43 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, outcom
               </div>
             )}
 
-            {listing.detail && (
+            {safeDetail && (
               <div className="col-span-2 mt-1">
                 <span style={{ color: 'var(--text-muted)' }}>Detail: </span>
                 <p
                   className="mt-0.5 p-2 rounded text-xs whitespace-pre-wrap"
                   style={{
                     background: 'var(--bg-secondary)',
-                    color: copied === listing.detail ? 'var(--success)' : 'var(--text-secondary)',
+                    color: copied === safeDetail ? 'var(--success)' : 'var(--text-secondary)',
                     border: '1px solid var(--border)',
                     cursor: 'pointer',
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(listing.detail).catch(() => {});
-                    setCopied(listing.detail);
+                    navigator.clipboard.writeText(safeDetail).catch(() => {});
+                    setCopied(safeDetail);
                     setTimeout(() => setCopied(null), 1500);
                   }}
                   title="Click to copy"
                 >
-                  {listing.detail}
+                  {safeDetail}
                 </p>
+              </div>
+            )}
+
+            {listing.expose_id && onSupportBundle && (
+              <div className="col-span-2">
+                <button
+                  className="btn btn-ghost text-xs"
+                  style={{ color: supportBusy ? 'var(--success)' : 'var(--accent)', padding: '3px 8px' }}
+                  onClick={(e) => { e.stopPropagation(); if (!supportBusy) onSupportBundle(listing); }}
+                  disabled={supportBusy}
+                >
+                  {supportBusy ? '✓ Debug bundle exported' : '📦 Export Debug Bundle'}
+                </button>
+                <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+                  screenshot + HTML + entry logs
+                </span>
               </div>
             )}
           </div>
@@ -320,6 +348,7 @@ export default function HistoryTab() {
   const [expandedIds, setExpandedIds] = useState(new Set());
   const [loadingMore, setLoadingMore] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [supportBusyId, setSupportBusyId] = useState(null);
   const [allTimeStats, setAllTimeStats] = useState(null);
   const [retrying, setRetrying] = useState(new Set());
   const sentinelRef = useRef(null);
@@ -347,7 +376,7 @@ export default function HistoryTab() {
   const fetchListings = useCallback(
     async (append = false) => {
       if (!window.homelander) {
-        setError('Homelander API unavailable');
+        setError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }));
         setLoading(false);
         return;
       }
@@ -468,6 +497,16 @@ export default function HistoryTab() {
     }), 2000);
   }, []);
 
+  const handleSupportBundle = useCallback(async (listing) => {
+    const exposeId = listing?.expose_id;
+    if (!window.homelander?.createSupportBundle || !exposeId) return;
+    setSupportBusyId(exposeId);
+    try {
+      await window.homelander.createSupportBundle({ scope: 'entry', listing });
+    } catch {}
+    setTimeout(() => setSupportBusyId(null), 1500);
+  }, []);
+
   // ── Load all-time stats
   const exportCSV = useCallback(async () => {
     if (!window.homelander) return;
@@ -480,7 +519,7 @@ export default function HistoryTab() {
         filterId || null,
         outcomeFilter || null
       );
-      if (apiError) throw new Error(apiError);
+      if (apiError) throw { userError: apiError.userError, message: apiError };
       const rowsToExport = exportRows || [];
       if (rowsToExport.length === 0) return;
 
@@ -517,7 +556,7 @@ export default function HistoryTab() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err.message || 'CSV export failed');
+      setError(userErrorText(err.userError || err, { operation: 'csv export' }));
     } finally {
       setExporting(false);
     }
@@ -662,6 +701,8 @@ export default function HistoryTab() {
                       onToggle={toggleExpand}
                       onRetry={handleRetry}
                       retrying={retrying}
+                      onSupportBundle={handleSupportBundle}
+                      supportBusy={supportBusyId === listing.expose_id}
                       outcomeFilter={outcomeFilter}
                       onImageHover={setHoveredImage}
                       onImageMove={setHoverPos}
@@ -728,8 +769,9 @@ export default function HistoryTab() {
           <img
             src={hoveredImage}
             alt="Preview"
-            className="rounded shadow-lg object-cover"
+            className="rounded shadow-lg object-cover bg-gray-700"
             style={{ width: 360, height: 270 }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
         </div>
       )}

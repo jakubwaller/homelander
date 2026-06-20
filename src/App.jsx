@@ -8,6 +8,7 @@ import HistoryTab from './screens/HistoryTab';
 import SettingsTab from './screens/SettingsTab';
 import SetupWizard from './screens/SetupWizard';
 import StatusDot from './components/StatusDot';
+import { userErrorText } from './shared/userErrors';
 
 const TABS = [
   { id: 'searches', label: 'Searches' },
@@ -129,7 +130,7 @@ export default function App() {
       if (data.type === 'paused') setDaemonStatus('paused');
       if (data.type === 'resumed') setDaemonStatus('running');
       if (data.type === 'daemon_stopped') setDaemonStatus('stopped');
-      if (data.type === 'session_expired') setDaemonStatus('paused');
+      if (data.type === 'session_expired') setDaemonStatus('session_expired');
       if (data.type === 'config_applied') {
         // Brief flash — clears after animation
         setDaemonStatus((prev) => prev === 'restarting' ? prev : prev);
@@ -143,6 +144,11 @@ export default function App() {
     return () => unsubs.forEach(fn => fn());
   }, []);
 
+  // Session recovery is user-confirmed. Do not poll IS24 login pages: the login
+  // flow is bot-sensitive, so Homelander only opens the plain login browser and
+  // trusts the user to click the header button again after IS24 visibly shows
+  // them as logged in.
+
   // ── Daemon controls (global, visible from all tabs) ──────────
   const [daemonError, setDaemonError] = useState(null);
 
@@ -151,30 +157,48 @@ export default function App() {
   const handleToggleDaemon = useCallback(async () => {
     if (!window.homelander) return;
     try {
+      let keepMessage = false;
       if (daemonStatus === 'stopped') {
-        const { status } = await window.homelander.startDaemon();
-        setDaemonStatus(status || 'running');
+        const result = await window.homelander.startDaemon();
+        if (result?.error) throw result;
+        setDaemonStatus(result.status || 'running');
       } else if (daemonStatus === 'running') {
-        const { status } = await window.homelander.pauseDaemon();
-        setDaemonStatus(status || 'paused');
+        const result = await window.homelander.pauseDaemon();
+        if (result?.error) throw result;
+        setDaemonStatus(result.status || 'paused');
+      } else if (daemonStatus === 'session_expired') {
+        const chromeStatus = await window.homelander.getChromeStatus();
+        if (chromeStatus?.manualLogin && !chromeStatus?.cdpHealthy) {
+          const finalize = await window.homelander.finalizeManualLogin();
+          if (finalize?.error) throw finalize;
+          const result = await window.homelander.resumeDaemon();
+          if (result?.error) throw result;
+          setDaemonStatus(result.status || 'running');
+        } else {
+          const result = await window.homelander.openLoginPage();
+          if (result?.error) throw result;
+          setDaemonError(null);
+        }
       } else if (daemonStatus === 'paused') {
-        const { status } = await window.homelander.resumeDaemon();
-        setDaemonStatus(status || 'running');
+        const result = await window.homelander.resumeDaemon();
+        if (result?.error) throw result;
+        setDaemonStatus(result.status || 'running');
       }
-      setDaemonError(null);
+      if (!keepMessage) setDaemonError(null);
     } catch (err) {
-      setDaemonError(err.message || 'Daemon action failed');
+      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon action' }));
     }
   }, [daemonStatus, setDaemonStatus]);
 
   const handleStopDaemon = useCallback(async () => {
     if (!window.homelander) return;
     try {
-      const { status } = await window.homelander.stopDaemon();
-      setDaemonStatus(status || 'stopped');
+      const result = await window.homelander.stopDaemon();
+      if (result?.error) throw result;
+      setDaemonStatus(result.status || 'stopped');
       setDaemonError(null);
     } catch (err) {
-      setDaemonError(err.message || 'Failed to stop daemon');
+      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon stop' }));
     }
   }, [setDaemonStatus]);
 
@@ -203,6 +227,7 @@ export default function App() {
           <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
             {daemonStatus === 'running' ? 'Active'
               : daemonStatus === 'paused' ? 'Paused'
+              : daemonStatus === 'session_expired' ? 'Login needed'
               : daemonStatus === 'restarting' ? 'Restarting…'
               : 'Stopped'}
           </span>
@@ -210,15 +235,15 @@ export default function App() {
             className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
             onClick={handleToggleDaemon}
             disabled={daemonControlDisabled}
-            title={daemonStatus === 'stopped' ? 'Start' : daemonStatus === 'running' ? 'Pause' : daemonStatus === 'restarting' ? 'Restarting…' : 'Resume'}
+            title={daemonStatus === 'stopped' ? 'Start' : daemonStatus === 'running' ? 'Pause' : daemonStatus === 'session_expired' ? 'Open Chromium to log in' : daemonStatus === 'restarting' ? 'Restarting…' : 'Resume'}
             style={{
               fontSize: '13px',
-              background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
-              color: daemonStatus === 'stopped' ? 'var(--accent)' : daemonStatus === 'running' ? 'var(--warning)' : daemonStatus === 'restarting' ? 'var(--text-muted)' : 'var(--accent)',
+              background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'session_expired' ? 'rgba(239,68,68,0.14)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
+              color: daemonStatus === 'stopped' ? 'var(--accent)' : daemonStatus === 'running' ? 'var(--warning)' : daemonStatus === 'session_expired' ? 'var(--danger)' : daemonStatus === 'restarting' ? 'var(--text-muted)' : 'var(--accent)',
               opacity: daemonControlDisabled ? 0.4 : 1,
             }}
           >
-            {daemonStatus === 'stopped' ? '▶' : daemonStatus === 'running' ? '⏸' : daemonStatus === 'restarting' ? '⏳' : '▶'}
+            {daemonStatus === 'stopped' ? '▶' : daemonStatus === 'running' ? '⏸' : daemonStatus === 'session_expired' ? '↗' : daemonStatus === 'restarting' ? '⏳' : '▶'}
           </button>
           {daemonStatus !== 'stopped' && daemonStatus !== 'restarting' && (
             <button
@@ -256,6 +281,21 @@ export default function App() {
         {activeTab === 'history' && <HistoryTab />}
         {activeTab === 'settings' && <SettingsTab />}
       </main>
+
+      {/* Footer */}
+      <footer className="px-5 pb-4 text-center">
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); window.homelander?.openExternal('https://github.com/B1Z0N/'); }}
+            style={{ color: 'var(--accent)', textDecoration: 'none', cursor: 'pointer' }}
+            className="hover:underline"
+          >
+            Mykola Fedurko
+          </a>
+          {' '}© 2026
+        </p>
+      </footer>
     </div>
   );
 }

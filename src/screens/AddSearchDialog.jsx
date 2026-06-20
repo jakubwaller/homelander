@@ -1,6 +1,7 @@
 // Add Search dialog — paste IS24 URL, test it, save.
 
 import React, { useState, useMemo } from 'react';
+import { userErrorText } from '../shared/userErrors';
 
 /** Derive a human-readable name from an IS24 search URL. */
 function deriveName(url) {
@@ -44,17 +45,17 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
 
     try {
       if (!window.homelander) {
-        setTestError('API bridge not available');
+        setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }));
         return;
       }
       const result = await window.homelander.testFilter(url.trim());
       if (result.error) {
-        setTestError(result.error);
+        setTestError(userErrorText(result.userError || result, { operation: 'search test' }));
       } else {
         setTestResult(result.total);
       }
     } catch (err) {
-      setTestError(err.message);
+      setTestError(userErrorText(err.userError || err, { operation: 'search test' }));
     } finally {
       setTesting(false);
     }
@@ -69,13 +70,13 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
       setTestError(null);
       try {
         if (!window.homelander) {
-          setTestError('API bridge not available');
+          setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }));
           setTesting(false);
           return;
         }
         const result = await window.homelander.testFilter(url.trim());
         if (result.error) {
-          setTestError(result.error);
+          setTestError(userErrorText(result.userError || result, { operation: 'search test' }));
           setTesting(false);
           return;
         }
@@ -87,7 +88,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
         onCancel();
         return;
       } catch (err) {
-        setTestError(err.message);
+        setTestError(userErrorText(err.userError || err, { operation: 'search test' }));
         setTesting(false);
         return;
       }
