@@ -7,6 +7,7 @@ on:
 jobs:
   release:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
@@ -24,11 +25,15 @@ jobs:
         with:
           node-version: '22'
 
-      - run: npm ci
+      - name: Install
+        run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
 
       - name: Build
         run: npm run dist:${{ matrix.platform }}
         env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to release
