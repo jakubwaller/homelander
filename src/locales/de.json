@@ -57,6 +57,7 @@
     "supportBundlePath": "Erstellt eine .zip in ~/.homelander/support-bundles, öffnet den Ordner und kopiert den Pfad.",
     "sendBundlesTo": "Debug-Pakete senden an",
     "loadingPersona": "Lade Persona…",
+    "loadingConfig": "Lade Konfiguration…",
     "noTemplate": "Keine Vorlage gesetzt.",
     "livePreview": "Live-Vorschau:",
     "cancel": "Abbrechen",
@@ -180,7 +181,9 @@
     "retry": "Erneut versuchen",
     "emptyState": "Noch kein Verlauf.",
     "emptyHint": "Gesendete und fehlgeschlagene Inserate erscheinen hier.",
-    "exporting": "Exportiere…"
+    "exporting": "Exportiere…",
+    "loadingMore": "Lade mehr…",
+    "endOfHistory": "— Ende des Verlaufs —"
   },
   "setup": {
     "title": "Einrichtung",
@@ -330,7 +333,8 @@
     "noListings": "Keine Einträge gefunden",
     "selectAll": "Alle auswählen",
     "clearSelection": "Leeren",
-    "selected": "ausgewählt"
+    "selected": "ausgewählt",
+    "anyMoment": "jeden Moment"
   },
   "errors": {
     "backendUnavailable": {

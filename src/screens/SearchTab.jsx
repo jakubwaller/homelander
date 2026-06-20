@@ -260,7 +260,7 @@ export default function SearchTab() {
     if (!stats.nextPollAt) { setNextPollCountdown(''); return; }
     function tick() {
       const diff = new Date(stats.nextPollAt) - Date.now();
-      if (diff <= 0) return setNextPollCountdown('any moment');
+      if (diff <= 0) return setNextPollCountdown(t('search.anyMoment', 'jeden Moment'));
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
       setNextPollCountdown(`${m}m ${s}s`);

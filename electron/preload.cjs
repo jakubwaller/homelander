@@ -19,7 +19,7 @@ contextBridge.exposeInMainWorld('homelander', {
   addFilter: (webUrl, name) => ipcRenderer.invoke('filters:add', webUrl, name),
   removeFilter: (id) => ipcRenderer.invoke('filters:remove', id),
   updateFilter: (id, patch) => ipcRenderer.invoke('filters:update', id, patch),
-  testFilter: (webUrl) => ipcRenderer.invoke('filters:test', webUrl),
+  testFilter: (webUrl, locale) => ipcRenderer.invoke('filters:test', webUrl, locale),
 
   // ── Listings / History ────────────────────────────────────
   getHistory: (limit, offset, filterId, outcome) =>

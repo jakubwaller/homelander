@@ -543,14 +543,14 @@ function handleDaemonEvent(event) {
       if (config.notifications !== false) {
         if (event.outcome === 'SENT') {
           new Notification({
-            title: '✓ Application Sent',
-            body: `${event.title} — ${event.address || 'no address'}`,
+            title: '✓ Bewerbung gesendet',
+            body: `${event.title} — ${event.address || 'keine Adresse'}`,
             silent: true,
           }).show();
         } else if (event.outcome === 'FAIL') {
           const userError = toUserError(event.detail || event.failureReason || 'Application failed', { operation: 'listing apply' });
           new Notification({
-            title: 'Application needs attention',
+            title: 'Bewerbung braucht Aufmerksamkeit',
             body: `${event.title} — ${userError.title}`,
             silent: true,
           }).show();
@@ -561,8 +561,8 @@ function handleDaemonEvent(event) {
       mainWindow.webContents.send('homelander:event', event);
       if (config.notifications !== false) {
         new Notification({
-          title: '🔐 Captcha Wall Detected',
-          body: `Auto-paused for 15 minutes after ${event.consecutive} captchas`,
+          title: '🔐 Captcha-Wand erkannt',
+          body: `Nach ${event.consecutive} Captchas automatisch für 15 Minuten pausiert`,
           silent: true,
         }).show();
       }
@@ -576,8 +576,8 @@ function handleDaemonEvent(event) {
       });
       if (config.notifications !== false) {
         new Notification({
-          title: '⚠ IS24 Session Expired',
-          body: 'Log in again via Settings → IS24 Account',
+          title: '⚠ IS24-Anmeldung abgelaufen',
+          body: 'Melde dich erneut über Einstellungen → IS24-Konto an',
           silent: false,
         }).show();
       }
@@ -731,7 +731,7 @@ function registerIpcHandlers() {
       const db = new HomelanderDB(DB_PATH);
       try {
         const filter = db.getFilter(filterId);
-        if (!filter) return { ok: false, error: 'Search not found' };
+        if (!filter) return { ok: false, error: 'Suche nicht gefunden' };
 
         // Multi-page: fetch up to 5 pages, stop when page < 20 or 0 new
         const MAX_PAGES = 5, PAGE_SIZE = 20;
@@ -857,10 +857,10 @@ function registerIpcHandlers() {
     }
   });
 
-  ipcMain.handle('filters:test', async (_e, webUrl) => {
+  ipcMain.handle('filters:test', async (_e, webUrl, locale = 'en') => {
     try {
       const { getTotalResults } = await import('../engine/url-translator.js');
-      const result = await getTotalResults(webUrl);
+      const result = await getTotalResults(webUrl, { locale });
       if (result.error) {
         return {
           total: 0,

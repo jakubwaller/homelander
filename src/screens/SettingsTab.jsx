@@ -249,7 +249,7 @@ export default function SettingsTab() {
   if (!config) {
     return (
       <div className="py-12 text-center" style={{ color: 'var(--text-muted)' }}>
-        <p className="text-sm">Loading configuration...</p>
+        <p className="text-sm">{t('settings.loadingConfig', 'Lade Konfiguration…')}</p>
       </div>
     );
   }
@@ -391,7 +391,7 @@ export default function SettingsTab() {
             </div>
           </div>
         ) : (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{t('settings.loadingPersona', 'Loading persona…')}</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{t('settings.loadingPersona', 'Lade Persona…')}</p>
         )}
       </Section>
 

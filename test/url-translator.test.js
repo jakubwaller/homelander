@@ -159,6 +159,18 @@ describe('validateSearchUrl — user friendly import gate', () => {
     assert.ok(result.preview.filters.includes('Equipment: barrier-free'));
     assert.deepEqual(result.safeIgnoredParams, [{ key: 'enteredFrom', value: 'result_list' }]);
   });
+
+  it('localizes parsed search preview to German when requested by UI locale', () => {
+    const result = validateSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/bayern/muenchen/thalkirchen-obersendling-forstenried-fuerstenried-solln/solln/wohnung-mieten?enteredFrom=result_list',
+      { locale: 'de' }
+    );
+
+    assert.equal(result.ok, true);
+    assert.ok(result.preview.location.includes('Muenchen'));
+    assert.deepEqual(result.preview.filters, ['Wohnung zur Miete']);
+    assert.equal(result.preview.filters.includes('Apartment rent'), false);
+  });
 });
 
 // ---------------------------------------------------------------------------

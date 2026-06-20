@@ -235,7 +235,7 @@ export default function SetupWizard({ onComplete }) {
   if (!config) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p style={{ color: 'var(--text-muted)' }}>{t('setup.loading', 'Loading…')}</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('setup.loading', 'Lädt…')}</p>
       </div>
     );
   }

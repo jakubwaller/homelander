@@ -37,13 +37,114 @@ const PRICE_TYPE_MAP = {
   'grundstueck-kaufen': 'purchaseprice',
 };
 
-const REAL_ESTATE_LABELS = {
-  apartmentrent: 'Apartment rent',
-  apartmentbuy: 'Apartment buy',
-  houserent: 'House rent',
-  housebuy: 'House buy',
-  plotbuy: 'Plot buy',
+const PREVIEW_I18N = {
+  en: {
+    realEstate: {
+      apartmentrent: 'Apartment rent',
+      apartmentbuy: 'Apartment buy',
+      houserent: 'House rent',
+      housebuy: 'House buy',
+      plotbuy: 'Plot buy',
+    },
+    heating: {
+      CENTRAL_HEATING: 'central heating',
+      SELF_CONTAINED_CENTRAL_HEATING: 'self-contained central heating',
+      FLOOR_HEATING: 'floor heating',
+      GAS_HEATING: 'gas heating',
+      OIL_HEATING: 'oil heating',
+      DISTRICT_HEATING: 'district heating',
+      NIGHT_STORAGE_HEATER: 'night storage heating',
+      STOVE_HEATING: 'stove heating',
+      WOOD_PELLET_HEATING: 'wood pellet heating',
+      HEAT_PUMP: 'heat pump',
+      SOLAR_HEATING: 'solar heating',
+    },
+    equipment: {
+      HANDICAPPED_ACCESSIBLE: 'barrier-free',
+      BALCONY: 'balcony',
+      GARDEN: 'garden',
+      BUILT_IN_KITCHEN: 'built-in kitchen',
+      LIFT: 'elevator',
+      PARKING_SPACE: 'parking',
+      GUEST_TOILET: 'guest toilet',
+      CELLAR: 'cellar',
+      FRIDGE: 'fridge',
+      COOKER: 'cooker',
+      PETS_ALLOWED: 'pets allowed',
+      INTERNET: 'internet',
+    },
+    labels: {
+      allGermany: 'All Germany',
+      newBuildPrefix: 'New-build',
+      price: 'Price',
+      rooms: 'Rooms',
+      livingSpace: 'Living space',
+      heating: 'Heating',
+      equipment: 'Equipment',
+      energy: 'Energy',
+      pets: 'Pets',
+      any: 'any',
+      selected: 'selected',
+      unsupportedFilters: 'Unsupported IS24 search filters',
+      mobileRejects: (label) => `The IS24 mobile API rejects ${label} filters; Homelander keeps the supported parts of the search.`,
+    },
+  },
+  de: {
+    realEstate: {
+      apartmentrent: 'Wohnung zur Miete',
+      apartmentbuy: 'Wohnung zum Kauf',
+      houserent: 'Haus zur Miete',
+      housebuy: 'Haus zum Kauf',
+      plotbuy: 'Grundstück zum Kauf',
+    },
+    heating: {
+      CENTRAL_HEATING: 'Zentralheizung',
+      SELF_CONTAINED_CENTRAL_HEATING: 'Etagenheizung',
+      FLOOR_HEATING: 'Fußbodenheizung',
+      GAS_HEATING: 'Gasheizung',
+      OIL_HEATING: 'Ölheizung',
+      DISTRICT_HEATING: 'Fernwärme',
+      NIGHT_STORAGE_HEATER: 'Nachtspeicherheizung',
+      STOVE_HEATING: 'Ofenheizung',
+      WOOD_PELLET_HEATING: 'Pelletheizung',
+      HEAT_PUMP: 'Wärmepumpe',
+      SOLAR_HEATING: 'Solarheizung',
+    },
+    equipment: {
+      HANDICAPPED_ACCESSIBLE: 'barrierefrei',
+      BALCONY: 'Balkon',
+      GARDEN: 'Garten',
+      BUILT_IN_KITCHEN: 'Einbauküche',
+      LIFT: 'Aufzug',
+      PARKING_SPACE: 'Stellplatz',
+      GUEST_TOILET: 'Gäste-WC',
+      CELLAR: 'Keller',
+      FRIDGE: 'Kühlschrank',
+      COOKER: 'Herd',
+      PETS_ALLOWED: 'Haustiere erlaubt',
+      INTERNET: 'Internet',
+    },
+    labels: {
+      allGermany: 'Deutschlandweit',
+      newBuildPrefix: 'Neubau',
+      price: 'Preis',
+      rooms: 'Zimmer',
+      livingSpace: 'Wohnfläche',
+      heating: 'Heizung',
+      equipment: 'Ausstattung',
+      energy: 'Energie',
+      pets: 'Haustiere',
+      any: 'egal',
+      selected: 'ausgewählt',
+      unsupportedFilters: 'Nicht unterstützte IS24-Suchfilter',
+      mobileRejects: (label) => `Die IS24 Mobile API lehnt Filter für ${label} ab; Homelander übernimmt die unterstützten Teile der Suche.`,
+    },
+  },
 };
+
+function previewLocale(locale = 'en') {
+  return PREVIEW_I18N[String(locale).toLowerCase().startsWith('de') ? 'de' : 'en'];
+}
 
 const SAFE_IGNORED_PARAM_PATTERNS = [
   /^enteredfrom$/i,
@@ -397,60 +498,74 @@ function formatRangePreview(range, unit = '') {
   return `≤ ${range.max}${suffix}`;
 }
 
-function formatDirectParamPreview({ key, value }) {
+function formatDirectParamPreview({ key, value }, i18n) {
   if (key === 'energyefficiencyclasses') {
     const label = value.split(',').map(v => v.replace('a_plus', 'A+').toUpperCase()).join(', ');
-    return `Energy: ${label}`;
+    return `${i18n.labels.energy}: ${label}`;
   }
   if (key === 'petsallowedtypes') {
     const values = value.split(',').map(v => v.trim()).filter(Boolean);
     const allPetValues = ['no', 'yes', 'negotiable'];
-    if (allPetValues.every(v => values.includes(v))) return 'Pets: any';
-    return `Pets: ${values.join(', ')}`;
+    if (allPetValues.every(v => values.includes(v))) return `${i18n.labels.pets}: ${i18n.labels.any}`;
+    return `${i18n.labels.pets}: ${values.join(', ')}`;
   }
   return `${key}: ${value}`;
 }
 
-function previewFor(canonical) {
+function previewFor(canonical, locale = 'en') {
+  const i18n = previewLocale(locale);
   const filters = [];
-  let type = REAL_ESTATE_LABELS[canonical.realEstateType] || canonical.realEstateType;
-  if (canonical.construction?.newBuildingOnly) type = `New-build ${type.charAt(0).toLowerCase()}${type.slice(1)}`;
+  let type = i18n.realEstate[canonical.realEstateType] || canonical.realEstateType;
+  if (canonical.construction?.newBuildingOnly) {
+    type = String(locale).toLowerCase().startsWith('de')
+      ? `${i18n.labels.newBuildPrefix}: ${type}`
+      : `${i18n.labels.newBuildPrefix} ${type.charAt(0).toLowerCase()}${type.slice(1)}`;
+  }
   if (canonical.flatShare?.label) type = canonical.flatShare.label;
   filters.push(type);
 
   const price = formatRangePreview(canonical.price);
   const rooms = formatRangePreview(canonical.rooms);
   const livingSpace = formatRangePreview(canonical.livingSpace, 'm²');
-  if (price) filters.push(`Price ${price}`);
-  if (rooms) filters.push(`Rooms ${rooms}`);
-  if (livingSpace) filters.push(`Living space ${livingSpace}`);
-  if (canonical.heatingTypes?.length) filters.push(`Heating: ${canonical.heatingTypes.map(v => HEATING_LABELS[v] || v).join(', ')}`);
+  if (price) filters.push(`${i18n.labels.price} ${price}`);
+  if (rooms) filters.push(`${i18n.labels.rooms} ${rooms}`);
+  if (livingSpace) filters.push(`${i18n.labels.livingSpace} ${livingSpace}`);
+  if (canonical.heatingTypes?.length) filters.push(`${i18n.labels.heating}: ${canonical.heatingTypes.map(v => i18n.heating[v] || v).join(', ')}`);
   if (canonical.equipment?.length) {
-    const labels = canonical.equipment.map(v => EQUIPMENT_LABELS[v] || v);
-    filters.push(labels.length > 3 ? `Equipment: ${labels.length} selected` : `Equipment: ${labels.join(', ')}`);
+    const labels = canonical.equipment.map(v => i18n.equipment[v] || v);
+    filters.push(labels.length > 3 ? `${i18n.labels.equipment}: ${labels.length} ${i18n.labels.selected}` : `${i18n.labels.equipment}: ${labels.join(', ')}`);
   }
-  for (const directParam of canonical.directParams || []) filters.push(formatDirectParamPreview(directParam));
-  return { location: canonical.location?.label || 'All Germany', filters };
+  for (const directParam of canonical.directParams || []) filters.push(formatDirectParamPreview(directParam, i18n));
+  const locationLabel = canonical.location?.label === PREVIEW_I18N.en.labels.allGermany
+    ? i18n.labels.allGermany
+    : (canonical.location?.label || i18n.labels.allGermany);
+  return { location: locationLabel, filters };
 }
 
 /** Validate a pasted search URL for user-facing import. Blocks dangerous unknown filters. */
-export function validateSearchUrl(webUrl) {
+export function validateSearchUrl(webUrl, options = {}) {
+  const locale = typeof options === 'string' ? options : (options.locale || 'en');
+  const i18n = previewLocale(locale);
   const parsed = parseSearchUrl(webUrl);
   if (parsed.error) {
     return { ok: false, error: parsed.error, ...parsed, preview: { location: '', filters: [] }, mobileUrl: '' };
   }
-  const preview = previewFor(parsed.canonical);
+  const preview = previewFor(parsed.canonical, locale);
   const dangerous = parsed.unsupportedParams.filter(p => p.risk === 'dangerous');
   const error = dangerous.length
-    ? `Unsupported IS24 search filters: ${dangerous.map(p => `${p.key}=${p.value}`).join(', ')}`
+    ? `${i18n.labels.unsupportedFilters}: ${dangerous.map(p => `${p.key}=${p.value}`).join(', ')}`
     : null;
+  const localizeIgnored = (p) => {
+    if (!p.mobileRejected) return p;
+    return { ...p, reason: i18n.labels.mobileRejects(p.label || p.key) };
+  };
   return {
     ok: !error,
     error,
     canonical: parsed.canonical,
     preview,
     unsupportedParams: parsed.unsupportedParams,
-    safeIgnoredParams: parsed.safeIgnoredParams,
+    safeIgnoredParams: parsed.safeIgnoredParams.map(localizeIgnored),
     mobileUrl: buildMobileApiUrl(parsed.canonical),
   };
 }
@@ -466,8 +581,8 @@ export function translateUrl(webUrl) {
 }
 
 /** Fetch total result count for a search URL (used by "Test" button). */
-export async function getTotalResults(webUrl) {
-  const validation = validateSearchUrl(webUrl);
+export async function getTotalResults(webUrl, options = {}) {
+  const validation = validateSearchUrl(webUrl, options);
   if (!validation.ok) return { total: 0, error: validation.error, validation };
 
   const totalUrl = buildMobileApiUrl(validation.canonical, { includeListControls: false })

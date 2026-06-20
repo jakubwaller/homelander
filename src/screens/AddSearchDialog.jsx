@@ -42,7 +42,7 @@ function compactValidationError(validation, fallback, t) {
 }
 
 export default function AddSearchDialog({ onCancel, onAdd }) {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
   const [testing, setTesting] = useState(false);
@@ -64,7 +64,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
         setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t));
         return;
       }
-      const result = await window.homelander.testFilter(url.trim());
+      const result = await window.homelander.testFilter(url.trim(), locale);
       setValidation(result.validation || null);
       if (result.error) {
         setTestError(compactValidationError(result.validation, userErrorText(result.userError || result, { operation: 'search test' }), t));
@@ -91,7 +91,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
           setTesting(false);
           return;
         }
-        const result = await window.homelander.testFilter(url.trim());
+        const result = await window.homelander.testFilter(url.trim(), locale);
         setValidation(result.validation || null);
         if (result.error) {
           setTestError(compactValidationError(result.validation, userErrorText(result.userError || result, { operation: 'search test' }), t));

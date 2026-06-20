@@ -57,6 +57,7 @@
     "supportBundlePath": "Creates a .zip in ~/.homelander/support-bundles, opens the folder, and copies the path.",
     "sendBundlesTo": "Send debug bundles to",
     "loadingPersona": "Loading persona…",
+    "loadingConfig": "Loading configuration…",
     "noTemplate": "No template set.",
     "livePreview": "Live preview:",
     "cancel": "Cancel",
@@ -180,7 +181,9 @@
     "retry": "Retry",
     "emptyState": "No history yet.",
     "emptyHint": "Sent and failed listings will appear here.",
-    "exporting": "Exporting…"
+    "exporting": "Exporting…",
+    "loadingMore": "Loading more…",
+    "endOfHistory": "— End of history —"
   },
   "setup": {
     "title": "Setup",
@@ -330,7 +333,8 @@
     "noListings": "No listings found",
     "selectAll": "Select all",
     "clearSelection": "Clear",
-    "selected": "selected"
+    "selected": "selected",
+    "anyMoment": "any moment"
   },
   "errors": {
     "backendUnavailable": {
