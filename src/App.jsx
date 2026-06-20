@@ -7,14 +7,12 @@ import SearchTab from './screens/SearchTab';
 import HistoryTab from './screens/HistoryTab';
 import SettingsTab from './screens/SettingsTab';
 import SetupWizard from './screens/SetupWizard';
+import LanguagePicker from './screens/LanguagePicker';
 import StatusDot from './components/StatusDot';
+import { LocaleProvider, useLocale } from './locales/LocaleContext';
 import { userErrorText } from './shared/userErrors';
 
-const TABS = [
-  { id: 'searches', label: 'Searches' },
-  { id: 'history', label: 'History' },
-  { id: 'settings', label: 'Settings' },
-];
+const TABS = ['searches', 'history', 'settings'];
 
 function normalizeStats(stats) {
   if (!stats) return stats;
@@ -45,6 +43,11 @@ function normalizeStats(stats) {
 }
 
 export default function App() {
+  return React.createElement(LocaleProvider, null, React.createElement(AppInner));
+}
+
+function AppInner() {
+  const { chosen, t } = useLocale();
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const setupComplete = useStore((s) => s.setupComplete);
@@ -202,6 +205,11 @@ export default function App() {
     }
   }, [setDaemonStatus]);
 
+  // Show language picker during first-launch setup before anything else
+  if (!chosen && !setupComplete) {
+    return React.createElement(LanguagePicker);
+  }
+
   // Show setup wizard on first launch
   if (!setupComplete) {
     return <SetupWizard onComplete={() => setSetupComplete(true)} />;
@@ -218,24 +226,24 @@ export default function App() {
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="text-base">🏠</span>
-            <h1 className="text-lg font-semibold tracking-tight">Homelander</h1>
+            <h1 className="text-lg font-semibold tracking-tight">{t('app.title', 'Homelander')}</h1>
           </div>
           <div
             className="flex items-center gap-3 px-2.5 py-1 rounded"
           >
           <StatusDot status={daemonStatus} />
           <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-            {daemonStatus === 'running' ? 'Active'
-              : daemonStatus === 'paused' ? 'Paused'
-              : daemonStatus === 'session_expired' ? 'Login needed'
-              : daemonStatus === 'restarting' ? 'Restarting…'
-              : 'Stopped'}
+            {daemonStatus === 'running' ? t('status.active', 'Active')
+              : daemonStatus === 'paused' ? t('status.paused', 'Paused')
+              : daemonStatus === 'session_expired' ? t('status.loginNeeded', 'Login needed')
+              : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…')
+              : t('status.stopped', 'Stopped')}
           </span>
           <button
             className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
             onClick={handleToggleDaemon}
             disabled={daemonControlDisabled}
-            title={daemonStatus === 'stopped' ? 'Start' : daemonStatus === 'running' ? 'Pause' : daemonStatus === 'session_expired' ? 'Open Chromium to log in' : daemonStatus === 'restarting' ? 'Restarting…' : 'Resume'}
+            title={daemonStatus === 'stopped' ? t('daemon.start', 'Start') : daemonStatus === 'running' ? t('daemon.pause', 'Pause') : daemonStatus === 'session_expired' ? t('daemon.openChromium', 'Open Chromium to log in') : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…') : t('daemon.resume', 'Resume')}
             style={{
               fontSize: '13px',
               background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'session_expired' ? 'rgba(239,68,68,0.14)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
@@ -249,7 +257,7 @@ export default function App() {
             <button
               className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
               onClick={handleStopDaemon}
-              title="Stop"
+              title={t('daemon.stop', 'Stop')}
               style={{ fontSize: '13px', background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}
             >
               ⏹
@@ -263,13 +271,13 @@ export default function App() {
 
         {/* Right: tabs */}
         <nav className="flex gap-1">
-          {TABS.map((tab) => (
+          {TABS.map((id) => (
             <button
-              key={tab.id}
-              className={`tab ${activeTab === tab.id ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.id)}
+              key={id}
+              className={`tab ${activeTab === id ? 'active' : ''}`}
+              onClick={() => setActiveTab(id)}
             >
-              {tab.label}
+              {t(`tabs.${id}`, id)}
             </button>
           ))}
         </nav>
@@ -293,7 +301,7 @@ export default function App() {
           >
             Mykola Fedurko
           </a>
-          {' '}© 2026
+          {' '}{t('app.footer', '© 2026')}
         </p>
       </footer>
     </div>

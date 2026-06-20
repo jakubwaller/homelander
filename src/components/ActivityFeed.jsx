@@ -1,7 +1,8 @@
 // Activity feed — live-scrolling list of sent/failed listings.
 // Each entry is clickable: expands to show detail + IS24 link.
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useLocale } from '../locales/LocaleContext';
 import { useStore } from '../stores/appStore';
 import { userErrorText } from '../shared/userErrors';
 
@@ -207,7 +208,7 @@ export default function ActivityFeed() {
                   className="flex-shrink-0"
                   style={{ color: 'var(--accent)', fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   onClick={(e) => { e.stopPropagation(); window.homelander?.openListingInChrome?.(exposeId); }}
-                  title="Open in Homelander Chromium"
+                  title={t('livefeed.openInChrome', 'Open in Homelander Chromium')}
                 >
                   ↗
                 </button>
@@ -216,14 +217,14 @@ export default function ActivityFeed() {
               {/* Retry button (visible on summary row for quick access) */}
               {!isSent && !isDeactivated && exposeId && (
                 requeued.has(exposeId) ? (
-                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--success)' }}>Re-queued →</span>
+                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--success)' }}>{t('livefeed.requeued', 'Re-queued →')}</span>
                 ) : (
                   <button
                     className="btn btn-ghost flex-shrink-0"
                     onClick={(e) => { e.stopPropagation(); handleRetry(exposeId); }}
                     disabled={retrying.has(exposeId)}
                     style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '20px' }}
-                    title="Retry this listing"
+                    title={t("livefeed.retryThis", "Retry this listing")}
                   >
                     {retrying.has(exposeId) ? '⟳' : '⟳'}
                   </button>
@@ -305,7 +306,7 @@ export default function ActivityFeed() {
                         {supportBusyId === exposeId ? '✓ Debug bundle exported' : '📦 Export Debug Bundle'}
                       </button>
                       <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                        screenshot + HTML + entry logs
+                        {t('livefeed.supportDesc', 'screenshot + HTML + entry logs')}
                       </span>
                     </div>
                   )}

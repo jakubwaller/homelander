@@ -13,6 +13,7 @@ import {
   IS24_DOCUMENTS,
 } from '../shared/is24FormOptions';
 import { userErrorText } from '../shared/userErrors';
+import { useLocale } from '../locales/LocaleContext';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ function Section({ title, children }) {
 // ── Main component ──────────────────────────────────────────────────
 
 export default function SettingsTab() {
+  const { t, locale, setLocale } = useLocale();
   const config = useStore((s) => s.config);
   const setConfig = useStore((s) => s.setConfig);
 
@@ -126,7 +128,7 @@ export default function SettingsTab() {
     } else {
       const fresh = await window.homelander.getConfig();
       setConfig(fresh);
-      showFeedback({ type: 'success', msg: 'Saved' });
+      showFeedback({ type: 'success', msg: t('settings.saved', 'Saved') });
     }
   };
 
@@ -163,7 +165,7 @@ export default function SettingsTab() {
     if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
     if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
     if (errors.length > 0) {
-      const msg = errors.length > 3 ? 'All fields are required' : errors.join('; ');
+      const msg = errors.length > 3 ? t('settings.persona.required') : errors.join('; ');
       showFeedback({ type: 'error', msg });
       return;
     }
@@ -276,57 +278,57 @@ export default function SettingsTab() {
       )}
 
       {/* ── 1. Persona ──────────────────────────────────────────── */}
-      <Section title="Persona">
+      <Section title={t("settings.persona")}>
         {personaDraft ? (
           <div className="space-y-3">
             <div className="grid grid-cols-4 gap-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Anrede</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.anrede")}</label>
                 <select className="select text-sm" value={personaDraft.anrede} onChange={(e) => updatePersonaField('anrede', e.target.value)}>
                   <option value="">-</option>
                   {IS24_SALUTATION.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Vorname</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.vorname")}</label>
                 <input className="input text-sm" value={personaDraft.vorname} onChange={(e) => updatePersonaField('vorname', e.target.value)} />
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Nachname</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.nachname")}</label>
                 <input className="input text-sm" value={personaDraft.nachname} onChange={(e) => updatePersonaField('nachname', e.target.value)} />
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>E-Mail</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.email")}</label>
                 <input className="input text-sm" type="email" value={personaDraft.email} onChange={(e) => updatePersonaField('email', e.target.value)} />
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Telefon</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.telefon")}</label>
                 <input className="input text-sm" value={personaDraft.telefon} onChange={(e) => updatePersonaField('telefon', e.target.value)} />
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Straße</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.strasse")}</label>
                 <input className="input text-sm" value={personaDraft.strasse} onChange={(e) => updatePersonaField('strasse', e.target.value)} />
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Hausnr.</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.hausnr")}</label>
                 <input className="input text-sm" value={personaDraft.hausnummer} onChange={(e) => updatePersonaField('hausnummer', e.target.value)} />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>PLZ</label>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.plz")}</label>
                   <input className="input text-sm" value={personaDraft.plz} onChange={(e) => updatePersonaField('plz', e.target.value)} />
                 </div>
                 <div>
-                  <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Ort</label>
+                  <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.ort")}</label>
                   <input className="input text-sm" value={personaDraft.ort} onChange={(e) => updatePersonaField('ort', e.target.value)} />
                 </div>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Einzug</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.einzug")}</label>
                 <select className="select text-sm" value={personaDraft.einzug} onChange={(e) => updatePersonaField('einzug', e.target.value)}>
                   {IS24_MOVE_IN.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
                   <option value="">—</option>
@@ -341,13 +343,13 @@ export default function SettingsTab() {
                 )}
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Personen</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.personen")}</label>
                 <select className="select text-sm" value={personaDraft.personen} onChange={(e) => updatePersonaField('personen', e.target.value)}>
                   {IS24_PERSONS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Haustiere</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.haustiere")}</label>
                 <select className="select text-sm" value={personaDraft.haustiere} onChange={(e) => updatePersonaField('haustiere', e.target.value)}>
                   {IS24_PETS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
@@ -355,14 +357,14 @@ export default function SettingsTab() {
                   <input
                     className="input mt-2 text-sm"
                     type="text"
-                    placeholder="Anzahl und Tierart"
+                    placeholder={t("settings.persona.haustiereZusatz")}
                     value={personaDraft.haustiere_zusatz}
                     onChange={(e) => updatePersonaField('haustiere_zusatz', e.target.value)}
                   />
                 )}
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Beschäftigung</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.beschaeftigung")}</label>
                 <select className="select text-sm" value={personaDraft.beschaeftigung} onChange={(e) => updatePersonaField('beschaeftigung', e.target.value)}>
                   {IS24_EMPLOYMENT.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
@@ -370,13 +372,13 @@ export default function SettingsTab() {
             </div>
             <div className="grid grid-cols-4 gap-3">
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Einkommen (netto)</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.einkommen")}</label>
                 <select className="select text-sm" value={personaDraft.einkommen} onChange={(e) => updatePersonaField('einkommen', e.target.value)}>
                   {IS24_INCOME.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>Unterlagen</label>
+                <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t("settings.persona.unterlagen")}</label>
                 <select className="select text-sm" value={personaDraft.unterlagen} onChange={(e) => updatePersonaField('unterlagen', e.target.value)}>
                   {IS24_DOCUMENTS.map((o) => <option key={o} value={o}>{o || '-'}</option>)}
                 </select>
@@ -394,7 +396,7 @@ export default function SettingsTab() {
       </Section>
 
       {/* ── 2. Message Template ──────────────────────────────────── */}
-      <Section title="Message Template">
+      <Section title={t("settings.messageTemplate")}>
         <textarea
           className="input resize-y text-sm font-mono leading-6"
           rows={templateRows}
@@ -424,26 +426,26 @@ export default function SettingsTab() {
       </Section>
 
       {/* ── 3. Timing ────────────────────────────────────────────── */}
-      <Section title="Timing">
+      <Section title={t("settings.timing")}>
         <div className="flex items-start justify-between">
           <div className="flex gap-4 flex-1">
             <div className="flex-1">
-              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Speed</label>
+              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>{t("settings.speed")}</label>
               <select
                 className="select text-sm w-full"
                 value={timingDraft.speed}
                 onChange={(e) => updateTimingField('speed', e.target.value)}
               >
-                <option value="fast">Fast</option>
-                <option value="balanced">Balanced</option>
-                <option value="slow">Slow</option>
+                <option value="fast">{t("settings.fast")}</option>
+                <option value="balanced">{t("settings.balanced")}</option>
+                <option value="slow">{t("settings.slow")}</option>
               </select>
               <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
                 {timingDraft.speed === 'fast' ? 'Minimum delays, higher captcha risk' : timingDraft.speed === 'slow' ? 'Maximum delays, safest' : 'Default balance'}
               </p>
             </div>
             <div className="flex-1">
-              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>Poll interval (min)</label>
+              <label className="text-xs mb-1.5 block" style={{ color: 'var(--text-muted)' }}>{t("settings.pollInterval")}</label>
               <input
                 className="input text-sm w-full"
                 type="number"
@@ -464,12 +466,12 @@ export default function SettingsTab() {
       </Section>
 
       {/* ── 4. 2captcha API Key ──────────────────────────────────── */}
-      <Section title="2captcha API Key">
+      <Section title={t("settings.captcha")}>
         <div className="flex items-center gap-3">
           <input
             className="input text-sm flex-1"
             type={showCaptcha ? 'text' : 'password'}
-            placeholder="Enter your 2captcha API key"
+            placeholder={t("settings.placeholder.apiKey")}
             value={captchaDraft}
             onChange={(e) => setCaptchaDraft(e.target.value)}
           />
@@ -489,14 +491,14 @@ export default function SettingsTab() {
       </Section>
 
       {/* ── 5. Support Bundle ──────────────────────────────────── */}
-      <Section title="Support Bundle">
+      <Section title={t("settings.support")}>
         <div className="flex items-center justify-between gap-4">
           <div>
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
               Export redacted logs, config, Chrome status, and recent debug screenshots/HTML.
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Creates a .zip in ~/.homelander/support-bundles, opens the folder, and copies the path.
+              Creates a .zip in ~/.homelander/support-bundles, {t('settings.opensFolder', 'opens the folder')}, and copies the path.
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
               Send debug bundles to{' '}
@@ -511,7 +513,32 @@ export default function SettingsTab() {
         </div>
       </Section>
 
-      {/* ── 6. Clean All Data ──────────────────────────────────── */}
+      {/* ── 6. Language ──────────────────────────────────────────── */}
+      <Section title={t("settings.language")}>
+        <div className="flex items-center gap-2">
+          {['en', 'de'].map((lang) => (
+            <button
+              key={lang}
+              className="btn text-xs"
+              onClick={() => setLocale(lang)}
+              style={{
+                background: locale === lang ? 'var(--accent)' : 'var(--bg-tertiary)',
+                color: locale === lang ? '#fff' : 'var(--text-secondary)',
+                border: locale === lang ? 'none' : '1px solid var(--border)',
+                padding: '4px 14px',
+                fontWeight: locale === lang ? 600 : 400,
+              }}
+            >
+              {lang === 'en' ? '🇬🇧 English' : '🇩🇪 Deutsch'}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+          {t('setup.changeLater', 'You can change this later in Settings')}
+        </p>
+      </Section>
+
+      {/* ── 7. Clean All Data ──────────────────────────────────── */}
       <div className="pt-2">
         {cleanupStep === null ? (
           <button className="btn btn-danger text-sm w-full" onClick={handleCleanData}>

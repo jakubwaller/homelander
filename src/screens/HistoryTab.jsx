@@ -2,6 +2,7 @@
 // Filterable by outcome and search, grouped by date, with CSV export.
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocale } from '../locales/LocaleContext';
 import { useStore } from '../stores/appStore';
 import { userErrorText } from '../shared/userErrors';
 
@@ -193,7 +194,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
             className="flex-shrink-0"
             style={{ color: 'var(--accent)', fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
             onClick={(e) => { e.stopPropagation(); window.homelander?.openListingInChrome?.(listing.expose_id); }}
-            title="Open in Homelander Chromium"
+            title={t('history.openInChrome', 'Open in Homelander Chromium')}
           >
             ↗
           </button>
@@ -202,14 +203,14 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
         {/* Retry button */}
         {!isSent && !isDeactivated && listing.expose_id && onRetry && (
           requeued ? (
-            <span className="text-xs flex-shrink-0" style={{ color: 'var(--success)' }}>Re-queued →</span>
+            <span className="text-xs flex-shrink-0" style={{ color: 'var(--success)' }}>{t('history.requeued', 'Re-queued →')}</span>
           ) : (
             <button
               className="btn btn-ghost flex-shrink-0"
               onClick={(e) => { e.stopPropagation(); onRetry(listing.expose_id); }}
               disabled={retrying?.has(listing.expose_id)}
               style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
-              title="Retry this listing"
+              title={t("history.retryThis", "Retry this listing")}
             >
               <span style={{ fontSize: '20px' }}>⟳</span>
             </button>
@@ -321,7 +322,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                   {supportBusy ? '✓ Debug bundle exported' : '📦 Export Debug Bundle'}
                 </button>
                 <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                  screenshot + HTML + entry logs
+                  {t('history.supportDesc', 'screenshot + HTML + entry logs')}
                 </span>
               </div>
             )}

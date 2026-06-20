@@ -1,0 +1,230 @@
+{
+  "app": {
+    "title": "Homelander",
+    "footer": "© 2026"
+  },
+  "tabs": {
+    "searches": "Searches",
+    "history": "History",
+    "settings": "Settings",
+    "kanban": "Kanban"
+  },
+  "status": {
+    "active": "Active",
+    "paused": "Paused",
+    "loginNeeded": "Login needed",
+    "restarting": "Restarting…",
+    "stopped": "Stopped"
+  },
+  "daemon": {
+    "start": "Start",
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Stop",
+    "openChromium": "Open Chromium to log in"
+  },
+  "settings": {
+    "persona": "Persona",
+    "messageTemplate": "Message Template",
+    "timing": "Timing",
+    "captcha": "2captcha API Key",
+    "support": "Support Bundle",
+    "danger": "Danger Zone",
+    "manageSearches": "Manage Searches",
+    "language": "Language",
+    "save": "Save",
+    "saved": "Saved",
+    "speed": "Speed",
+    "slow": "Slow",
+    "balanced": "Balanced",
+    "fast": "Fast",
+    "pollInterval": "Poll interval (min)",
+    "placeholder": {
+      "apiKey": "Enter your 2captcha API key",
+      "email": "your@email.com",
+      "template": "Sehr geehrte Damen und Herren,\nich interessiere mich für {{title}} in {{address}}...\n\nMit freundlichen Grüßen\n{{name}}"
+    },
+    "showKey": "Show key",
+    "supportExport": "Export Support Bundle",
+    "supportExporting": "Exporting…",
+    "supportExported": "Bundle saved",
+    "supportDesc": "Creates a zip with daemon log, config (redacted), and recent debug screenshots.",
+    "opensFolder": "opens the folder",
+    "contact": "contact:",
+    "persona": {
+      "anrede": "Anrede",
+      "vorname": "Vorname",
+      "nachname": "Nachname",
+      "email": "E-Mail",
+      "telefon": "Telefon",
+      "strasse": "Straße",
+      "hausnr": "Hausnr.",
+      "plz": "PLZ",
+      "ort": "Ort",
+      "einzug": "Einzug",
+      "personen": "Personen",
+      "haustiere": "Haustiere",
+      "haustiereZusatz": "Anzahl und Tierart",
+      "beschaeftigung": "Beschäftigung",
+      "einkommen": "Einkommen (netto)",
+      "unterlagen": "Unterlagen",
+      "required": "All fields are required"
+    },
+    "cleanup": {
+      "title": "Clean up all local data",
+      "desc": "Wipe IS24 profile, debug files, and history. This does not touch your IS24 account.",
+      "confirm": "This will delete all local Homelander data.",
+      "typeEmail": "Type your email to confirm",
+      "mismatch": "Email does not match",
+      "deleting": "Deleting…",
+      "done": "All local Homelander data deleted.",
+      "failed": "Cleanup failed"
+    },
+    "browser": {
+      "title": "Browser Management",
+      "openChrome": "Open Homelander Chromium"
+    }
+  },
+  "livefeed": {
+    "title": "Live Feed",
+    "filterPlaceholder": "Filter by filter name…",
+    "allOutcomes": "All outcomes",
+    "noEntries": "No entries yet",
+    "sent": "Sent",
+    "failed": "Failed",
+    "deactivated": "Deactivated",
+    "pollingPaused": "Polling paused",
+    "retryThis": "Retry this listing",
+    "requeued": "Re-queued →",
+    "openInChrome": "Open in Homelander Chromium",
+    "premium": "Premium",
+    "supportExport": "📦 Export Debug Bundle",
+    "supportExported": "✓ Debug bundle exported",
+    "supportDesc": "screenshot + HTML + entry logs"
+  },
+  "history": {
+    "title": "History",
+    "filterPlaceholder": "Filter…",
+    "all": "All",
+    "sent": "Sent",
+    "failed": "Failed",
+    "deactivated": "Deactivated",
+    "noEntries": "No history yet",
+    "supportExport": "📦 Export Debug Bundle",
+    "supportExported": "✓ Debug bundle exported",
+    "supportDesc": "screenshot + HTML + entry logs",
+    "openInChrome": "Open in Homelander Chromium",
+    "premium": "Premium",
+    "retryThis": "Retry this listing",
+    "requeued": "Re-queued →",
+    "exportCsv": "Export CSV"
+  },
+  "setup": {
+    "title": "Setup",
+    "language": "Language",
+    "languageDesc": "Choose your language",
+    "english": "English",
+    "german": "Deutsch",
+    "changeLater": "You can change this later in Settings",
+    "persona": "Persona",
+    "message": "Message",
+    "is24": "IS24",
+    "captcha": "2captcha",
+    "search": "Search",
+    "done": "Done",
+    "continue": "Continue",
+    "back": "Back",
+    "finish": "Finish Setup",
+    "searchPlaceholder": "https://www.immobilienscout24.de/Suche/...",
+    "searchDesc": "Paste an IS24 search URL to auto-fill it after setup.",
+    "searchLabel": "First search URL",
+    "personaDesc": "Tell Homelander who you are — this fills IS24 contact forms.",
+    "messageDesc": "Customize the message sent with each application.",
+    "is24Desc": "Log into IS24 so Homelander can apply on your behalf.",
+    "is24Waiting": "Log in, then click Continue.",
+    "is24Launching": "Opening Chromium…",
+    "is24Preparing": "Preparing browser…",
+    "captchaDesc": "2captcha API key for automated captcha solving (optional).",
+    "validating": "Validating…",
+    "allFields": "All fields are required"
+  },
+  "search": {
+    "title": "Searches",
+    "addSearch": "Add Search",
+    "editFilter": "Edit filter name",
+    "rename": "Rename",
+    "remove": "Remove",
+    "pasteUrl": "Paste a full IS24 search URL",
+    "filterName": "Filter name",
+    "cancel": "Cancel",
+    "add": "Add",
+    "addFilter": "Add filter",
+    "saveName": "Save name",
+    "paused": "Paused",
+    "enabled": "Enabled",
+    "togglePaused": "Toggle pause",
+    "newListings": "new",
+    "noListings": "No listings found",
+    "selectAll": "Select all",
+    "clearSelection": "Clear",
+    "selected": "selected"
+  },
+  "errors": {
+    "backendUnavailable": {
+      "title": "Backend unavailable",
+      "message": "Homelander is still starting up. Try again in a moment."
+    },
+    "browserStartFailed": {
+      "title": "Could not open Chromium",
+      "message": "Homelander could not start its bundled browser. Restart the app and try again."
+    },
+    "browserNotResponding": {
+      "title": "Chromium is not responding",
+      "message": "The controlled Chromium session stopped responding. Restart Chromium or restart Homelander."
+    },
+    "sessionExpired": {
+      "title": "Login needed",
+      "message": "Homelander needs you to log back into IS24 before it can continue applying."
+    },
+    "searchUrlInvalid": {
+      "title": "Search URL not accepted",
+      "message": "This does not look like a usable IS24 search URL. Paste the full search results URL from IS24."
+    },
+    "searchPollFailed": {
+      "title": "Could not poll this search",
+      "message": "Homelander could not refresh listings for this search. IS24 or the network may be temporarily unavailable."
+    },
+    "configSaveFailed": {
+      "title": "Could not save settings",
+      "message": "Homelander could not save the settings. Try again or restart the app."
+    },
+    "databaseError": {
+      "title": "Could not read saved data",
+      "message": "Homelander could not read or write its local database. Restart the app."
+    },
+    "captchaKeyInvalid": {
+      "title": "2captcha key not accepted",
+      "message": "2captcha did not accept this key. Check the key or leave it empty."
+    },
+    "cleanupConfirmationFailed": {
+      "title": "Email does not match",
+      "message": "Type the configured email exactly to confirm."
+    },
+    "csvExportFailed": {
+      "title": "Could not export history",
+      "message": "Homelander could not export the selected history rows."
+    },
+    "daemonActionFailed": {
+      "title": "Daemon action failed",
+      "message": "Homelander could not change the daemon state. Try again or restart."
+    },
+    "listingRetryFailed": {
+      "title": "Could not queue retry",
+      "message": "Homelander could not queue this listing for retry."
+    },
+    "generic": {
+      "title": "Something went wrong",
+      "message": "Homelander could not complete that action. Details were logged."
+    }
+  }
+}
