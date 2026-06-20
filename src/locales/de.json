@@ -292,6 +292,7 @@
     "noSearchesConfigured": "Noch keine Suchen eingerichtet.",
     "noSearchesHint": "Füge eine IS24-Such-URL hinzu, um automatisch Bewerbungen zu starten.",
     "nextPollIn": "Nächste Prüfung in {{time}}",
+    "nextPollSoon": "Nächste Prüfung: bald",
     "test": "Prüfen",
     "testing": "Prüfe…",
     "resultsFound": "{{count}} Ergebnisse gefunden",

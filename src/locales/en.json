@@ -292,6 +292,7 @@
     "noSearchesConfigured": "No searches configured yet.",
     "noSearchesHint": "Add an IS24 search URL to start auto-applying to new listings.",
     "nextPollIn": "Next poll in {{time}}",
+    "nextPollSoon": "Next poll: soon",
     "test": "Test",
     "testing": "Testing…",
     "resultsFound": "{{count}} results found",

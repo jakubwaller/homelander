@@ -332,9 +332,11 @@ export default function SearchTab() {
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
               {t('search.yourSearches', 'Deine Suchen')}
             </h2>
-            {nextPollCountdown && (
+            {filters.length > 0 && (
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                · {t('search.nextPollIn', 'Nächste Prüfung in {{time}}').replace('{{time}}', nextPollCountdown)}
+                · {nextPollCountdown
+                  ? t('search.nextPollIn', 'Nächste Prüfung in {{time}}').replace('{{time}}', nextPollCountdown)
+                  : t('search.nextPollSoon', 'Nächste Prüfung: bald')}
               </span>
             )}
           </div>
