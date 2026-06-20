@@ -51,6 +51,7 @@ let mainWindow = null;
 let daemonProcess = null;
 let daemonStatus = 'stopped'; // stopped | running | paused | restarting | session_expired
 let daemonStartedAt = 0;      // timestamp of last startDaemon() call
+let latestNextPollAt = null;  // last future next_poll_at emitted by daemon poll loop
 let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
 let chromeManager = new ChromeManager();
 let config = null;
@@ -402,6 +403,7 @@ function startDaemon() {
 
   daemonStatus = 'running';
   daemonStartedAt = Date.now();
+  latestNextPollAt = new Date(Date.now() + (config.polling?.interval_seconds || 120) * 1000).toISOString();
   if (mainWindow) {
     mainWindow.webContents.send('homelander:event', { type: 'daemon_started' });
   }
@@ -437,6 +439,7 @@ function startDaemon() {
     if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
     const wasRunning = daemonStatus === 'running' || daemonStatus === 'paused';
     daemonStatus = 'stopped';
+    latestNextPollAt = null;
     if (mainWindow) {
       mainWindow.webContents.send('homelander:event', {
         type: 'daemon_stopped',
@@ -466,6 +469,7 @@ function startDaemon() {
     logRawError('daemon spawn', err, { code: 'DAEMON_ACTION_FAILED' });
     daemonProcess = null;
     daemonStatus = 'stopped';
+    latestNextPollAt = null;
   });
 }
 
@@ -483,12 +487,50 @@ function stopDaemon() {
     if (daemonProcess === proc) {
       try { proc.kill('SIGKILL'); } catch {}
       daemonProcess = null;
+      latestNextPollAt = null;
     }
   }, 5000);
   daemonStatus = 'stopped';
+  latestNextPollAt = null;
+}
+
+function getNextPollAt(db) {
+  if (!daemonProcess || daemonStatus === 'stopped') return null;
+
+  // Prefer the daemon poll loop's own schedule. This is the only source that
+  // stays correct while the apply loop is processing a backlog.
+  if (latestNextPollAt && new Date(latestNextPollAt).getTime() > Date.now()) {
+    return latestNextPollAt;
+  }
+
+  const pollIntervalMs = (config?.polling?.interval_seconds || 120) * 1000;
+  try {
+    const filters = db.getFilters();
+    const lastPoll = filters.reduce((max, f) => {
+      const t = f.last_polled_at ? new Date(f.last_polled_at).getTime() : 0;
+      return t > max ? t : max;
+    }, 0);
+    if (lastPoll > 0) {
+      const fromDb = new Date(lastPoll + pollIntervalMs).toISOString();
+      if (new Date(fromDb).getTime() > Date.now()) return fromDb;
+    }
+  } catch {}
+
+  // Startup / first-cycle fallback: daemon is alive but no future schedule has
+  // arrived yet. Show a real countdown instead of the useless "bald" state.
+  const fallback = new Date(Date.now() + pollIntervalMs).toISOString();
+  latestNextPollAt = fallback;
+  return fallback;
 }
 
 function handleDaemonEvent(event) {
+  if (event?.type === 'stats') {
+    const next = event.next_poll_at || event.nextPollAt || null;
+    if (next && new Date(next).getTime() > Date.now()) {
+      latestNextPollAt = next;
+    }
+  }
+
   if (!mainWindow) return;
 
   switch (event.type) {
@@ -647,6 +689,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('daemon:stop', () => {
     daemonStatus = 'stopped'; // must be set BEFORE kill — exit handler checks this
+    latestNextPollAt = null;
     try { unlinkSync(PAUSE_FLAG); } catch {} // clear pause flag so restart doesn't inherit pause
     stopDaemon();
     return { status: daemonStatus };
@@ -850,22 +893,7 @@ function registerIpcHandlers() {
       const db = new HomelanderDB(DB_PATH);
       const stats = db.getStats(filterId || null);
       const recent = db.getRecentActivity(20);
-      // Compute next poll estimate only when daemon is alive.
-      // When stopped, leave null — the UI shows nothing instead of stale "any moment".
-      let nextPollAt = null;
-      if (daemonProcess && daemonStatus !== 'stopped') {
-        try {
-          const filters = db.getFilters();
-          const pollIntervalMs = (config.polling?.interval_seconds || 120) * 1000;
-          const lastPoll = filters.reduce((max, f) => {
-            const t = f.last_polled_at ? new Date(f.last_polled_at).getTime() : 0;
-            return t > max ? t : max;
-          }, 0);
-          if (lastPoll > 0) {
-            nextPollAt = new Date(lastPoll + pollIntervalMs).toISOString();
-          }
-        } catch {}
-      }
+      const nextPollAt = getNextPollAt(db);
       db.close();
       return { stats: { ...stats, nextPollAt }, recent, error: null };
     } catch (err) {
@@ -878,21 +906,7 @@ function registerIpcHandlers() {
       const { HomelanderDB } = await import('../engine/db.js');
       const db = new HomelanderDB(DB_PATH);
       const stats = db.getTodayStats(filterId || null);
-      // Same nextPollAt computation as listings:stats — so the dashboard countdown works.
-      let nextPollAt = null;
-      if (daemonProcess && daemonStatus !== 'stopped') {
-        try {
-          const filters = db.getFilters();
-          const pollIntervalMs = (config.polling?.interval_seconds || 120) * 1000;
-          const lastPoll = filters.reduce((max, f) => {
-            const t = f.last_polled_at ? new Date(f.last_polled_at).getTime() : 0;
-            return t > max ? t : max;
-          }, 0);
-          if (lastPoll > 0) {
-            nextPollAt = new Date(lastPoll + pollIntervalMs).toISOString();
-          }
-        } catch {}
-      }
+      const nextPollAt = getNextPollAt(db);
       db.close();
       return { stats: { ...stats, nextPollAt }, error: null };
     } catch (err) {
@@ -1059,6 +1073,7 @@ function registerIpcHandlers() {
 
     // Stop daemon first
     daemonStatus = 'stopped';
+    latestNextPollAt = null;
     try { unlinkSync(PAUSE_FLAG); } catch {}
     stopDaemon();
 
