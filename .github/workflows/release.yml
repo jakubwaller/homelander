@@ -30,27 +30,35 @@ jobs:
           - os: windows-latest
             platform: win
     runs-on: ${{ matrix.os }}
-    if: ${{ github.event.inputs.platforms == 'all' || matrix.platform == github.event.inputs.platforms }}
 
     steps:
+      - name: Skip non-selected platforms
+        if: ${{ github.event.inputs.platforms != 'all' && github.event.inputs.platforms != matrix.platform }}
+        run: exit 0
+
       - uses: actions/checkout@v7
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
 
       - uses: actions/setup-node@v6
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         with:
           node-version: '22'
 
       - name: Install
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: npm ci
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
 
       - name: Build
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: npm run dist:${{ matrix.platform }}
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to release
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.version }}
