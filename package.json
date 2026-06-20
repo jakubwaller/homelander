@@ -6,7 +6,7 @@
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"sleep 2 && electron .\"",
+    "dev": "lsof -ti:5173 | xargs kill -9 2>/dev/null; concurrently \"vite\" \"sleep 2 && electron .\"",
     "dev:renderer": "vite",
     "dev:electron": "electron .",
     "postinstall": "npm run rebuild:electron",
@@ -24,7 +24,8 @@
     "dist": "vite build && electron-builder",
     "dist:mac": "vite build && electron-builder --mac",
     "dist:win": "vite build && electron-builder --win",
-    "dist:linux": "vite build && electron-builder --linux"
+    "dist:linux": "vite build && electron-builder --linux",
+    "dist:all": "npm run dist:mac && npm run dist:win && npm run dist:linux"
   },
   "dependencies": {
     "@2captcha/captcha-solver": "^1.3.6",
