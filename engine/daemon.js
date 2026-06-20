@@ -45,6 +45,7 @@ const DAEMON_LOG = join(dirname(DB_PATH), 'daemon.log');
 
 // Mutable poll interval — updated via IPC when user changes it in Settings
 let pollIntervalSec = parseInt(args['poll-interval'], 10);
+let nextPollDueAt = 0; // ms timestamp; reset by settings save and manual poll
 
 // Dynamic imports
 const { HomelanderDB } = await import('./db.js');
@@ -66,6 +67,19 @@ function log(msg) {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function resetNextPollDue() {
+  nextPollDueAt = Date.now() + pollIntervalSec * 1000;
+  return new Date(nextPollDueAt).toISOString();
+}
+
+async function sleepUntilNextPoll() {
+  while (true) {
+    const remaining = nextPollDueAt - Date.now();
+    if (remaining <= 0) return;
+    await sleep(Math.min(1000, remaining));
+  }
 }
 
 function jitter(min, max) {
@@ -349,7 +363,7 @@ async function pollLoop(db) {
   log('Poll loop started');
 
   // Emit an immediate heartbeat so the UI countdown appears right away
-  const nextPollAt = new Date(Date.now() + pollIntervalSec * 1000).toISOString();
+  const nextPollAt = resetNextPollDue();
   emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
 
   while (true) {
@@ -399,12 +413,13 @@ async function pollLoop(db) {
 
     // ── Emit stats with next_poll_at based on poll schedule ──
     const elapsed = Date.now() - cycleStart;
-    const sleepMs = Math.max(0, (pollIntervalSec * 1000) - elapsed);
-    const nextPollAt = new Date(Date.now() + sleepMs).toISOString();
+    const delayMs = Math.max(0, (pollIntervalSec * 1000) - elapsed);
+    nextPollDueAt = Date.now() + delayMs;
+    const nextPollAt = new Date(nextPollDueAt).toISOString();
     emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
 
-    // ── Sleep until next scheduled poll ──────────────────────
-    await sleep(sleepMs);
+    // ── Sleep until next scheduled poll; settings/manual poll may reset deadline ──
+    await sleepUntilNextPoll();
   }
 }
 
@@ -443,7 +458,8 @@ function setupIpc(db) {
           last_polled_at: new Date().toISOString(),
           total_seen: (filter.total_seen || 0) + allInserted,
         });
-        emit({ type: 'stats', ...db.getTodayStats() });
+        const nextPollAt = resetNextPollDue();
+        emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
         if (allInserted > 0) {
           emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted });
         }
@@ -464,7 +480,8 @@ function setupIpc(db) {
       } else {
         log(`Retry: expose ${msg.exposeId} reset to seen`);
         emit({ type: 'retry_queued', exposeId: msg.exposeId, hash: result.hash });
-        emit({ type: 'stats', ...db.getTodayStats() });
+        const nextPollAt = resetNextPollDue();
+        emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
       }
     }
 
@@ -512,6 +529,8 @@ function setupIpc(db) {
       if (msg.poll_interval !== undefined) {
         pollIntervalSec = msg.poll_interval;
         log(`Config hot-reload: poll interval → ${pollIntervalSec}s`);
+        const nextPollAt = resetNextPollDue();
+        emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
         changed = true;
       }
       if (msg.persona) {

@@ -403,7 +403,7 @@ function startDaemon() {
 
   daemonStatus = 'running';
   daemonStartedAt = Date.now();
-  latestNextPollAt = new Date(Date.now() + (config.polling?.interval_seconds || 120) * 1000).toISOString();
+  latestNextPollAt = new Date(Date.now() + pollIntervalMs()).toISOString();
   if (mainWindow) {
     mainWindow.webContents.send('homelander:event', { type: 'daemon_started' });
   }
@@ -494,6 +494,27 @@ function stopDaemon() {
   latestNextPollAt = null;
 }
 
+function pollIntervalMs() {
+  return (config?.polling?.interval_seconds || 120) * 1000;
+}
+
+function setNextPollFromNow(reason = 'schedule_reset') {
+  if (!daemonProcess || daemonStatus === 'stopped') return null;
+  latestNextPollAt = new Date(Date.now() + pollIntervalMs()).toISOString();
+  return latestNextPollAt;
+}
+
+function broadcastStats(stats = {}) {
+  const nextPollAt = stats.nextPollAt || stats.next_poll_at || latestNextPollAt || null;
+  const payload = {
+    ...stats,
+    type: 'stats',
+    next_poll_at: nextPollAt,
+    nextPollAt,
+  };
+  if (mainWindow) mainWindow.webContents.send('homelander:stats', payload);
+}
+
 function getNextPollAt(db) {
   if (!daemonProcess || daemonStatus === 'stopped') return null;
 
@@ -503,7 +524,7 @@ function getNextPollAt(db) {
     return latestNextPollAt;
   }
 
-  const pollIntervalMs = (config?.polling?.interval_seconds || 120) * 1000;
+  const pollIntervalMsValue = pollIntervalMs();
   try {
     const filters = db.getFilters();
     const lastPoll = filters.reduce((max, f) => {
@@ -511,14 +532,14 @@ function getNextPollAt(db) {
       return t > max ? t : max;
     }, 0);
     if (lastPoll > 0) {
-      const fromDb = new Date(lastPoll + pollIntervalMs).toISOString();
+      const fromDb = new Date(lastPoll + pollIntervalMsValue).toISOString();
       if (new Date(fromDb).getTime() > Date.now()) return fromDb;
     }
   } catch {}
 
   // Startup / first-cycle fallback: daemon is alive but no future schedule has
   // arrived yet. Show a real countdown instead of the useless "bald" state.
-  const fallback = new Date(Date.now() + pollIntervalMs).toISOString();
+  const fallback = new Date(Date.now() + pollIntervalMsValue).toISOString();
   latestNextPollAt = fallback;
   return fallback;
 }
@@ -535,7 +556,7 @@ function handleDaemonEvent(event) {
 
   switch (event.type) {
     case 'stats':
-      mainWindow.webContents.send('homelander:stats', event);
+      broadcastStats(event);
       break;
     case 'listing':
       mainWindow.webContents.send('homelander:listing', event);
@@ -751,9 +772,10 @@ function registerIpcHandlers() {
           total_seen: (filter.total_seen || 0) + allInserted,
         });
 
-        const stats = db.getStats();
+        const nextPollAt = setNextPollFromNow('manual_poll');
+        const stats = { ...db.getStats(), nextPollAt, next_poll_at: nextPollAt };
+        broadcastStats(stats);
         if (mainWindow) {
-          mainWindow.webContents.send('homelander:event', { type: 'stats', ...stats });
           if (allInserted > 0) {
             mainWindow.webContents.send('homelander:event', {
               type: 'poll_complete',
@@ -928,11 +950,25 @@ function registerIpcHandlers() {
     return config;
   });
 
-  ipcMain.handle('config:update', (_e, patch) => {
+  ipcMain.handle('config:update', async (_e, patch) => {
     try {
       // Deep merge patch into config
       config = deepMerge(config, patch);
       saveConfig();
+
+      const pollIntervalChanged = patch.polling?.interval_seconds !== undefined;
+      if (pollIntervalChanged) {
+        const nextPollAt = setNextPollFromNow('poll_interval_changed');
+        if (nextPollAt) {
+          const { HomelanderDB } = await import('../engine/db.js');
+          const db = new HomelanderDB(DB_PATH);
+          try {
+            broadcastStats({ ...db.getStats(), nextPollAt, next_poll_at: nextPollAt, reason: 'poll_interval_changed' });
+          } finally {
+            db.close();
+          }
+        }
+      }
 
     // Hot-reload everything into the running daemon — no restart needed
     if (daemonProcess) {
