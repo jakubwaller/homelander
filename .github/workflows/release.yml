@@ -11,6 +11,11 @@ on:
         options:
           - mac
           - all
+      version:
+        description: 'Version tag (e.g. v1.0.5)'
+        required: true
+        type: string
+        default: 'v1.0.5'
 
 jobs:
   release:
@@ -48,6 +53,7 @@ jobs:
       - name: Upload to release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ github.event.inputs.version }}
           files: |
             release/*.dmg
             release/*.dmg.blockmap
