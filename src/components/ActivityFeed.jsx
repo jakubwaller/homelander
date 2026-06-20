@@ -1,7 +1,7 @@
 // Activity feed — live-scrolling list of sent/failed listings.
 // Each entry is clickable: expands to show detail + IS24 link.
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../locales/LocaleContext';
 import { useStore } from '../stores/appStore';
 import { userErrorText } from '../shared/userErrors';
@@ -25,6 +25,7 @@ function formatDateTime(iso) {
 }
 
 export default function ActivityFeed() {
+  const { t } = useLocale();
   const activity = useStore((s) => s.activity);
   const [expanded, setExpanded] = useState(new Set());
   const [retrying, setRetrying] = useState(new Set());
@@ -107,8 +108,8 @@ export default function ActivityFeed() {
   if (activity.length === 0) {
     return (
       <div className="py-8 text-center" style={{ color: 'var(--text-muted)' }}>
-        <p className="text-sm">No activity yet.</p>
-        <p className="text-xs mt-1">Add a search to start finding listings.</p>
+        <p className="text-sm">{t('livefeed.empty', 'No activity yet.')}</p>
+        <p className="text-xs mt-1">{t('livefeed.emptyHint', 'Add a search to start finding listings.')}</p>
       </div>
     );
   }
@@ -132,7 +133,7 @@ export default function ActivityFeed() {
         const safeDetail = item.detail ? userErrorText(item.detail, { operation: 'listing apply' }) : '';
         const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : 'var(--danger)';
         const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : '✗';
-        const outcomeLabel = isSent ? 'Sent' : isDeactivated ? 'Deactivated' : 'Failed';
+        const outcomeLabel = isSent ? t('livefeed.sent', 'Sent') : isDeactivated ? t('livefeed.deactivated', 'Deactivated') : t('livefeed.failed', 'Failed');
 
         return (
           <div
@@ -142,20 +143,21 @@ export default function ActivityFeed() {
           >
             {/* Summary row */}
             <div className="flex items-center gap-3 px-3 py-2">
-              {/* Thumbnail */}
-              {item.imageUrl && (
-                <div className="relative flex-shrink-0" style={{ width: 40, height: 40 }}>
+              {/* Thumbnail — always show placeholder, overlay image when available */}
+              <div className="relative flex-shrink-0" style={{ width: 40, height: 40 }}>
+                <div
+                  className="absolute inset-0 rounded bg-gray-700 flex items-center justify-center text-gray-500 text-xs font-medium"
+                >
+                  {(item.title || '?')[0]}
+                </div>
+                {item.imageUrl && (
                   <img
                     src={item.imageUrl}
                     alt=""
-                    className="rounded object-cover bg-gray-700"
+                    className="absolute inset-0 rounded object-cover bg-gray-700"
                     style={{ width: 40, height: 40 }}
                     loading="lazy"
-                    onError={(e) => {
-                      e.currentTarget.style.display = 'none';
-                      const fb = e.currentTarget.nextElementSibling;
-                      if (fb) fb.style.display = 'flex';
-                    }}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
                     onMouseEnter={(e) => {
                       setHoveredImage(item.imageUrl);
                       setHoverPos({ x: e.clientX, y: e.clientY });
@@ -163,14 +165,8 @@ export default function ActivityFeed() {
                     onMouseMove={(e) => setHoverPos({ x: e.clientX, y: e.clientY })}
                     onMouseLeave={() => setHoveredImage(null)}
                   />
-                  <div
-                    className="absolute inset-0 rounded bg-gray-700 items-center justify-center text-gray-500 text-xs font-medium"
-                    style={{ display: 'none' }}
-                  >
-                    {(item.title || '?')[0]}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
               {/* Status icon */}
               <span className={`flex-shrink-0 w-5 text-center ${isDeactivated ? 'text-base' : 'text-sm'}`} style={{ color: statusColor }}>
                 {statusIcon}
@@ -180,19 +176,19 @@ export default function ActivityFeed() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium truncate">
-                    {item.title || 'Unknown Listing'}
+                    {item.title || t('livefeed.unknownListing', 'Unknown Listing')}
                   </span>
                   <span className="badge badge-sm text-xs" style={{ background: statusColor + '20', color: statusColor }}>
                     {outcomeLabel}
                   </span>
                   {isDeactivated && (
-                    <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip('Listing was removed from IS24 before the bot could apply — not a failure, just bad timing.', e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>🪦 Deactivated</span>
+                    <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.deactivatedTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.deactivatedBadge', '🪦 Deactivated')}</span>
                   )}
                   {isCaptcha && (
-                    <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip('Blocked by captcha — enter your 2captcha API key in Settings to auto-solve', e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>🔐 Captcha</span>
+                    <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.captchaTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.captchaBadge', '🔐 Captcha')}</span>
                   )}
                   {isPremium && (
-                    <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip('Premium listing — requires MieterPlus/Suchen+ subscription. Buy Suchen+ to avoid these errors', e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>💎 Premium</span>
+                    <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.premiumTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.premiumBadge', '💎 Premium')}</span>
                   )}
                 </div>
                 {item.address && (
@@ -248,22 +244,22 @@ export default function ActivityFeed() {
               <div className="px-3 pb-3 pt-1 border-t mx-3" style={{ borderColor: 'var(--border)' }}>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mt-2">
                   <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Status: </span>
+                    <span style={{ color: 'var(--text-muted)' }}>{t('livefeed.status', 'Status:')} </span>
                     <span style={{ color: statusColor }} className="font-medium">{outcomeLabel}</span>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Time: </span>
+                    <span style={{ color: 'var(--text-muted)' }}>{t('livefeed.time', 'Time:')} </span>
                     <span style={{ color: 'var(--text-secondary)' }}>{formatDateTime(item.time)}</span>
                   </div>
 
                   {exposeId && (
                     <div className="col-span-2">
-                      <span style={{ color: 'var(--text-muted)' }}>Exposé ID: </span>
+                      <span style={{ color: 'var(--text-muted)' }}>{t('livefeed.exposeId', 'Exposé ID:')} </span>
                       <button
                         className="font-mono"
                         style={{ color: copied === exposeId ? 'var(--success)' : 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                         onClick={(e) => { e.stopPropagation(); handleCopy(exposeId); }}
-                        title="Click to copy"
+                        title={t('livefeed.clickToCopy', 'Click to copy')}
                       >
                         {exposeId}
                       </button>
@@ -271,16 +267,16 @@ export default function ActivityFeed() {
                         className="ml-2 text-xs"
                         style={{ color: copied === exposeId ? 'var(--success)' : 'var(--text-muted)', cursor: 'pointer' }}
                         onClick={(e) => { e.stopPropagation(); handleCopy(exposeId); }}
-                        title="Click to copy"
+                        title={t('livefeed.clickToCopy', 'Click to copy')}
                       >
-                        {copied === exposeId ? '✓ Copied' : '📋'}
+                        {copied === exposeId ? t('livefeed.copied', '✓ Copied') : t('livefeed.copyIcon', '📋')}
                       </span>
                     </div>
                   )}
 
                   {safeDetail && (
                     <div className="col-span-2 mt-1">
-                      <span style={{ color: 'var(--text-muted)' }}>Detail: </span>
+                      <span style={{ color: 'var(--text-muted)' }}>{t('livefeed.detail', 'Detail:')} </span>
                       <p
                         className="mt-0.5 p-2 rounded text-xs whitespace-pre-wrap"
                         style={{
@@ -290,7 +286,7 @@ export default function ActivityFeed() {
                           cursor: 'pointer',
                         }}
                         onClick={(e) => { e.stopPropagation(); handleCopy(safeDetail); }}
-                        title="Click to copy"
+                        title={t('livefeed.clickToCopy', 'Click to copy')}
                       >{safeDetail}</p>
                     </div>
                   )}
@@ -303,7 +299,7 @@ export default function ActivityFeed() {
                         onClick={(e) => { e.stopPropagation(); if (supportBusyId !== exposeId) handleSupportBundle(item, exposeId); }}
                         disabled={supportBusyId === exposeId}
                       >
-                        {supportBusyId === exposeId ? '✓ Debug bundle exported' : '📦 Export Debug Bundle'}
+                        {supportBusyId === exposeId ? t('livefeed.supportExported', '✓ Debug bundle exported') : t('livefeed.supportExport', '📦 Export Debug Bundle')}
                       </button>
                       <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                         {t('livefeed.supportDesc', 'screenshot + HTML + entry logs')}

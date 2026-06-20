@@ -1,8 +1,9 @@
 // Setup Wizard — first-launch guided setup for Homelander.
-// 5 steps: Persona → Message → IS24 Login → 2captcha → First Search → Done
+// 6 steps: Language → Persona → Message → IS24 Login → 2captcha → First Search → Done
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../stores/appStore';
+import { useLocale } from '../locales/LocaleContext';
 import {
   IS24_SALUTATION,
   IS24_MOVE_IN,
@@ -15,6 +16,7 @@ import {
 import { userErrorText } from '../shared/userErrors';
 
 const STEPS = [
+  { id: 'language', label: 'Language' },
   { id: 'persona', label: 'Persona' },
   { id: 'message', label: 'Message' },
   { id: 'is24', label: 'IS24' },
@@ -40,6 +42,7 @@ const DEFAULT_MESSAGE = [
 ].join('\n');
 
 export default function SetupWizard({ onComplete }) {
+  const { t, locale, setLocale } = useLocale();
   const [step, setStep] = useState(0);
   const [config, setConfig] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -91,47 +94,47 @@ export default function SetupWizard({ onComplete }) {
     setSaving(true);
 
     try {
-      if (!window.homelander) throw { userError: { code: 'BACKEND_UNAVAILABLE', title: 'Backend unavailable', message: 'Homelander is still starting up. Try again in a moment.' } };
+      if (!window.homelander) throw { userError: { code: 'BACKEND_UNAVAILABLE', title: t('errors.backendUnavailable.title', 'Backend unavailable'), message: t('errors.backendUnavailable.message', 'Homelander is still starting up. Try again in a moment.') } };
 
       let configToSave = config;
 
       // ── Step-specific validation ────────────────────────────
-      if (step === 0) {
+      if (step === 1) {
         // Persona: ALL fields mandatory
         const errors = [];
         const p = configToSave.persona || {};
-        if (!p.anrede?.trim()) errors.push('Anrede is required');
-        if (!p.vorname?.trim()) errors.push('Vorname is required');
-        if (!p.nachname?.trim()) errors.push('Nachname is required');
-        if (!p.email?.trim()) errors.push('Email is required');
+        if (!p.anrede?.trim()) errors.push(t('setup.anredeRequired', 'Anrede is required'));
+        if (!p.vorname?.trim()) errors.push(t('setup.vornameRequired', 'Vorname is required'));
+        if (!p.nachname?.trim()) errors.push(t('setup.nachnameRequired', 'Nachname is required'));
+        if (!p.email?.trim()) errors.push(t('setup.emailRequired', 'Email is required'));
         if (p.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email.trim())) {
-          errors.push('Email format is invalid');
+          errors.push(t('setup.emailInvalid', 'Email format is invalid'));
         }
-        if (!p.telefon?.trim()) errors.push('Telefon is required');
-        if (!p.strasse?.trim()) errors.push('Straße is required');
-        if (!p.hausnummer?.trim()) errors.push('Hausnr. is required');
-        if (!p.plz?.trim()) errors.push('PLZ is required');
+        if (!p.telefon?.trim()) errors.push(t('setup.telefonRequired', 'Telefon is required'));
+        if (!p.strasse?.trim()) errors.push(t('setup.strasseRequired', 'Straße is required'));
+        if (!p.hausnummer?.trim()) errors.push(t('setup.hausnrRequired', 'Hausnr. is required'));
+        if (!p.plz?.trim()) errors.push(t('setup.plzRequired', 'PLZ is required'));
         if (p.plz?.trim() && !/^\d{4,5}$/.test(String(p.plz).trim())) {
-          errors.push('PLZ must be 4-5 digits');
+          errors.push(t('setup.plzDigits', 'PLZ must be 4-5 digits'));
         }
-        if (!p.ort?.trim()) errors.push('Ort is required');
-        if (!p.einzug?.trim()) errors.push('Einzug is required');
-        if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push('Einzug Datum is required');
-        if (!p.personen?.trim()) errors.push('Personen is required');
-        if (!p.haustiere?.trim()) errors.push('Haustiere is required');
-        if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push('Anzahl und Tierart is required');
-        if (!p.beschaeftigung?.trim()) errors.push('Beschäftigung is required');
-        if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
-        if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
+        if (!p.ort?.trim()) errors.push(t('setup.ortRequired', 'Ort is required'));
+        if (!p.einzug?.trim()) errors.push(t('setup.einzugRequired', 'Einzug is required'));
+        if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push(t('setup.einzugDatumRequired', 'Einzug Datum is required'));
+        if (!p.personen?.trim()) errors.push(t('setup.personenRequired', 'Personen is required'));
+        if (!p.haustiere?.trim()) errors.push(t('setup.haustiereRequired', 'Haustiere is required'));
+        if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push(t('setup.haustiereZusatzRequired', 'Anzahl und Tierart is required'));
+        if (!p.beschaeftigung?.trim()) errors.push(t('setup.beschaeftigungRequired', 'Beschäftigung is required'));
+        if (!p.einkommen?.trim()) errors.push(t('setup.einkommenRequired', 'Einkommen (netto) is required'));
+        if (!p.unterlagen?.trim()) errors.push(t('setup.unterlagenRequired', 'Unterlagen is required'));
         if (errors.length > 0) {
-          const msg = errors.length > 3 ? 'All fields are required' : errors.join('; ');
+          const msg = errors.length > 3 ? t('setup.allFieldsRequired', 'All fields are required') : errors.join('; ');
           showFeedback({ type: 'error', msg });
           setSaving(false);
           return;
         }
       }
 
-      if (step === 2) {
+      if (step === 3) {
         // IS24 login: do not inspect or verify the account page. IS24 login/SSO
         // is sensitive to automation, so this step trusts the user's confirmation.
         let chromeStatus = await window.homelander.getChromeStatus();
@@ -146,7 +149,7 @@ export default function SetupWizard({ onComplete }) {
             const result = await window.homelander.openLoginPage();
             if (result.error) throw result;
             setIs24Status('waiting_for_login');
-            showFeedback({ type: 'success', msg: 'Log in, then click Continue.' });
+            showFeedback({ type: 'success', msg: t('setup.is24WaitingStatus', 'Log in, then click Continue.') });
             setSaving(false);
             return;
           } catch (err) {
@@ -168,7 +171,7 @@ export default function SetupWizard({ onComplete }) {
         }
       }
 
-      if (step === 3) {
+      if (step === 4) {
         // 2captcha: validate the API key if provided (optional)
         const captchaKey = configToSave.captcha?.api_key || '';
         if (captchaKey.trim()) {
@@ -184,7 +187,7 @@ export default function SetupWizard({ onComplete }) {
         // Empty key = skip captcha solving (listings with captchas will be skipped)
       }
 
-      if (step === 4) {
+      if (step === 5) {
         // First search: validate URL if provided
         if (searchUrl.trim()) {
           const testResult = await window.homelander.testFilter(searchUrl.trim());
@@ -206,7 +209,7 @@ export default function SetupWizard({ onComplete }) {
       // Save config
       await window.homelander.updateConfig(configToSave);
 
-      if (step < 4) {
+      if (step < 5) {
         setStep(step + 1);
       } else {
         // Final step — complete setup
@@ -232,7 +235,7 @@ export default function SetupWizard({ onComplete }) {
   if (!config) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p style={{ color: 'var(--text-muted)' }}>Loading...</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('setup.loading', 'Loading…')}</p>
       </div>
     );
   }
@@ -246,7 +249,7 @@ export default function SetupWizard({ onComplete }) {
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pb-2">
-        <h1 className="text-lg font-semibold tracking-tight">Homelander Setup</h1>
+        <h1 className="text-lg font-semibold tracking-tight">{t('setup.header', 'Homelander Setup')}</h1>
       </header>
 
       {/* Step indicator */}
@@ -257,7 +260,7 @@ export default function SetupWizard({ onComplete }) {
               {i < step ? '✓' : i + 1}
             </div>
             <span className="text-xs" style={{ color: i <= step ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-              {s.label}
+              {t(`setup.steps.${s.id}`, s.label)}
             </span>
             {i < STEPS.length - 1 && (
               <div style={{ width: 24, height: 1, background: i < step ? 'var(--success)' : 'var(--border)' }} />
@@ -284,12 +287,36 @@ export default function SetupWizard({ onComplete }) {
       {/* Content */}
       <main className="flex-1 overflow-y-auto px-8 pb-8" style={{ maxWidth: 600, margin: '0 auto', width: '100%' }}>
 
-        {/* ── Step 0: Persona ────────────────────────────────────────── */}
+        {/* ── Step 0: Language ────────────────────────────────────────── */}
         {step === 0 && (
+          <div className="space-y-6 text-center" style={{ maxWidth: 420, margin: '0 auto' }}>
+            <h2 className="text-base font-semibold">{t('setup.language', 'Language')}</h2>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{t('setup.languageDesc', 'Choose your language')}</p>
+            <div className="grid grid-cols-2 gap-4">
+              {['de', 'en'].map((lang) => (
+                <button
+                  key={lang}
+                  className="card p-6 cursor-pointer transition-all hover:scale-[1.02]"
+                  style={{
+                    border: locale === lang ? '2px solid var(--accent)' : '2px solid var(--border)',
+                    background: locale === lang ? 'rgba(59,130,246,0.08)' : 'var(--bg-secondary)',
+                  }}
+                  onClick={() => setLocale(lang)}
+                >
+                  <div className="text-4xl mb-2">{lang === 'en' ? '🇬🇧' : '🇩🇪'}</div>
+                  <div className="text-sm font-medium">{lang === 'en' ? t('setup.english', 'English') : t('setup.german', 'Deutsch')}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 1: Persona ────────────────────────────────────────── */}
+        {step === 1 && (
           <div className="space-y-4">
-            <h2 className="text-base font-semibold">Your details</h2>
+            <h2 className="text-base font-semibold">{t('setup.personaTitle', 'Your details')}</h2>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              These details will be filled into the IS24 contact form for every application.
+              {t('setup.personaSubtext', 'These details will be filled into the IS24 contact form for every application.')}
             </p>
 
             <div className="grid grid-cols-2 gap-3">
@@ -301,50 +328,50 @@ export default function SetupWizard({ onComplete }) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>E-Mail</label>
-                <input className="input" type="email" value={persona.email || ''} onChange={(e) => updatePersona('email', e.target.value)} placeholder="your@email.com" />
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.email', 'E-Mail')}</label>
+                <input className="input" type="email" value={persona.email || ''} onChange={(e) => updatePersona('email', e.target.value)} placeholder={t('setup.placeholderEmail', 'your@email.com')} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Vorname</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.vorname', 'Vorname')}</label>
                 <input className="input" value={persona.vorname || ''} onChange={(e) => updatePersona('vorname', e.target.value)} />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Nachname</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.nachname', 'Nachname')}</label>
                 <input className="input" value={persona.nachname || ''} onChange={(e) => updatePersona('nachname', e.target.value)} />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Telefon</label>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.telefon', 'Telefon')}</label>
               <input className="input" value={persona.telefon || ''} onChange={(e) => updatePersona('telefon', e.target.value)} />
             </div>
 
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-2">
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Straße</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.strasse', 'Straße')}</label>
                 <input className="input" value={persona.strasse || ''} onChange={(e) => updatePersona('strasse', e.target.value)} />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Hausnr.</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.hausnr', 'Hausnr.')}</label>
                 <input className="input" value={persona.hausnummer || ''} onChange={(e) => updatePersona('hausnummer', e.target.value)} />
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>PLZ</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.plz', 'PLZ')}</label>
                 <input className="input" value={persona.plz || ''} onChange={(e) => updatePersona('plz', e.target.value)} />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Ort</label>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.ort', 'Ort')}</label>
               <input className="input" value={persona.ort || ''} onChange={(e) => updatePersona('ort', e.target.value)} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Einzug</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.einzug', 'Einzug')}</label>
                 <select className="select" value={persona.einzug || ''} onChange={(e) => updatePersona('einzug', e.target.value)}>
                   <option value="">—</option>
                   {EINZUG_OPTIONS.filter(Boolean).map((o) => <option key={o} value={o}>{o}</option>)}
@@ -359,7 +386,7 @@ export default function SetupWizard({ onComplete }) {
                 )}
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Personen</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.personen', 'Personen')}</label>
                 <select className="select" value={persona.personen || ''} onChange={(e) => updatePersona('personen', e.target.value)}>
                   <option value="">—</option>
                   {PERSONEN_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -369,7 +396,7 @@ export default function SetupWizard({ onComplete }) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Haustiere</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.haustiere', 'Haustiere')}</label>
                 <select className="select" value={persona.haustiere || ''} onChange={(e) => updatePersona('haustiere', e.target.value)}>
                   <option value="">—</option>
                   {HAUSTIERE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -378,14 +405,14 @@ export default function SetupWizard({ onComplete }) {
                   <input
                     className="input mt-2"
                     type="text"
-                    placeholder="Anzahl und Tierart"
+                    placeholder={t('setup.placeholderHaustiere', 'Anzahl und Tierart')}
                     value={persona.haustiere_zusatz || ''}
                     onChange={(e) => updatePersona('haustiere_zusatz', e.target.value)}
                   />
                 )}
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Beschäftigung</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.beschaeftigung', 'Beschäftigung')}</label>
                 <select className="select" value={persona.beschaeftigung || ''} onChange={(e) => updatePersona('beschaeftigung', e.target.value)}>
                   <option value="">—</option>
                   {BESCHAEFTIGUNG_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -395,14 +422,14 @@ export default function SetupWizard({ onComplete }) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Einkommen (netto)</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.einkommen', 'Einkommen (netto)')}</label>
                 <select className="select" value={persona.einkommen || ''} onChange={(e) => updatePersona('einkommen', e.target.value)}>
                   <option value="">—</option>
                   {EINKOMMEN_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Unterlagen</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.unterlagen', 'Unterlagen')}</label>
                 <select className="select" value={persona.unterlagen || ''} onChange={(e) => updatePersona('unterlagen', e.target.value)}>
                   <option value="">—</option>
                   {UNTERLAGEN_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -412,12 +439,12 @@ export default function SetupWizard({ onComplete }) {
           </div>
         )}
 
-        {/* ── Step 1: Message Template ───────────────────────────────── */}
-        {step === 1 && (
+        {/* ── Step 2: Message Template ───────────────────────────────── */}
+        {step === 2 && (
           <div className="space-y-4">
-            <h2 className="text-base font-semibold">Message template</h2>
+            <h2 className="text-base font-semibold">{t('setup.messageTitle', 'Message template')}</h2>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              This message will be sent for every application. Use {'{{title}}'}, {'{{address}}'}, and {'{{name}}'} as placeholders.
+              {t('setup.messageSubtext', "This message will be sent for every application. Use {{title}}, {{address}}, and {{name}} as placeholders.")}
             </p>
 
             <textarea
@@ -430,7 +457,7 @@ export default function SetupWizard({ onComplete }) {
 
             {/* Live preview */}
             <div className="card p-4">
-              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Live preview:</p>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>{t('setup.livePreview', 'Live preview:')}</p>
               <div className="text-sm whitespace-pre-wrap" style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                 {(config.message_template || DEFAULT_MESSAGE)
                   .replace(/\{\{title\}\}/g, 'Helle 2-Zimmer-Wohnung in Berlin-Mitte')
@@ -441,30 +468,30 @@ export default function SetupWizard({ onComplete }) {
           </div>
         )}
 
-        {/* ── Step 2: IS24 Login ─────────────────────────────────────── */}
-        {step === 2 && (
+        {/* ── Step 3: IS24 Login ─────────────────────────────────────── */}
+        {step === 3 && (
           <div className="space-y-4">
-            <h2 className="text-base font-semibold">IS24 Account</h2>
+            <h2 className="text-base font-semibold">{t('setup.is24Title', 'IS24 Account')}</h2>
 
             <div className="card p-4">
               <div className="flex items-center gap-3">
                 <StatusIndicator status={is24Status} />
                 <div className="flex-1">
                   <p className="text-sm font-medium">
-                    {is24Status === 'pending' && 'Open IS24'}
-                    {is24Status === 'launching' && 'Opening Chromium…'}
-                    {is24Status === 'waiting_for_login' && 'Log in, then continue'}
-                    {is24Status === 'preparing' && 'Saving session…'}
-                    {is24Status === 'chrome_closed' && 'Chromium closed'}
-                    {is24Status === 'chrome_error' && 'Could not open Chromium'}
+                    {is24Status === 'pending' && t('setup.is24Pending', 'Open IS24')}
+                    {is24Status === 'launching' && t('setup.is24LaunchingStatus', 'Opening Chromium…')}
+                    {is24Status === 'waiting_for_login' && t('setup.is24WaitingStatus', 'Log in, then continue')}
+                    {is24Status === 'preparing' && t('setup.is24PreparingStatus', 'Saving session…')}
+                    {is24Status === 'chrome_closed' && t('setup.is24ClosedStatus', 'Chromium closed')}
+                    {is24Status === 'chrome_error' && t('setup.is24ErrorStatus', 'Could not open Chromium')}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {is24Status === 'pending' && 'Open Chromium and log in to IS24.'}
-                    {is24Status === 'launching' && 'Chromium is starting.'}
-                    {is24Status === 'waiting_for_login' && 'Only click Continue after IS24 shows you are logged in.'}
-                    {is24Status === 'preparing' && 'Keeping this login for future applications.'}
-                    {is24Status === 'chrome_closed' && 'Reopen Chromium to log in.'}
-                    {is24Status === 'chrome_error' && 'Try again after Chromium is available.'}
+                    {is24Status === 'pending' && t('setup.is24PendingDesc', 'Open Chromium and log in to IS24.')}
+                    {is24Status === 'launching' && t('setup.is24LaunchingDesc', 'Chromium is starting.')}
+                    {is24Status === 'waiting_for_login' && t('setup.is24WaitingDesc', 'Only click Continue after IS24 shows you are logged in.')}
+                    {is24Status === 'preparing' && t('setup.is24PreparingDesc', 'Keeping this login for future applications.')}
+                    {is24Status === 'chrome_closed' && t('setup.is24ClosedDesc', 'Reopen Chromium to log in.')}
+                    {is24Status === 'chrome_error' && t('setup.is24ErrorDesc', 'Try again after Chromium is available.')}
                   </p>
                 </div>
               </div>
@@ -476,7 +503,7 @@ export default function SetupWizard({ onComplete }) {
                 onClick={async () => {
                   setIs24Status('launching');
                   try {
-                    if (!window.homelander) throw { userError: { code: 'BACKEND_UNAVAILABLE', title: 'Backend unavailable', message: 'Homelander is still starting up. Try again in a moment.' } };
+                    if (!window.homelander) throw { userError: { code: 'BACKEND_UNAVAILABLE', title: t('errors.backendUnavailable.title', 'Backend unavailable'), message: t('errors.backendUnavailable.message', 'Homelander is still starting up. Try again in a moment.') } };
                     await window.homelander.updateConfig(config);
                     const result = await window.homelander.openLoginPage();
                     if (result.error) throw result;
@@ -487,46 +514,46 @@ export default function SetupWizard({ onComplete }) {
                   }
                 }}
               >
-                {is24Status === 'chrome_closed' ? '🖥 Reopen Chromium' :
-                 is24Status === 'chrome_error' ? '🖥 Try again' :
-                 '🖥 Open Chromium'}
+                {is24Status === 'chrome_closed' ? t('setup.reopenChromium', '🖥 Reopen Chromium') :
+                 is24Status === 'chrome_error' ? t('setup.tryAgain', '🖥 Try again') :
+                 t('setup.openChromium', '🖥 Open Chromium')}
               </button>
             )}
           </div>
         )}
 
-        {/* ── Step 3: 2captcha ────────────────────────────────────────── */}
-        {step === 3 && (
+        {/* ── Step 4: 2captcha ────────────────────────────────────────── */}
+        {step === 4 && (
           <div className="space-y-4">
-            <h2 className="text-base font-semibold">2captcha API Key (optional)</h2>
+            <h2 className="text-base font-semibold">{t('setup.captchaTitle', '2captcha API Key (optional)')}</h2>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              IS24 sometimes shows captcha. It costs 0.001$ to solve, but needs a key from {' '}
+              {t('setup.captchaSubtext', 'IS24 sometimes shows captcha. Costs ~0.001$ to solve with a key from ')}{' '}
               <a href="https://2captcha.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>2captcha.com</a>.
             </p>
 
             <div>
-              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>API Key</label>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('setup.captchaApiKey', 'API Key')}</label>
               <input
                 className="input"
                 type="password"
                 value={config.captcha?.api_key || ''}
                 onChange={(e) => updateConfig({ captcha: { ...config.captcha, api_key: e.target.value } })}
-                placeholder="Leave empty to skip captcha solving"
+                placeholder={t('setup.placeholderCaptcha', 'Leave empty to skip captcha solving')}
               />
             </div>
           </div>
         )}
 
-        {/* ── Step 4: First Search ────────────────────────────────────── */}
-        {step === 4 && (
+        {/* ── Step 5: First Search ───────────────────────────────────── */}
+        {step === 5 && (
           <div className="space-y-4">
-            <h2 className="text-base font-semibold">Your first search</h2>
+            <h2 className="text-base font-semibold">{t('setup.searchTitle', 'Your first search')}</h2>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Paste an IS24 search URL to get started. You can add more searches later from the Searches tab.
+              {t('setup.searchSubtext', 'Paste an IS24 search URL to get started. You can add more searches later from the Searches tab.')}
             </p>
 
             <div>
-              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>IS24 search URL</label>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('setup.searchUrlLabel', 'IS24 search URL')}</label>
               <input
                 className="input"
                 placeholder="https://www.immobilienscout24.de/Suche/de/..."
@@ -536,7 +563,7 @@ export default function SetupWizard({ onComplete }) {
             </div>
 
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Leave empty to skip — you can add searches later.
+              {t('setup.searchSkip', 'Leave empty to skip — you can add searches later.')}
             </p>
           </div>
         )}
@@ -548,7 +575,7 @@ export default function SetupWizard({ onComplete }) {
             onClick={() => setStep(Math.max(0, step - 1))}
             disabled={step === 0}
           >
-            ← Back
+            {t('setup.backButton', '← Back')}
           </button>
 
           <button
@@ -556,7 +583,7 @@ export default function SetupWizard({ onComplete }) {
             onClick={saveAndNext}
             disabled={saving}
           >
-            {saving ? 'Saving...' : step === 4 ? 'Start searching' : 'Continue →'}
+            {saving ? t('setup.saving', 'Saving…') : step === 5 ? t('setup.startSearching', 'Start searching') : t('setup.continueButton', 'Continue →')}
           </button>
         </div>
       </main>

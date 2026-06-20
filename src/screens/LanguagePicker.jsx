@@ -52,24 +52,6 @@ export default function LanguagePicker() {
       </h2>
 
       <div style={{ display: 'flex', gap: 24, marginTop: 24 }}>
-        {/* English */}
-        <button
-          onClick={() => pick('en')}
-          onMouseEnter={() => setHovered('en')}
-          onMouseLeave={() => setHovered(null)}
-          aria-label="English"
-          style={cardStyle('en')}
-        >
-          <span style={{ fontSize: 48 }}>🇬🇧</span>
-          <span style={{
-            fontSize: 20,
-            fontWeight: 500,
-            color: 'var(--text-primary, #e6edf3)',
-          }}>
-            {t('setup.english', 'English')}
-          </span>
-        </button>
-
         {/* German */}
         <button
           onClick={() => pick('de')}
@@ -85,6 +67,24 @@ export default function LanguagePicker() {
             color: 'var(--text-primary, #e6edf3)',
           }}>
             {t('setup.german', 'Deutsch')}
+          </span>
+        </button>
+
+        {/* English */}
+        <button
+          onClick={() => pick('en')}
+          onMouseEnter={() => setHovered('en')}
+          onMouseLeave={() => setHovered(null)}
+          aria-label="English"
+          style={cardStyle('en')}
+        >
+          <span style={{ fontSize: 48 }}>🇬🇧</span>
+          <span style={{
+            fontSize: 20,
+            fontWeight: 500,
+            color: 'var(--text-primary, #e6edf3)',
+          }}>
+            {t('setup.english', 'English')}
           </span>
         </button>
       </div>

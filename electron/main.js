@@ -43,6 +43,7 @@ const CDP_URL = 'http://localhost:9222';
 const PAUSE_FLAG = join(DATA_DIR, '.apply-paused');
 const SUPPORT_DIR = join(DATA_DIR, 'support-bundles');
 const DEBUG_DIR = join(DATA_DIR, 'debug');
+const APP_ICON_PNG = join(__dirname, '..', 'resources', 'icon.png');
 
 // ── State ──────────────────────────────────────────────────────
 
@@ -562,13 +563,14 @@ function handleDaemonEvent(event) {
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 960,
+    width: 1030,
     height: 680,
     minWidth: 720,
     minHeight: 500,
     title: 'Homelander',
     titleBarStyle: 'hiddenInset',
     backgroundColor: '#0a0a0b',
+    icon: APP_ICON_PNG,
     show: false,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -762,9 +764,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('filters:add', async (_e, webUrl, name) => {
     try {
-      const { translateUrl } = await import('../engine/url-translator.js');
-      const { fullUrl, error } = translateUrl(webUrl);
-      if (error) return gracefulFailure('filters:add validate', new Error(error), { code: 'SEARCH_URL_INVALID' });
+      const { validateSearchUrl } = await import('../engine/url-translator.js');
+      const validation = validateSearchUrl(webUrl);
+      if (!validation.ok) {
+        return {
+          validation,
+          ...gracefulFailure('filters:add validate', new Error(validation.error), { code: 'SEARCH_URL_INVALID' }),
+        };
+      }
 
       const { HomelanderDB } = await import('../engine/db.js');
       const db = new HomelanderDB(DB_PATH);
@@ -773,7 +780,7 @@ function registerIpcHandlers() {
         id,
         name: name || '',
         web_url: webUrl,
-        mobile_params: fullUrl,
+        mobile_params: validation.mobileUrl,
       });
       const filter = db.getFilter(id);
       db.close();
@@ -811,7 +818,13 @@ function registerIpcHandlers() {
     try {
       const { getTotalResults } = await import('../engine/url-translator.js');
       const result = await getTotalResults(webUrl);
-      if (result.error) return { total: 0, ...gracefulFailure('filters:test', new Error(result.error), { code: 'SEARCH_URL_INVALID' }) };
+      if (result.error) {
+        return {
+          total: 0,
+          validation: result.validation,
+          ...gracefulFailure('filters:test', new Error(result.error), { code: 'SEARCH_URL_INVALID' }),
+        };
+      }
       return result;
     } catch (err) {
       return { total: 0, ...gracefulFailure('filters:test', err, { code: 'SEARCH_POLL_FAILED' }) };
@@ -1066,6 +1079,11 @@ function deepMerge(target, patch) {
 // ── App Lifecycle ──────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  app.setName('Homelander');
+  if (process.platform === 'darwin' && existsSync(APP_ICON_PNG)) {
+    app.dock.setIcon(nativeImage.createFromPath(APP_ICON_PNG));
+  }
+
   loadConfig();
   registerIpcHandlers();
   await createWindow();

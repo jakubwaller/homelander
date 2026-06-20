@@ -2,11 +2,13 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '../stores/appStore';
+import { useLocale } from '../locales/LocaleContext';
 import FilterCard from '../components/FilterCard';
 import ActivityFeed from '../components/ActivityFeed';
 import { userErrorText } from '../shared/userErrors';
 
 export default function SearchTab() {
+  const { t } = useLocale();
   // ── Store ──────────────────────────────────────────────────────
   const filters = useStore((s) => s.filters);
   const setFilters = useStore((s) => s.setFilters);
@@ -292,13 +294,13 @@ export default function SearchTab() {
     <div className="flex flex-col gap-6">
       {/* ── Stats row ──────────────────────────────────────────── */}
       <div className="flex items-center gap-3 flex-wrap mt-2">
-        <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Today</span>
-        <StatBadge label="Processed" value={`${(stats.sent + stats.failed + (stats.deactivated || 0))}/${stats.seen}`} color="var(--accent)" />
-        <StatBadge label="Sent" value={stats.sent} color="var(--success)" />
-        <StatBadge label="Failed" value={stats.failed} color="var(--danger)" />
-        <StatBadge label="Deactivated" value={stats.deactivated || 0} color="var(--text-muted)" tooltip="Listings removed from IS24 before the bot could apply — not failures, just bad timing." />
-        <StatBadge label="Premium" value={stats.premium || 0} color="#a855f7" tooltip="Premium listings require MieterPlus/Suchen+ subscription. Buy Suchen+ to avoid these errors." />
-        <StatBadge label="Captcha" value={stats.captcha || 0} color="#f59e0b" tooltip="Blocked by captcha — enter your 2captcha API key in Settings to auto-solve." />
+        <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{t('search.today', 'Today')}</span>
+        <StatBadge label={t('search.processed', 'Processed')} value={`${(stats.sent + stats.failed + (stats.deactivated || 0))}/${stats.seen}`} color="var(--accent)" />
+        <StatBadge label={t('search.sent', 'Sent')} value={stats.sent} color="var(--success)" />
+        <StatBadge label={t('search.failed', 'Failed')} value={stats.failed} color="var(--danger)" />
+        <StatBadge label={t('livefeed.deactivated', 'Deactivated')} value={stats.deactivated || 0} color="var(--text-muted)" tooltip={t('livefeed.deactivatedTip')} />
+        <StatBadge label={t('livefeed.premium', 'Premium')} value={stats.premium || 0} color="#a855f7" tooltip={t('livefeed.premiumTip')} />
+        <StatBadge label={t('livefeed.captcha', 'Captcha')} value={stats.captcha || 0} color="#f59e0b" tooltip={t('livefeed.captchaTip')} />
 
         </div>
 
@@ -318,7 +320,7 @@ export default function SearchTab() {
             className="font-medium hover:underline"
             onClick={() => setError(null)}
           >
-            Dismiss
+            {t('common.dismiss', 'Schließen')}
           </button>
         </div>
       )}
@@ -328,11 +330,11 @@ export default function SearchTab() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
-              Your searches
+              {t('search.yourSearches', 'Deine Suchen')}
             </h2>
             {nextPollCountdown && (
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                · Next poll in {nextPollCountdown}
+                · {t('search.nextPollIn', 'Nächste Prüfung in {{time}}').replace('{{time}}', nextPollCountdown)}
               </span>
             )}
           </div>
@@ -340,29 +342,29 @@ export default function SearchTab() {
             className="btn btn-primary text-sm"
             onClick={() => setShowAddDialog(true)}
           >
-            + Add search
+            + {t('search.addSearchButton', 'Suche hinzufügen')}
           </button>
         </div>
 
         {loading && filters.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Loading searches…
+              {t('search.loadingSearches', 'Suchen werden geladen…')}
             </p>
           </div>
         ) : filters.length === 0 ? (
           <div className="card p-8 text-center">
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              No searches configured yet.
+              {t('search.noSearchesConfigured', 'Noch keine Suchen eingerichtet.')}
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Add an IS24 search URL to start auto-applying to new listings.
+              {t('search.noSearchesHint', 'Füge eine IS24-Such-URL hinzu, um automatisch Bewerbungen zu starten.')}
             </p>
             <button
               className="btn btn-primary mt-4 text-sm"
               onClick={() => setShowAddDialog(true)}
             >
-              + Add your first search
+              + {t('search.addFirstSearch', 'Erste Suche hinzufügen')}
             </button>
           </div>
         ) : (
@@ -421,6 +423,7 @@ export default function SearchTab() {
 // ── Lazy dialog loader ──────────────────────────────────────────
 // Dynamic import so the dialog bundle is only loaded when needed.
 function LazyAddSearchDialog({ onAdd, onCancel }) {
+  const { t } = useLocale();
   const [Dialog, setDialog] = useState(null);
 
   useEffect(() => {
@@ -438,7 +441,7 @@ function LazyAddSearchDialog({ onAdd, onCancel }) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
         <div className="card p-6">
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading…</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{t('common.loading', 'Wird geladen…')}</p>
         </div>
       </div>
     );
@@ -449,6 +452,7 @@ function LazyAddSearchDialog({ onAdd, onCancel }) {
 
 // ── Inline fallback dialog (used when AddSearchDialog.jsx is missing) ─
 function InlineAddDialog({ onAdd, onCancel }) {
+  const { t } = useLocale();
   const [webUrl, setWebUrl] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -457,7 +461,7 @@ function InlineAddDialog({ onAdd, onCancel }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!webUrl.trim()) {
-      setLocalError('Please enter an IS24 search URL');
+      setLocalError(t('search.enterSearchUrl', 'Bitte IS24-Such-URL eingeben'));
       return;
     }
     setSubmitting(true);
@@ -465,10 +469,10 @@ function InlineAddDialog({ onAdd, onCancel }) {
     try {
       const ok = await onAdd(webUrl.trim(), name.trim() || undefined);
       if (!ok) {
-        setLocalError('Failed to add search');
+        setLocalError(t('search.addFailed', 'Suche konnte nicht hinzugefügt werden'));
       }
     } catch {
-      setLocalError('Failed to add search');
+      setLocalError(t('search.addFailed', 'Suche konnte nicht hinzugefügt werden'));
     } finally {
       setSubmitting(false);
     }
@@ -481,14 +485,14 @@ function InlineAddDialog({ onAdd, onCancel }) {
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div className="card p-6 w-full" style={{ maxWidth: 480 }}>
-        <h2 className="text-base font-semibold mb-4">Add IS24 Search</h2>
+        <h2 className="text-base font-semibold mb-4">{t('search.addSearch', 'IS24-Suche hinzufügen')}</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
             <label
               className="block text-xs mb-1.5 font-medium"
               style={{ color: 'var(--text-secondary)' }}
             >
-              Search URL
+              {t('search.searchUrl', 'Such-URL')}
             </label>
             <input
               className="input"
@@ -504,12 +508,12 @@ function InlineAddDialog({ onAdd, onCancel }) {
               className="block text-xs mb-1.5 font-medium"
               style={{ color: 'var(--text-secondary)' }}
             >
-              Name (optional)
+              {t('search.nameOptional', 'Name (optional)')}
             </label>
             <input
               className="input"
               type="text"
-              placeholder="e.g. Berlin 2-room"
+              placeholder={t('search.searchPlaceholder', 'e.g. Berlin 2-room')}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -528,14 +532,14 @@ function InlineAddDialog({ onAdd, onCancel }) {
               onClick={onCancel}
               disabled={submitting}
             >
-              Cancel
+              {t('search.cancel', 'Abbrechen')}
             </button>
             <button
               type="submit"
               className="btn btn-primary text-sm"
               disabled={submitting || !webUrl.trim()}
             >
-              {submitting ? 'Adding…' : 'Add search'}
+              {submitting ? t('search.adding', 'Füge hinzu…') : t('search.addSearchButton', 'Suche hinzufügen')}
             </button>
           </div>
         </form>

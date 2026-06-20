@@ -6,7 +6,14 @@
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { translateUrl, getTotalResults, fetchListings } from '../engine/url-translator.js';
+import {
+  translateUrl,
+  getTotalResults,
+  fetchListings,
+  parseSearchUrl,
+  validateSearchUrl,
+  buildMobileApiUrl,
+} from '../engine/url-translator.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -41,6 +48,118 @@ function mockResponse(body, status = 200, ok = true) {
     json: async () => body,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Canonical parser / validation — conservative search import behavior
+// ---------------------------------------------------------------------------
+
+describe('parseSearchUrl — canonical IS24 filter model', () => {
+  it('parses the Osnabrück new-build URL with ranges, multi-enums and safe ignored params', () => {
+    const input = 'https://www.immobilienscout24.de/Suche/de/niedersachsen/osnabrueck/neubauwohnung-mieten?heatingtypes=central,selfcontainedcentral&numberofrooms=-5.0&price=500.0-&livingspace=30.0-&equipment=handicappedaccessible&pricetype=rentpermonth&enteredFrom=result_list';
+    const parsed = parseSearchUrl(input);
+
+    assert.equal(parsed.error, null);
+    assert.equal(parsed.canonical.realEstateType, 'apartmentrent');
+    assert.equal(parsed.canonical.construction.newBuildingOnly, true);
+    assert.deepEqual(parsed.canonical.location.path, ['de', 'niedersachsen', 'osnabrueck']);
+    assert.deepEqual(parsed.canonical.price, { min: 500, max: null, type: 'rentpermonth' });
+    assert.deepEqual(parsed.canonical.rooms, { min: null, max: 5 });
+    assert.deepEqual(parsed.canonical.livingSpace, { min: 30, max: null });
+    assert.deepEqual(parsed.canonical.heatingTypes, ['CENTRAL_HEATING', 'SELF_CONTAINED_CENTRAL_HEATING']);
+    assert.deepEqual(parsed.canonical.equipment, ['HANDICAPPED_ACCESSIBLE']);
+    assert.deepEqual(parsed.safeIgnoredParams, [{ key: 'enteredFrom', value: 'result_list' }]);
+    assert.deepEqual(parsed.unsupportedParams, []);
+  });
+
+  it('flags dangerous unknown params instead of silently dropping them', () => {
+    const parsed = parseSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?petsallowedtypes=yes&unknown=foo&enteredFrom=result_list'
+    );
+
+    assert.equal(parsed.error, null);
+    assert.deepEqual(parsed.safeIgnoredParams, [{ key: 'enteredFrom', value: 'result_list' }]);
+    assert.deepEqual(parsed.unsupportedParams, [
+      { key: 'unknown', value: 'foo', risk: 'dangerous' },
+    ]);
+    assert.deepEqual(parsed.canonical.directParams, [{ key: 'petsallowedtypes', value: 'yes' }]);
+  });
+
+  it('rejects malformed ranges instead of ignoring them', () => {
+    const parsed = parseSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?price=abc'
+    );
+
+    assert.equal(parsed.error, 'Invalid price range: abc');
+  });
+
+  it('builds mobile API params without duplicating explicit pricetype', () => {
+    const parsed = parseSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/niedersachsen/osnabrueck/neubauwohnung-mieten?price=500.0-&pricetype=rentpermonth'
+    );
+    const fullUrl = buildMobileApiUrl(parsed.canonical);
+    const params = new URL(fullUrl).searchParams;
+
+    assert.deepEqual(params.getAll('pricetype'), ['rentpermonth']);
+    assert.equal(params.get('price'), '500-');
+    assert.equal(params.get('realestatetype'), 'apartmentrent');
+    assert.equal(params.get('newbuilding'), 'true');
+  });
+});
+
+describe('validateSearchUrl — user friendly import gate', () => {
+  it('returns preview lines and blocks dangerous unsupported params', () => {
+    const result = validateSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?foo=bar'
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Unsupported IS24 search filters: foo=bar');
+    assert.ok(result.preview.filters.includes('Apartment rent'));
+    assert.deepEqual(result.unsupportedParams, [{ key: 'foo', value: 'bar', risk: 'dangerous' }]);
+  });
+
+  it('accepts WG links, trims the WG slug from geocode, and keeps mobile-supported filters', () => {
+    const result = validateSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/bayern/muenchen/4er-wg?gender=male&livingspace=-100.0&energyefficiencyclasses=a,b,a_plus&equipment=fridge,cooker,petsallowed,internet&smokingallowed=allowed&petsallowedtypes=no,yes,negotiable&startrentaldate=2027-05-22&furniture=true&price=1.0-&rentalduration=3&enteredFrom=result_list'
+    );
+    const params = new URL(result.mobileUrl).searchParams;
+
+    assert.equal(result.ok, true);
+    assert.equal(result.error, null);
+    assert.deepEqual(result.unsupportedParams, []);
+    assert.deepEqual(result.canonical.location.path, ['de', 'bayern', 'muenchen']);
+    assert.equal(result.canonical.fullText, '4er wg');
+    assert.deepEqual(result.canonical.equipment, ['FRIDGE', 'COOKER', 'PETS_ALLOWED', 'INTERNET']);
+    assert.ok(result.preview.filters.includes('4er WG'));
+    assert.equal(params.get('geocodes'), '/de/bayern/muenchen');
+    assert.equal(params.get('fulltext'), '4er wg');
+    assert.equal(params.get('livingspace'), '-100');
+    assert.equal(params.get('price'), '1-');
+    assert.equal(params.get('energyefficiencyclasses'), 'a,b,a_plus');
+    assert.equal(params.get('petsallowedtypes'), 'no,yes,negotiable');
+    assert.equal(params.get('equipment'), 'fridge,cooker,petsallowed,internet');
+    assert.equal(params.has('numberofrooms'), false);
+    assert.ok(result.safeIgnoredParams.some(p => p.key === 'gender'));
+    assert.ok(result.safeIgnoredParams.some(p => p.key === 'startrentaldate'));
+  });
+
+  it('accepts the golden Osnabrück URL and describes the parsed filters', () => {
+    const result = validateSearchUrl(
+      'https://www.immobilienscout24.de/Suche/de/niedersachsen/osnabrueck/neubauwohnung-mieten?heatingtypes=central,selfcontainedcentral&numberofrooms=-5.0&price=500.0-&livingspace=30.0-&equipment=handicappedaccessible&pricetype=rentpermonth&enteredFrom=result_list'
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.error, null);
+    assert.ok(result.preview.location.includes('Osnabrueck'));
+    assert.ok(result.preview.filters.includes('New-build apartment rent'));
+    assert.ok(result.preview.filters.includes('Price ≥ 500'));
+    assert.ok(result.preview.filters.includes('Rooms ≤ 5'));
+    assert.ok(result.preview.filters.includes('Living space ≥ 30 m²'));
+    assert.ok(result.preview.filters.includes('Heating: central heating, self-contained central heating'));
+    assert.ok(result.preview.filters.includes('Equipment: barrier-free'));
+    assert.deepEqual(result.safeIgnoredParams, [{ key: 'enteredFrom', value: 'result_list' }]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // translateUrl — successful translations
@@ -633,6 +752,51 @@ describe('fetchListings', () => {
     assert.equal(listings[0].price, 500);   // from totalRent
     assert.equal(listings[0].size, 60);     // from livingSpace
     assert.equal(listings[0].rooms, 0);     // 'rooms' attr had no value key
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Optional live conformance checks (manual: IS24_LIVE_TESTS=1 node --test ...)
+// ---------------------------------------------------------------------------
+
+describe('IS24 live conformance (opt-in)', { skip: process.env.IS24_LIVE_TESTS !== '1' }, () => {
+  beforeEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('golden Osnabrück URL returns a valid mobile API total with parsed filters intact', async () => {
+    const url = 'https://www.immobilienscout24.de/Suche/de/niedersachsen/osnabrueck/neubauwohnung-mieten?heatingtypes=central,selfcontainedcentral&numberofrooms=-5.0&price=500.0-&livingspace=30.0-&equipment=handicappedaccessible&pricetype=rentpermonth&enteredFrom=result_list';
+    const result = await getTotalResults(url);
+    assert.equal(result.error, null);
+    assert.equal(typeof result.total, 'number');
+    assert.ok(result.validation.ok);
+    assert.equal(result.validation.unsupportedParams.length, 0);
+  });
+
+  it('WG Munich URL reaches live mobile API after dropping only rejected web-only filters', async () => {
+    const url = 'https://www.immobilienscout24.de/Suche/de/bayern/muenchen/4er-wg?gender=male&livingspace=-100.0&energyefficiencyclasses=a,b,a_plus&equipment=fridge,cooker,petsallowed,internet&smokingallowed=allowed&petsallowedtypes=no,yes,negotiable&startrentaldate=2027-05-22&furniture=true&price=1.0-&rentalduration=3&enteredFrom=result_list';
+    const result = await getTotalResults(url);
+    assert.equal(result.error, null);
+    assert.equal(typeof result.total, 'number');
+    assert.ok(result.validation.ok);
+    assert.equal(result.validation.unsupportedParams.length, 0);
+    assert.equal(result.validation.canonical.fullText, '4er wg');
+  });
+
+  it('stricter max price does not increase total in the same geo/type', async () => {
+    const loose = await getTotalResults('https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?price=-1500.0');
+    const strict = await getTotalResults('https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?price=-900.0');
+    assert.equal(loose.error, null);
+    assert.equal(strict.error, null);
+    assert.ok(strict.total <= loose.total, `expected ${strict.total} <= ${loose.total}`);
+  });
+
+  it('returned listings obey numeric max-room constraint when attributes are available', async () => {
+    const result = await fetchListings('https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?numberofrooms=-2.0', 1);
+    assert.equal(result.error, null);
+    for (const listing of result.listings.filter(l => Number.isFinite(l.rooms) && l.rooms > 0).slice(0, 10)) {
+      assert.ok(listing.rooms <= 2, `${listing.expose_id} has ${listing.rooms} rooms`);
+    }
   });
 });
 

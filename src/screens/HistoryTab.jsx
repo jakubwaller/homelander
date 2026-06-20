@@ -8,12 +8,12 @@ import { userErrorText } from '../shared/userErrors';
 
 const PAGE_SIZE = 30;
 const OUTCOME_KEYS = [
-  { value: '', label: 'All', statKey: 'total', icon: null, color: null },
-  { value: 'SENT', label: 'Sent', statKey: 'sent', icon: '●', color: 'var(--success)' },
-  { value: 'FAIL', label: 'Failed', statKey: 'failed', icon: '●', color: 'var(--danger)' },
-  { value: 'DEACTIVATED', label: 'Deactivated', statKey: 'deactivated', icon: '●', color: 'var(--text-secondary)' },
-  { value: 'PREMIUM', label: 'Premium', statKey: 'premium', icon: '●', color: '#a855f7' },
-  { value: 'CAPTCHA', label: 'Captcha', statKey: 'captcha', icon: '●', color: '#f59e0b' },
+  { value: '', label: 'All', localeKey: 'history.all', statKey: 'total', icon: null, color: null },
+  { value: 'SENT', label: 'Sent', localeKey: 'history.sent', statKey: 'sent', icon: '●', color: 'var(--success)' },
+  { value: 'FAIL', label: 'Failed', localeKey: 'history.failed', statKey: 'failed', icon: '●', color: 'var(--danger)' },
+  { value: 'DEACTIVATED', label: 'Deactivated', localeKey: 'history.deactivated', statKey: 'deactivated', icon: '●', color: 'var(--text-secondary)' },
+  { value: 'PREMIUM', label: 'Premium', localeKey: 'history.premiumLabel', statKey: 'premium', icon: '●', color: '#a855f7' },
+  { value: 'CAPTCHA', label: 'Captcha', localeKey: 'history.captchaLabel', statKey: 'captcha', icon: '●', color: '#f59e0b' },
 ];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,6 +81,7 @@ function listingBadges(listing) {
 // ── Entry Row ────────────────────────────────────────────────────────────────
 
 function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupportBundle, supportBusy, outcomeFilter, onImageHover, onImageMove, onImageLeave, onTipShow, onTipMove, onTipHide }) {
+  const { t } = useLocale();
   const [copied, setCopied] = useState(null);
   const [requeued, setRequeued] = useState(false);
 
@@ -113,7 +114,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
   const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : isDryRun ? '○' : '✗';
   const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : isDryRun ? 'var(--text-muted)' : 'var(--danger)';
 
-  const outcomeLabel = isSent ? 'Sent' : isDeactivated ? 'Deactivated' : isDryRun ? 'Dry Run' : 'Failed';
+  const outcomeLabel = isSent ? t('history.sent', 'Sent') : isDeactivated ? t('history.deactivated', 'Deactivated') : isDryRun ? t('history.dryRun', 'Dry Run') : t('history.failed', 'Failed');
 
   const badgeClass = isSent ? 'badge-success' : isDeactivated ? 'badge-deactivated' : isDryRun ? '' : 'badge-fail';
   const safeDetail = listing.detail ? userErrorText(listing.detail, { operation: 'listing apply' }) : '';
@@ -125,20 +126,21 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
     >
       {/* Summary row */}
       <div className="flex items-center gap-3 px-3 py-2.5">
-        {/* Thumbnail */}
-        {listing.image_url && (
-          <div className="relative flex-shrink-0" style={{ width: 40, height: 40 }}>
+        {/* Thumbnail — always show placeholder, overlay image when available */}
+        <div className="relative flex-shrink-0" style={{ width: 40, height: 40 }}>
+          <div
+            className="absolute inset-0 rounded bg-gray-700 flex items-center justify-center text-gray-500 text-xs font-medium"
+          >
+            {(listing.title || '?')[0]}
+          </div>
+          {listing.image_url && (
             <img
               src={listing.image_url}
               alt=""
-              className="rounded object-cover bg-gray-700"
+              className="absolute inset-0 rounded object-cover bg-gray-700"
               style={{ width: 40, height: 40 }}
               loading="lazy"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                const fb = e.currentTarget.nextElementSibling;
-                if (fb) fb.style.display = 'flex';
-              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
               onMouseEnter={(e) => {
                 onImageHover?.(listing.image_url);
                 onImageMove?.({ x: e.clientX, y: e.clientY });
@@ -146,14 +148,8 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
               onMouseMove={(e) => onImageMove?.({ x: e.clientX, y: e.clientY })}
               onMouseLeave={() => onImageLeave?.()}
             />
-            <div
-              className="absolute inset-0 rounded bg-gray-700 items-center justify-center text-gray-500 text-xs font-medium"
-              style={{ display: 'none' }}
-            >
-              {(listing.title || '?')[0]}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
         {/* Status icon */}
         <span
           className={`flex-shrink-0 w-5 text-center ${isDeactivated ? 'text-base' : 'text-sm'}`}
@@ -166,19 +162,19 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate">
-              {listing.title || 'Unknown Listing'}
+              {listing.title || t('history.unknownListing', 'Unknown Listing')}
             </span>
             <span className={`badge ${badgeClass} text-xs`}>
               {outcomeLabel}
             </span>
             {showBadges.includes('Deactivated') && (
-              <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow('Listing was removed from IS24 before the bot could apply — not a failure, just bad timing.', e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>🪦 Deactivated</span>
+              <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.deactivatedTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.deactivatedBadge', '🪦 Deactivated')}</span>
             )}
             {showBadges.includes('Captcha') && (
-              <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow('Blocked by captcha — enter your 2captcha API key in Settings to auto-solve', e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>🔐 Captcha</span>
+              <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.captchaTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.captchaBadge', '🔐 Captcha')}</span>
             )}
             {showBadges.includes('Premium') && (
-              <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow('Premium listing — requires MieterPlus/Suchen+ subscription. Buy Suchen+ to avoid these errors', e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>💎 Premium</span>
+              <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.premiumTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.premiumBadge', '💎 Premium')}</span>
             )}
           </div>
           {listing.address && (
@@ -242,14 +238,14 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
         >
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mt-2">
             <div>
-              <span style={{ color: 'var(--text-muted)' }}>Status: </span>
+              <span style={{ color: 'var(--text-muted)' }}>{t('history.status', 'Status:')} </span>
               <span style={{ color: statusColor }} className="font-medium">
                 {outcomeLabel}
               </span>
             </div>
 
             <div>
-              <span style={{ color: 'var(--text-muted)' }}>Time: </span>
+              <span style={{ color: 'var(--text-muted)' }}>{t('history.time', 'Time:')} </span>
               <span style={{ color: 'var(--text-secondary)' }}>
                 {formatDateTime(listing.sent_at)}
               </span>
@@ -257,7 +253,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
 
             {listing.expose_id && (
               <div className="col-span-2">
-                <span style={{ color: 'var(--text-muted)' }}>Exposé ID: </span>
+                <span style={{ color: 'var(--text-muted)' }}>{t('history.exposeId', 'Exposé ID:')} </span>
                 <button
                   className="font-mono"
                   style={{ color: copied === listing.expose_id ? 'var(--success)' : 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
@@ -267,7 +263,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                     setCopied(listing.expose_id);
                     setTimeout(() => setCopied(null), 1500);
                   }}
-                  title="Click to copy"
+                  title={t('history.clickToCopy', 'Click to copy')}
                 >
                   {listing.expose_id}
                 </button>
@@ -280,16 +276,16 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                     setCopied(listing.expose_id);
                     setTimeout(() => setCopied(null), 1500);
                   }}
-                  title="Click to copy"
+                  title={t('history.clickToCopy', 'Click to copy')}
                 >
-                  {copied === listing.expose_id ? '✓ Copied' : '📋'}
+                  {copied === listing.expose_id ? t('history.copied', '✓ Copied') : t('history.copyIcon', '📋')}
                 </span>
               </div>
             )}
 
             {safeDetail && (
               <div className="col-span-2 mt-1">
-                <span style={{ color: 'var(--text-muted)' }}>Detail: </span>
+                <span style={{ color: 'var(--text-muted)' }}>{t('history.detail', 'Detail:')} </span>
                 <p
                   className="mt-0.5 p-2 rounded text-xs whitespace-pre-wrap"
                   style={{
@@ -304,7 +300,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                     setCopied(safeDetail);
                     setTimeout(() => setCopied(null), 1500);
                   }}
-                  title="Click to copy"
+                  title={t('history.clickToCopy', 'Click to copy')}
                 >
                   {safeDetail}
                 </p>
@@ -319,7 +315,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                   onClick={(e) => { e.stopPropagation(); if (!supportBusy) onSupportBundle(listing); }}
                   disabled={supportBusy}
                 >
-                  {supportBusy ? '✓ Debug bundle exported' : '📦 Export Debug Bundle'}
+                  {supportBusy ? t('history.supportExported', '✓ Debug bundle exported') : t('history.supportExport', '📦 Export Debug Bundle')}
                 </button>
                 <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
                   {t('history.supportDesc', 'screenshot + HTML + entry logs')}
@@ -336,6 +332,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function HistoryTab() {
+  const { t } = useLocale();
   const filters = useStore((state) => state.filters);
   const activeTab = useStore((state) => state.activeTab);
 
@@ -584,7 +581,7 @@ export default function HistoryTab() {
       {/* Stats label — reflects active search filter */}
       <div className="flex items-center gap-3 mb-3 flex-shrink-0">
         <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-          {filterId ? (filters.find(f => f.id === filterId)?.name || 'Search') : 'All time'}
+          {filterId ? (filters.find(f => f.id === filterId)?.name || t('history.searchFallback', 'Search')) : t('history.allTime', 'All time')}
         </span>
       </div>
 
@@ -594,7 +591,7 @@ export default function HistoryTab() {
         <div className="flex gap-1">
           {OUTCOME_KEYS.map((o) => {
             const count = allTimeStats ? allTimeStats[o.statKey] : null;
-            const label = count != null ? `${o.label} ${count}` : o.label;
+            const label = count != null ? `${t(o.localeKey, o.label)} ${count}` : t(o.localeKey, o.label);
             const isActive = outcomeFilter === o.value;
             return (
               <button
@@ -689,7 +686,7 @@ export default function HistoryTab() {
                   className="text-xs font-semibold uppercase tracking-wide mb-2 px-1"
                   style={{ color: 'var(--text-muted)' }}
                 >
-                  {date}
+                  {date === 'Today' ? t('history.today', 'Today') : date === 'Yesterday' ? t('history.yesterday', 'Yesterday') : date}
                 </h3>
 
                 {/* Entries for this date */}

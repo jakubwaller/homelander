@@ -1,0 +1,17 @@
+{
+  "name": "Homelander",
+  "primary_icon": "gold/brass key",
+  "source": "brand/icon.svg + brand/icon.png",
+  "colors": {
+    "gold": "#D9A441",
+    "highlight_gold": "#E6BD62",
+    "dark": "#07090E",
+    "panel_dark": "#0F1420",
+    "light": "#F6F7F9",
+    "muted": "#9CA3AF"
+  },
+  "recommended_master": "SVG source plus 2048x2048 transparent PNG",
+  "macos_icon": "brand/app/macos/icon.icns",
+  "web_favicon": "brand/web/favicon.ico",
+  "pipeline": "Autotrace vector trace from cleaned original key silhouette; rendered via librsvg; packaged with iconutil"
+}

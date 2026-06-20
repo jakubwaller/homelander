@@ -2,10 +2,12 @@
 // Also shows a "Poll now" button.
 
 import React, { useState } from 'react';
+import { useLocale } from '../locales/LocaleContext';
 import StatusDot from './StatusDot';
 import { userErrorText } from '../shared/userErrors';
 
 export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollError }) {
+  const { t } = useLocale();
   const [confirming, setConfirming] = useState(false);
   const [polling, setPolling] = useState(false);
   const [pollMessage, setPollMessage] = useState(null);
@@ -29,9 +31,9 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
       if (result?.error) {
         setPollMessage({ type: 'error', text: result.error });
       } else if ((result?.inserted || 0) > 0) {
-        setPollMessage({ type: 'success', text: `Added ${result.inserted} new listing${result.inserted === 1 ? '' : 's'}.` });
+        setPollMessage({ type: 'success', text: t('search.pollAdded', '{{count}} neue Inserate gefunden.').replace('{{count}}', result.inserted) });
       } else {
-        setPollMessage({ type: 'muted', text: 'No new listings.' });
+        setPollMessage({ type: 'muted', text: t('search.noNewListings', 'Keine neuen Inserate.') });
       }
     } catch (err) {
       setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'poll search' }) });
@@ -48,15 +50,15 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
           <div className="flex items-center gap-2 mb-1">
             <StatusDot status={filter.enabled ? 'running' : 'paused'} />
             <h3 className="text-sm font-medium truncate">
-              {filter.name || 'Unnamed Search'}
+              {filter.name || t('search.unnamedSearch', 'Unnamed Search')}
             </h3>
           </div>
 
           {/* Stats row */}
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>Processed <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.total_seen || 0}</strong></span>
+            <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.total_seen || 0}</strong></span>
             {filter.new_count > 0 && (
-              <span className="badge badge-accent">+{filter.new_count} pending</span>
+              <span className="badge badge-accent">+{filter.new_count} {t('search.pending', 'pending')}</span>
             )}
           </div>
 
@@ -88,7 +90,6 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
               {pollMessage.text}
             </p>
           )}
-
         </div>
 
         {/* Actions */}
@@ -99,20 +100,20 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
               onClick={handlePollNow}
               disabled={polling}
             >
-              {polling ? '⏳' : '▶'} Poll now
+              {polling ? '⏳' : '▶'} {t('search.pollNow', 'Poll now')}
             </button>
           )}
           <button
             className="btn btn-ghost text-xs"
             onClick={() => onPause(filter.id, !filter.enabled)}
           >
-            {filter.enabled ? '⏸ Pause' : '▶ Resume'}
+            {filter.enabled ? t('search.pause', '⏸ Pause') : t('search.resume', '▶ Resume')}
           </button>
           <button
             className={`btn text-xs ${confirming ? 'btn-danger' : 'btn-ghost'}`}
             onClick={handleRemove}
           >
-            {confirming ? 'Confirm?' : '🗑'}
+            {confirming ? t('search.confirm', 'Confirm?') : '🗑'}
           </button>
         </div>
       </div>

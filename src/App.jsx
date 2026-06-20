@@ -7,10 +7,10 @@ import SearchTab from './screens/SearchTab';
 import HistoryTab from './screens/HistoryTab';
 import SettingsTab from './screens/SettingsTab';
 import SetupWizard from './screens/SetupWizard';
-import LanguagePicker from './screens/LanguagePicker';
 import StatusDot from './components/StatusDot';
 import { LocaleProvider, useLocale } from './locales/LocaleContext';
 import { userErrorText } from './shared/userErrors';
+import homelanderKey from './assets/homelander-key.png';
 
 const TABS = ['searches', 'history', 'settings'];
 
@@ -47,7 +47,7 @@ export default function App() {
 }
 
 function AppInner() {
-  const { chosen, t } = useLocale();
+  const { t } = useLocale();
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const setupComplete = useStore((s) => s.setupComplete);
@@ -205,12 +205,7 @@ function AppInner() {
     }
   }, [setDaemonStatus]);
 
-  // Show language picker during first-launch setup before anything else
-  if (!chosen && !setupComplete) {
-    return React.createElement(LanguagePicker);
-  }
-
-  // Show setup wizard on first launch
+  // Show setup wizard on first launch (language is step 0)
   if (!setupComplete) {
     return <SetupWizard onComplete={() => setSetupComplete(true)} />;
   }
@@ -225,7 +220,7 @@ function AppInner() {
         {/* Left: title + controls grouped */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-base">🏠</span>
+            <img src={homelanderKey} alt="" className="w-5 h-5 object-contain opacity-90" draggable={false} />
             <h1 className="text-lg font-semibold tracking-tight">{t('app.title', 'Homelander')}</h1>
           </div>
           <div

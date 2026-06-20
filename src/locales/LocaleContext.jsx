@@ -18,7 +18,7 @@ function detectLocale() {
     const lang = navigator.language || '';
     if (lang.startsWith('de')) return 'de';
   } catch {}
-  return 'en';
+  return 'de';
 }
 
 const LocaleContext = createContext(null);

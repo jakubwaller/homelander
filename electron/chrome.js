@@ -94,6 +94,7 @@ export class ChromeManager {
         '--disable-hang-monitor',
         '--disable-translate',
         '--no-pings',
+        '--disable-features=NetworkServiceSandbox',
       ],
     });
 
