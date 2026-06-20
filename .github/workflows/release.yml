@@ -2,6 +2,15 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build'
+        required: true
+        type: choice
+        default: 'mac'
+        options:
+          - mac
+          - all
 
 jobs:
   release:
@@ -16,6 +25,7 @@ jobs:
           - os: windows-latest
             platform: win
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event.inputs.platforms == 'all' || matrix.platform == github.event.inputs.platforms }}
 
     steps:
       - uses: actions/checkout@v7

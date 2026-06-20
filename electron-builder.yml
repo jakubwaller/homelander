@@ -10,6 +10,7 @@ directories:
 files:
   - dist/**/*
   - electron/**/*
+  - src/**/*
   - engine/**/*
   - node_modules/**/*
   - package.json
