@@ -106,6 +106,7 @@ function AppInner() {
     const unsubs = [];
 
     unsubs.push(window.homelander.onStats((data) => {
+      if (data?.daemonStatus) setDaemonStatus(data.daemonStatus);
       setStats(normalizeStats(data));
       // Refresh per-search counts so FilterCards stay live
       window.homelander.getFilters().then(({ filters }) => {
@@ -135,8 +136,8 @@ function AppInner() {
       if (data.type === 'daemon_stopped') setDaemonStatus('stopped');
       if (data.type === 'session_expired') setDaemonStatus('session_expired');
       if (data.type === 'config_applied') {
+        if (data.daemonStatus) setDaemonStatus(data.daemonStatus);
         // Brief flash — clears after animation
-        setDaemonStatus((prev) => prev === 'restarting' ? prev : prev);
         window.dispatchEvent(new CustomEvent('homelander:config-applied'));
       }
       if (data.type === 'retry_queued') {

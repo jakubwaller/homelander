@@ -52,6 +52,7 @@ let daemonProcess = null;
 let daemonStatus = 'stopped'; // stopped | running | paused | restarting | session_expired
 let daemonStartedAt = 0;      // timestamp of last startDaemon() call
 let latestNextPollAt = null;  // last future next_poll_at emitted by daemon poll loop
+let daemonStopping = false;   // true only during an explicit user stop/SIGTERM window
 let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
 let chromeManager = new ChromeManager();
 let config = null;
@@ -381,6 +382,7 @@ function startDaemon() {
   if (daemonProcess) return;
 
   // Cancel any pending stop-SIGKILL to prevent cross-firing on this new daemon
+  daemonStopping = false;
   if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
 
   // Write current config for daemon to read
@@ -435,6 +437,7 @@ function startDaemon() {
   daemonProcess.on('exit', (code) => {
     console.log(`[daemon] exited with code ${code}`);
     daemonProcess = null;
+    daemonStopping = false;
     // Clear any pending SIGKILL timer — process already exited cleanly
     if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
     const wasRunning = daemonStatus === 'running' || daemonStatus === 'paused';
@@ -468,6 +471,7 @@ function startDaemon() {
   daemonProcess.on('error', (err) => {
     logRawError('daemon spawn', err, { code: 'DAEMON_ACTION_FAILED' });
     daemonProcess = null;
+    daemonStopping = false;
     daemonStatus = 'stopped';
     latestNextPollAt = null;
   });
@@ -479,6 +483,7 @@ function stopDaemon() {
   // Clear any previous stop timer
   if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
 
+  daemonStopping = true;
   const proc = daemonProcess; // capture reference — never cross-fire on a newer daemon
   proc.kill('SIGTERM');
   _stopKillTimer = setTimeout(() => {
@@ -487,6 +492,7 @@ function stopDaemon() {
     if (daemonProcess === proc) {
       try { proc.kill('SIGKILL'); } catch {}
       daemonProcess = null;
+      daemonStopping = false;
       latestNextPollAt = null;
     }
   }, 5000);
@@ -498,6 +504,25 @@ function pollIntervalMs() {
   return (config?.polling?.interval_seconds || 120) * 1000;
 }
 
+function daemonAlive() {
+  return !!daemonProcess && daemonProcess.exitCode === null && !daemonProcess.killed;
+}
+
+function effectiveDaemonStatus() {
+  if (daemonStopping) return 'stopped';
+  if (!daemonAlive()) return 'stopped';
+  if (daemonStatus === 'paused' || daemonStatus === 'session_expired' || daemonStatus === 'restarting') return daemonStatus;
+  return 'running';
+}
+
+function markDaemonAlive(reason = 'daemon_activity') {
+  if (daemonStopping || !daemonAlive()) return;
+  if (daemonStatus === 'stopped') {
+    daemonStatus = 'running';
+    if (mainWindow) mainWindow.webContents.send('homelander:event', { type: 'daemon_started', reason });
+  }
+}
+
 function resetDaemonPollSchedule(reason = 'schedule_reset') {
   if (daemonProcess && daemonProcess.connected) {
     try { daemonProcess.send({ type: 'reset_poll_schedule', reason }); } catch {}
@@ -505,7 +530,8 @@ function resetDaemonPollSchedule(reason = 'schedule_reset') {
 }
 
 function setNextPollFromNow(reason = 'schedule_reset') {
-  if (!daemonProcess || daemonStatus === 'stopped') return null;
+  if (!daemonAlive()) return null;
+  markDaemonAlive(reason);
   latestNextPollAt = new Date(Date.now() + pollIntervalMs()).toISOString();
   return latestNextPollAt;
 }
@@ -515,6 +541,7 @@ function broadcastStats(stats = {}) {
   const payload = {
     ...stats,
     type: 'stats',
+    daemonStatus: effectiveDaemonStatus(),
     next_poll_at: nextPollAt,
     nextPollAt,
   };
@@ -522,7 +549,8 @@ function broadcastStats(stats = {}) {
 }
 
 function getNextPollAt(db) {
-  if (!daemonProcess || daemonStatus === 'stopped') return null;
+  if (!daemonAlive()) return null;
+  markDaemonAlive('next_poll_lookup');
 
   // Prefer the daemon poll loop's own schedule. This is the only source that
   // stays correct while the apply loop is processing a backlog.
@@ -551,6 +579,10 @@ function getNextPollAt(db) {
 }
 
 function handleDaemonEvent(event) {
+  if (event?.type && event.type !== 'daemon_stopped' && event.type !== 'error') {
+    markDaemonAlive(event.type);
+  }
+
   if (event?.type === 'stats') {
     const next = event.next_poll_at || event.nextPollAt || null;
     if (next && new Date(next).getTime() > Date.now()) {
@@ -622,6 +654,9 @@ function handleDaemonEvent(event) {
     case 'resumed':
       daemonStatus = 'running';
       mainWindow.webContents.send('homelander:event', event);
+      break;
+    case 'config_applied':
+      mainWindow.webContents.send('homelander:event', { ...event, daemonStatus: effectiveDaemonStatus() });
       break;
     default:
       mainWindow.webContents.send('homelander:event', event);
@@ -711,7 +746,7 @@ function registerIpcHandlers() {
     } catch (err) {
       return { status: daemonStatus, ...gracefulFailure('daemon:start chrome launch', err, { code: 'BROWSER_START_FAILED' }) };
     }
-    return { status: daemonStatus };
+    return { status: effectiveDaemonStatus() };
   });
 
   ipcMain.handle('daemon:stop', () => {
@@ -719,7 +754,7 @@ function registerIpcHandlers() {
     latestNextPollAt = null;
     try { unlinkSync(PAUSE_FLAG); } catch {} // clear pause flag so restart doesn't inherit pause
     stopDaemon();
-    return { status: daemonStatus };
+    return { status: effectiveDaemonStatus() };
   });
 
   ipcMain.handle('daemon:pause', () => {
@@ -733,7 +768,7 @@ function registerIpcHandlers() {
       writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'manual' }), 'utf8');
       daemonStatus = 'paused';
     }
-    return { status: daemonStatus };
+    return { status: effectiveDaemonStatus() };
   });
 
   ipcMain.handle('daemon:resume', () => {
@@ -741,14 +776,14 @@ function registerIpcHandlers() {
     if (daemonProcess && daemonProcess.connected) {
       daemonProcess.send({ type: 'resume_apply' });
       daemonStatus = 'running';
-    } else if (!daemonProcess) {
-      daemonStatus = 'running';
+    } else {
+      daemonStatus = 'stopped';
     }
-    return { status: daemonStatus };
+    return { status: effectiveDaemonStatus() };
   });
 
   ipcMain.handle('daemon:status', () => {
-    return { status: daemonStatus };
+    return { status: effectiveDaemonStatus() };
   });
 
   ipcMain.handle('daemon:poll-now', async (_event, filterId) => {
