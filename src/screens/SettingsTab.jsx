@@ -484,7 +484,7 @@ export default function SettingsTab() {
             />
             {t('settings.showKey', 'Show')}
           </label>
-          <button className="btn btn-primary text-xs" onClick={saveCaptcha} disabled={!captchaDraft}>
+          <button className="btn btn-primary text-xs" onClick={saveCaptcha}>
             {t('settings.save', 'Save')}
           </button>
         </div>
