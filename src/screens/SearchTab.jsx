@@ -258,7 +258,8 @@ export default function SearchTab() {
   }, []);
 
   useEffect(() => {
-    if (daemonStatus !== 'running' || !stats.nextPollAt) { setNextPollCountdown(''); return; }
+    const pollingActive = daemonStatus === 'running' || daemonStatus === 'paused' || daemonStatus === 'session_expired';
+    if (!pollingActive || !stats.nextPollAt) { setNextPollCountdown(''); return; }
     function tick() {
       const diff = new Date(stats.nextPollAt) - Date.now();
       if (diff <= 0) return setNextPollCountdown('');
