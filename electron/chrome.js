@@ -11,7 +11,7 @@ import puppeteer from 'puppeteer';
 
 const CDP_PORT = 9222;
 const DEFAULT_MAX_TABS = 5;
-const OFFSCREEN_POSITION = '-32000,-32000';
+const DEFAULT_WINDOW_POSITION = { left: 80, top: 60, width: 1200, height: 850 };
 const IS24_HOME = 'https://www.immobilienscout24.de/';
 
 function getBundledChromiumPath() {
@@ -81,7 +81,7 @@ export class ChromeManager {
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         `--remote-debugging-port=${CDP_PORT}`,
-        opts.visibility === 'always_show' ? '--window-size=1200,850' : `--window-position=${OFFSCREEN_POSITION}`,
+        opts.visibility === 'always_show' ? '--window-size=1200,850' : `--window-position=${DEFAULT_WINDOW_POSITION.left},${DEFAULT_WINDOW_POSITION.top}`,
         '--disable-blink-features=AutomationControlled',
         '--no-first-run',
         '--no-default-browser-check',
@@ -107,7 +107,6 @@ export class ChromeManager {
     if (page && page.url() === 'about:blank') {
       await page.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
     }
-    if (opts.visibility !== 'always_show') await this.hideBrowser().catch(() => {});
     return this._versionInfo();
   }
 
@@ -163,22 +162,17 @@ export class ChromeManager {
       await session.detach().catch(() => {});
     }
   }
-
   async showBrowser() {
     const browser = await this._connectExisting();
-    const page = (await browser.pages())[0] || await browser.newPage();
-    await this._setWindowBounds(page, { windowState: 'normal', left: 80, top: 60, width: 1200, height: 850 });
+    const page = (await browser.pages())[0];
+    if (!page) return;
+    await this._setWindowBounds(page, DEFAULT_WINDOW_POSITION);
     await page.bringToFront().catch(() => {});
   }
 
   async hideBrowser() {
-    const browser = await this._connectExisting();
-    const page = (await browser.pages())[0];
-    if (!page) return;
-    // Keep background automation off-screen, not minimized. On macOS, a
-    // minimized Chromium window can restore/focus itself when Puppeteer opens
-    // or navigates a tab, stealing the user's desktop every poll/apply tick.
-    await this._setWindowBounds(page, { windowState: 'normal', left: -32000, top: -32000, width: 1200, height: 850 });
+    // No-op: keep browser at default position — don't drag off-screen.
+    // macOS handles background windows fine without forced positioning.
   }
 
   async openUrl(url, email, options = {}) {
@@ -207,8 +201,8 @@ export class ChromeManager {
     // Puppeteer/CDP exposes automation flags and can trigger visual challenges
     // ("find the stairs"). For the one-time manual login, run the same bundled
     // Chromium profile as a plain user-started process: no CDP, no Puppeteer
-    // connection, no --enable-automation. After login, finalizeManualLogin()
-    // closes this browser and relaunches the same profile under CDP.
+    // connection, no --enable-automation. The manual browser stays open
+    // after login; CDP launches later when the daemon starts.
     if (await this.isHealthy()) await this.shutdown();
     if (this.isManualLoginRunning()) return { manualLogin: true, profileDir: this.profileDir };
 
@@ -233,18 +227,9 @@ export class ChromeManager {
   }
 
   async finalizeManualLogin(email, options = {}) {
-    if (this.isManualLoginRunning()) {
-      try { this.manualLoginProcess.kill('SIGTERM'); } catch {}
-      const deadline = Date.now() + 5000;
-      while (this.isManualLoginRunning() && Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 200));
-      }
-      if (this.isManualLoginRunning()) {
-        try { this.manualLoginProcess.kill('SIGKILL'); } catch {}
-        await new Promise(r => setTimeout(r, 500));
-      }
-    }
-    return this.launch(email, { ...options, visibility: 'hidden_unless_needed' });
+    // Leave the manual-login Chromium open — user is logged in, keep it.
+    // CDP-controlled browser launches later when the daemon starts.
+    return { manualLogin: !!this.isManualLoginRunning(), cdpHealthy: false };
   }
 
   async openListing(exposeIdOrUrl, email, options = {}) {

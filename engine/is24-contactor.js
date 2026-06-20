@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IS24_EXPOSE_URL = 'https://www.immobilienscout24.de/expose';
 const DEBUG_DIR = process.env.HOMELANDER_DEBUG_DIR || join(__dirname, '..', 'debug');
-const OFFSCREEN = { windowState: 'normal', left: -32000, top: -32000, width: 1200, height: 850 };
+const DEFAULT_WINDOW = { windowState: 'normal', left: 80, top: 60, width: 1200, height: 850 };
 
 /** Ensure a debug directory exists, return its path. */
 function ensureDir(subdir) {
@@ -138,7 +138,7 @@ export class IS24Contactor {
       browserWSEndpoint: webSocketDebuggerUrl,
       defaultViewport: null,
     });
-    // Pre-create one persistent off-screen page for all background applies.
+    // Pre-create one persistent background page for all applies.
     // Reusing it avoids the OS-level app activation that newPage() triggers.
     await this._ensurePage();
   }
@@ -147,20 +147,20 @@ export class IS24Contactor {
   async _ensurePage() {
     if (this.page && !this.page.isClosed()) return this.page;
     this.page = await this.browser.newPage();
-    // Push off-screen so the initial creation doesn't flash a window
-    await this._setOffscreen(this.page);
+    // Use default window position — no off-screen shenanigans
+    await this._setWindowBounds(this.page);
     await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
     return this.page;
   }
 
-  /** Move a page's Chromium window off-screen via CDP. */
-  async _setOffscreen(page) {
+  /** Position a page's Chromium window at default coords via CDP. */
+  async _setWindowBounds(page) {
     if (!page) return;
     try {
       const session = await page.target().createCDPSession();
       try {
         const { windowId } = await session.send('Browser.getWindowForTarget');
-        await session.send('Browser.setWindowBounds', { windowId, bounds: OFFSCREEN });
+        await session.send('Browser.setWindowBounds', { windowId, bounds: DEFAULT_WINDOW });
       } finally {
         await session.detach().catch(() => {});
       }
