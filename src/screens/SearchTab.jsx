@@ -13,6 +13,7 @@ export default function SearchTab() {
   const filters = useStore((s) => s.filters);
   const setFilters = useStore((s) => s.setFilters);
   const stats = useStore((s) => s.stats);
+  const daemonStatus = useStore((s) => s.daemonStatus);
   const setStats = useStore((s) => s.setStats);
   const pollErrors = useStore((s) => s.pollErrors);
   const setPollError = useStore((s) => s.setPollError);
@@ -102,7 +103,7 @@ export default function SearchTab() {
         captcha: fresh.captcha || 0,
         seen_unapplied: fresh.seen_unapplied || 0,
         today: fresh.today || 0,
-        nextPollAt: fresh.nextPollAt || null,
+        nextPollAt: fresh.nextPollAt || fresh.next_poll_at || null,
       };
     }
     return {
@@ -114,7 +115,7 @@ export default function SearchTab() {
       captcha: fresh.captcha || 0,
       seen_unapplied: fresh.seen_unapplied || 0,
       today: fresh.today || 0,
-      nextPollAt: fresh.nextPollAt || null,
+      nextPollAt: fresh.nextPollAt || fresh.next_poll_at || null,
     };
   }, []);
 
@@ -257,10 +258,10 @@ export default function SearchTab() {
   }, []);
 
   useEffect(() => {
-    if (!stats.nextPollAt) { setNextPollCountdown(''); return; }
+    if (daemonStatus !== 'running' || !stats.nextPollAt) { setNextPollCountdown(''); return; }
     function tick() {
       const diff = new Date(stats.nextPollAt) - Date.now();
-      if (diff <= 0) return setNextPollCountdown(t('search.anyMoment', 'jeden Moment'));
+      if (diff <= 0) return setNextPollCountdown('');
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
       setNextPollCountdown(`${m}m ${s}s`);
@@ -268,7 +269,7 @@ export default function SearchTab() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [stats.nextPollAt]);
+  }, [stats.nextPollAt, daemonStatus]);
 
   // ── Stat badge helper ──────────────────────────────────────────
   const StatBadge = ({ label, value, color, tooltip }) => (
@@ -332,11 +333,9 @@ export default function SearchTab() {
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
               {t('search.yourSearches', 'Deine Suchen')}
             </h2>
-            {filters.length > 0 && (
+            {filters.length > 0 && nextPollCountdown && (
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                · {nextPollCountdown
-                  ? t('search.nextPollIn', 'Nächste Prüfung in {{time}}').replace('{{time}}', nextPollCountdown)
-                  : t('search.nextPollSoon', 'Nächste Prüfung: bald')}
+                · {t('search.nextPollIn', 'Nächste Prüfung in {{time}}').replace('{{time}}', nextPollCountdown)}
               </span>
             )}
           </div>

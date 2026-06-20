@@ -469,6 +469,14 @@ function setupIpc(db) {
       }
     }
 
+    // ── Reset automatic all-search poll deadline ─────────────
+    if (msg.type === 'reset_poll_schedule') {
+      const nextPollAt = resetNextPollDue();
+      log(`Poll schedule reset (${msg.reason || 'manual'}): next poll at ${nextPollAt}`);
+      emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
+      return;
+    }
+
     // ── Retry a failed listing ───────────────────────────────
     if (msg.type === 'retry_listing' && msg.exposeId) {
       const result = db.retryListing(msg.exposeId);

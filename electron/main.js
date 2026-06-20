@@ -498,6 +498,12 @@ function pollIntervalMs() {
   return (config?.polling?.interval_seconds || 120) * 1000;
 }
 
+function resetDaemonPollSchedule(reason = 'schedule_reset') {
+  if (daemonProcess && daemonProcess.connected) {
+    try { daemonProcess.send({ type: 'reset_poll_schedule', reason }); } catch {}
+  }
+}
+
 function setNextPollFromNow(reason = 'schedule_reset') {
   if (!daemonProcess || daemonStatus === 'stopped') return null;
   latestNextPollAt = new Date(Date.now() + pollIntervalMs()).toISOString();
@@ -754,6 +760,12 @@ function registerIpcHandlers() {
         const filter = db.getFilter(filterId);
         if (!filter) return { ok: false, error: 'Suche nicht gefunden' };
 
+        // A manual card poll is intentionally scoped to this one search. Push the
+        // daemon's automatic all-search poll deadline away before fetching, so an
+        // old sleeping deadline does not wake up and poll every enabled search
+        // right after the user clicked one card.
+        resetDaemonPollSchedule('manual_poll_started');
+
         // Multi-page: fetch up to 5 pages, stop when page < 20 or 0 new
         const MAX_PAGES = 5, PAGE_SIZE = 20;
         let allInserted = 0, allFetched = 0;
@@ -773,6 +785,7 @@ function registerIpcHandlers() {
         });
 
         const nextPollAt = setNextPollFromNow('manual_poll');
+        resetDaemonPollSchedule('manual_poll_finished');
         const stats = { ...db.getStats(), nextPollAt, next_poll_at: nextPollAt };
         broadcastStats(stats);
         if (mainWindow) {

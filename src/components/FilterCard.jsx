@@ -36,7 +36,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
         setPollMessage({ type: 'muted', text: t('search.noNewListings', 'Keine neuen Inserate.') });
       }
     } catch (err) {
-      setPollMessage({ type: 'error', text: userErrorText(apiError.userError || apiError, { operation: 'poll search' }, t) });
+      setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'poll search' }, t) });
     } finally {
       setPolling(false);
       setTimeout(() => setPollMessage(null), 5000);
