@@ -1,6 +1,6 @@
 {
   "name": "homelander",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Desktop app for automated IS24 apartment applications — polls listings, auto-fills contact forms via Chrome CDP.",
   "type": "module",
