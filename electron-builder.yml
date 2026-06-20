@@ -2,6 +2,7 @@
 appId: com.homelander.app
 productName: Homelander
 copyright: Copyright © 2026
+npmRebuild: false
 
 directories:
   output: release
@@ -21,7 +22,6 @@ extraResources:
 
 mac:
   category: public.app-category.productivity
-  npmRebuild: false
   target:
     - target: dmg
       arch: [arm64, x64]
