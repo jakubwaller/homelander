@@ -54,6 +54,12 @@ jobs:
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: npm run rebuild:electron
 
+      - name: Test
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
+        run: npm test
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
       - name: Verify native module arch
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: file node_modules/better-sqlite3/build/Release/better_sqlite3.node

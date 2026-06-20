@@ -32,7 +32,7 @@ function renderPreview(template, sample, t) {
     }
     return <span className="text-sm whitespace-pre-wrap">{result}</span>;
   } catch {
-    return <span className="text-xs" style={{ color: 'var(--danger)' }}>Invalid template.</span>;
+    return <span className="text-xs" style={{ color: 'var(--danger)' }}>{t('settings.invalidTemplate', 'Ungültige Vorlage.')}</span>;
   }
 }
 
@@ -229,7 +229,7 @@ export default function SettingsTab() {
 
   const handleConfirmClean = async () => {
     if (!cleanupEmail.trim()) {
-      setCleanupError('Enter your email to confirm.');
+      setCleanupError(t('settings.cleanup.emailRequired', 'Gib deine E-Mail zur Bestätigung ein.'));
       return;
     }
     setCleanupStep('purging');

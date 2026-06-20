@@ -91,6 +91,7 @@
       "unterlagen": "Unterlagen",
       "required": "Alle Felder sind erforderlich"
     },
+    "invalidTemplate": "Ungültige Vorlage.",
     "cleanup": {
       "title": "Alle lokalen Daten löschen",
       "desc": "IS24-Profil, Debug-Dateien und Verlauf löschen. Dein IS24-Konto bleibt unberührt.",
@@ -99,7 +100,8 @@
       "mismatch": "E-Mail stimmt nicht überein",
       "deleting": "Lösche…",
       "done": "Alle lokalen Homelander-Daten gelöscht.",
-      "failed": "Löschen fehlgeschlagen"
+      "failed": "Löschen fehlgeschlagen",
+      "emailRequired": "Gib deine E-Mail zur Bestätigung ein."
     },
     "browser": {
       "title": "Browser-Verwaltung",

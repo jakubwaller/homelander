@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci --ignore-scripts
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: Test
+        run: npm test
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: DB smoke test
+        run: npm run smoke:db
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: Build
+        run: npm run build
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
+
+      - name: Whitespace check
+        run: git diff --check

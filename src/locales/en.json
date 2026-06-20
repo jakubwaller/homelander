@@ -91,6 +91,7 @@
       "unterlagen": "Unterlagen",
       "required": "All fields are required"
     },
+    "invalidTemplate": "Invalid template.",
     "cleanup": {
       "title": "Clean up all local data",
       "desc": "Wipe IS24 profile, debug files, and history. This does not touch your IS24 account.",
@@ -99,7 +100,8 @@
       "mismatch": "Email does not match",
       "deleting": "Deleting…",
       "done": "All local Homelander data deleted.",
-      "failed": "Cleanup failed"
+      "failed": "Cleanup failed",
+      "emailRequired": "Enter your email to confirm."
     },
     "browser": {
       "title": "Browser Management",
