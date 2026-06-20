@@ -26,7 +26,7 @@ jobs:
         run: pip3 install --break-system-packages setuptools
 
       - name: Test
-        run: npm test
+        run: npm run rebuild:node && npm run test:unit && npm run test:i18n
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
 
