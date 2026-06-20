@@ -21,8 +21,10 @@ extraResources:
 mac:
   category: public.app-category.productivity
   target:
-    - dmg
-    - zip
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
   icon: resources/icon.icns
   hardenedRuntime: false
   entitlements: build/entitlements.mac.plist
