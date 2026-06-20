@@ -1,9 +1,9 @@
 {
   "name": "homelander",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": true,
   "author": "B1Z0N <kolausf@gmail.com>",
-  "description": "Desktop app for automated IS24 apartment applications \u2014 polls listings, auto-fills contact forms via Chrome CDP.",
+  "description": "Desktop app for automated IS24 apartment applications — polls listings, auto-fills contact forms via Chrome CDP.",
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
