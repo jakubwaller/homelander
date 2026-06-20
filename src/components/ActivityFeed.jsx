@@ -130,7 +130,7 @@ export default function ActivityFeed() {
           || failureReason.toLowerCase().includes('premium');
         const isCaptcha = (item.detail || '').toLowerCase().includes('captcha')
           || failureReason.toLowerCase().includes('captcha');
-        const safeDetail = item.detail ? userErrorText(item.detail, { operation: 'listing apply' }) : '';
+        const safeDetail = item.detail ? userErrorText(item.detail, { operation: 'listing apply' }, t) : '';
         const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : 'var(--danger)';
         const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : '✗';
         const outcomeLabel = isSent ? t('livefeed.sent', 'Sent') : isDeactivated ? t('livefeed.deactivated', 'Deactivated') : t('livefeed.failed', 'Failed');

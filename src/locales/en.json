@@ -175,7 +175,12 @@
     "requeued": "Re-queued →",
     "exportCsv": "Export CSV",
     "allTime": "All time",
-    "searchFallback": "Search"
+    "searchFallback": "Search",
+    "loading": "Loading history…",
+    "retry": "Retry",
+    "emptyState": "No history yet.",
+    "emptyHint": "Sent and failed listings will appear here.",
+    "exporting": "Exporting…"
   },
   "setup": {
     "title": "Setup",

@@ -175,7 +175,12 @@
     "requeued": "Erneut eingereiht →",
     "exportCsv": "CSV exportieren",
     "allTime": "Gesamte Zeit",
-    "searchFallback": "Suche"
+    "searchFallback": "Suche",
+    "loading": "Verlauf wird geladen…",
+    "retry": "Erneut versuchen",
+    "emptyState": "Noch kein Verlauf.",
+    "emptyHint": "Gesendete und fehlgeschlagene Inserate erscheinen hier.",
+    "exporting": "Exportiere…"
   },
   "setup": {
     "title": "Einrichtung",

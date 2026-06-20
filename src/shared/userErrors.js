@@ -1,5 +1,7 @@
 // Central user-safe error handling for Homelander.
 // Raw technical errors belong in logs; UI surfaces should use these messages.
+// Locale-aware: when t() is provided, error text uses locale translations;
+// otherwise falls back to English KNOWN map.
 
 const KNOWN = {
   BACKEND_UNAVAILABLE: {
@@ -104,6 +106,21 @@ const KNOWN = {
   },
 };
 
+// SNAKE_CASE → camelCase for locale key lookup
+function codeToKey(code) {
+  return code.toLowerCase().replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+
+// Look up a translated error field (title, message, action) — uses t() when available
+function tError(t, code, field) {
+  if (!t) return null;
+  const key = `errors.${codeToKey(code)}.${field}`;
+  const translated = t(key, null);
+  // t() returns the fallback (key) when not found; detect that
+  if (translated && translated !== key && !translated.startsWith('errors.')) return translated;
+  return null;
+}
+
 export function createSupportId(prefix = 'HML') {
   try {
     const bytes = new Uint8Array(4);
@@ -169,14 +186,15 @@ export function redact(text) {
     .replace(/\b[A-Fa-f0-9]{32,}\b/g, '[REDACTED_TOKEN]');
 }
 
-export function toUserError(input, context = {}) {
+export function toUserError(input, context = {}, t) {
   if (input && typeof input === 'object' && input.title && input.message) {
+    const code = input.code || context.code || 'GENERIC';
     return {
       severity: input.severity || 'error',
-      code: input.code || context.code || 'GENERIC',
-      title: input.title,
-      message: input.message,
-      action: input.action,
+      code,
+      title: tError(t, code, 'title') || input.title,
+      message: tError(t, code, 'message') || input.message,
+      action: tError(t, code, 'action') || input.action,
       supportId: input.supportId,
     };
   }
@@ -185,20 +203,21 @@ export function toUserError(input, context = {}) {
   return {
     severity: context.severity || 'error',
     code,
-    title: base.title,
-    message: base.message,
-    action: base.action,
+    title: tError(t, code, 'title') || base.title,
+    message: tError(t, code, 'message') || base.message,
+    action: tError(t, code, 'action') || base.action,
     supportId: context.supportId,
   };
 }
 
-export function userErrorText(input, context = {}) {
-  const err = toUserError(input, context);
+// t is optional — when provided (from useLocale), uses locale translations
+export function userErrorText(input, context = {}, t) {
+  const err = toUserError(input, context, t);
   return err.supportId ? `${err.message} Support ID: ${err.supportId}` : err.message;
 }
 
-export function userErrorTitleText(input, context = {}) {
-  const err = toUserError(input, context);
+export function userErrorTitleText(input, context = {}, t) {
+  const err = toUserError(input, context, t);
   const suffix = err.supportId ? ` · ${err.supportId}` : '';
   return `${err.title}. ${err.message}${suffix}`;
 }

@@ -153,7 +153,7 @@ export default function SetupWizard({ onComplete }) {
             setSaving(false);
             return;
           } catch (err) {
-            showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }) });
+            showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }, t) });
             setIs24Status('chrome_error');
             setSaving(false);
             return;
@@ -179,7 +179,7 @@ export default function SetupWizard({ onComplete }) {
           const validResult = await window.homelander.validateCaptchaKey(captchaKey.trim());
           setCaptchaValidating(false);
           if (!validResult.valid) {
-            showFeedback({ type: 'error', msg: userErrorText(validResult.userError || validResult, { operation: 'captcha validate' }) });
+            showFeedback({ type: 'error', msg: userErrorText(validResult.userError || validResult, { operation: 'captcha validate' }, t) });
             setSaving(false);
             return;
           }
@@ -192,14 +192,14 @@ export default function SetupWizard({ onComplete }) {
         if (searchUrl.trim()) {
           const testResult = await window.homelander.testFilter(searchUrl.trim());
           if (testResult.error) {
-            showFeedback({ type: 'error', msg: userErrorText(testResult.userError || testResult, { operation: 'search test' }) });
+            showFeedback({ type: 'error', msg: userErrorText(testResult.userError || testResult, { operation: 'search test' }, t) });
             setSaving(false);
             return;
           }
           // Save the filter before completing setup so new users do not land on an empty dashboard.
           const addResult = await window.homelander.addFilter(searchUrl.trim(), '');
           if (addResult?.error) {
-            showFeedback({ type: 'error', msg: userErrorText(addResult.userError || addResult, { operation: 'search add' }) });
+            showFeedback({ type: 'error', msg: userErrorText(addResult.userError || addResult, { operation: 'search add' }, t) });
             setSaving(false);
             return;
           }
@@ -219,7 +219,7 @@ export default function SetupWizard({ onComplete }) {
         onComplete();
       }
     } catch (err) {
-      showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'setup' }) });
+      showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'setup' }, t) });
     } finally {
       setSaving(false);
       setCaptchaValidating(false);
@@ -509,7 +509,7 @@ export default function SetupWizard({ onComplete }) {
                     if (result.error) throw result;
                     setIs24Status('waiting_for_login');
                   } catch (err) {
-                    showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }) });
+                    showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }, t) });
                     setIs24Status('chrome_error');
                   }
                 }}

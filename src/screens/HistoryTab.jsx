@@ -117,7 +117,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
   const outcomeLabel = isSent ? t('history.sent', 'Sent') : isDeactivated ? t('history.deactivated', 'Deactivated') : isDryRun ? t('history.dryRun', 'Dry Run') : t('history.failed', 'Failed');
 
   const badgeClass = isSent ? 'badge-success' : isDeactivated ? 'badge-deactivated' : isDryRun ? '' : 'badge-fail';
-  const safeDetail = listing.detail ? userErrorText(listing.detail, { operation: 'listing apply' }) : '';
+  const safeDetail = listing.detail ? userErrorText(listing.detail, { operation: 'listing apply' }, t) : '';
 
   return (
     <div
@@ -374,7 +374,7 @@ export default function HistoryTab() {
   const fetchListings = useCallback(
     async (append = false) => {
       if (!window.homelander) {
-        setError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }));
+        setError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t));
         setLoading(false);
         return;
       }
@@ -554,7 +554,7 @@ export default function HistoryTab() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      setError(userErrorText(err.userError || err, { operation: 'csv export' }));
+      setError(userErrorText(err.userError || err, { operation: 'csv export' }, t));
     } finally {
       setExporting(false);
     }
@@ -625,10 +625,10 @@ export default function HistoryTab() {
             value={filterId}
             onChange={(e) => setFilterId(e.target.value)}
           >
-            <option value="">All searches</option>
+            <option value="">{t('history.all', 'All searches')}</option>
             {filters.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.name || `Search ${f.id}`}
+                {f.name || t('history.searchFallback', 'Search') + ' ' + f.id}
               </option>
             ))}
           </select>
@@ -640,7 +640,7 @@ export default function HistoryTab() {
           onClick={exportCSV}
           disabled={exporting || (allTimeStats?.total ?? listings.length) === 0}
         >
-          {exporting ? 'Exporting…' : '⬇ Export'}
+          {exporting ? t('history.exporting', 'Exporting…') : t('history.exportCsv', '⬇ Export')}
         </button>
       </div>
 
@@ -649,7 +649,7 @@ export default function HistoryTab() {
         {/* Loading state */}
         {loading && (
           <div className="py-12 text-center" style={{ color: 'var(--text-muted)' }}>
-            <p className="text-sm">Loading history…</p>
+            <p className="text-sm">{t('history.loading', 'Loading history…')}</p>
           </div>
         )}
 
@@ -663,7 +663,7 @@ export default function HistoryTab() {
               className="btn btn-secondary text-xs mt-3"
               onClick={() => fetchListings(false)}
             >
-              Retry
+              {t('history.retry', 'Retry')}
             </button>
           </div>
         )}
@@ -671,8 +671,8 @@ export default function HistoryTab() {
         {/* Empty state */}
         {!loading && !error && listings.length === 0 && (
           <div className="py-12 text-center" style={{ color: 'var(--text-muted)' }}>
-            <p className="text-sm">No history yet.</p>
-            <p className="text-xs mt-1">Sent and failed listings will appear here.</p>
+            <p className="text-sm">{t('history.emptyState', 'No history yet.')}</p>
+            <p className="text-xs mt-1">{t('history.emptyHint', 'Sent and failed listings will appear here.')}</p>
           </div>
         )}
 

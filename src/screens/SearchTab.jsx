@@ -135,7 +135,7 @@ export default function SearchTab() {
         }
       }
     } catch (err) {
-      setError(userErrorText(err.userError || err, { operation: 'filters load' }));
+      setError(userErrorText(err.userError || err, { operation: 'filters load' }, t));
     } finally {
       setLoading(false);
     }
@@ -180,7 +180,7 @@ export default function SearchTab() {
       setError(null);
       return true;
     } catch (err) {
-      setError(userErrorText(err.userError || err, { operation: 'search add' }));
+      setError(userErrorText(err.userError || err, { operation: 'search add' }, t));
       return false;
     }
   }, [filters, setFilters]);
@@ -190,7 +190,7 @@ export default function SearchTab() {
     try {
       const { error: apiError } = await window.homelander.updateFilter(id, { enabled: enable });
       if (apiError) {
-        setPollError(id, userErrorText(apiError.userError || apiError, { operation: 'search update' }));
+        setPollError(id, userErrorText(apiError.userError || apiError, { operation: 'search update' }, t));
         return;
       }
       clearPollError(id);
@@ -199,7 +199,7 @@ export default function SearchTab() {
         f.id === id ? { ...f, enabled: enable } : f
       ));
     } catch (err) {
-      setPollError(id, userErrorText(err.userError || err, { operation: 'search update' }));
+      setPollError(id, userErrorText(err.userError || err, { operation: 'search update' }, t));
     }
   }, [filters, setFilters, setPollError, clearPollError]);
 
@@ -215,16 +215,16 @@ export default function SearchTab() {
       setFilters(filters.filter((f) => f.id !== id));
       setError(null);
     } catch (err) {
-      setError(userErrorText(err.userError || err, { operation: 'search remove' }));
+      setError(userErrorText(err.userError || err, { operation: 'search remove' }, t));
     }
   }, [filters, setFilters, clearPollError]);
 
   const handlePollNow = useCallback(async (id) => {
-    if (!window.homelander) return { error: userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }) };
+    if (!window.homelander) return { error: userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t) };
     try {
       const result = await window.homelander.pollNow(id);
       if (!result?.ok) {
-        const msg = userErrorText(result?.userError || result, { operation: 'poll search' });
+        const msg = userErrorText(result?.userError || result, { operation: 'poll search' }, t);
         setPollError(id, msg);
         return { ...result, error: msg };
       }
@@ -237,7 +237,7 @@ export default function SearchTab() {
       if (freshStats) setStats(normalizeStats(freshStats));
       return result;
     } catch (err) {
-      const msg = userErrorText(err.userError || err, { operation: 'poll search' });
+      const msg = userErrorText(err.userError || err, { operation: 'poll search' }, t);
       setPollError(id, msg);
       return { error: msg };
     }

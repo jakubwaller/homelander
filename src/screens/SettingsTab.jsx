@@ -119,12 +119,12 @@ export default function SettingsTab() {
 
   const save = async (patch) => {
     if (!window.homelander) {
-      showFeedback({ type: 'error', msg: userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }) });
+      showFeedback({ type: 'error', msg: userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t) });
       return;
     }
     const res = await window.homelander.updateConfig(patch);
     if (res?.error) {
-      showFeedback({ type: 'error', msg: userErrorText(res.userError || res, { operation: 'config:update' }) });
+      showFeedback({ type: 'error', msg: userErrorText(res.userError || res, { operation: 'config:update' }, t) });
     } else {
       const fresh = await window.homelander.getConfig();
       setConfig(fresh);
@@ -141,29 +141,29 @@ export default function SettingsTab() {
   const savePersona = () => {
     const errors = [];
     const p = personaDraft;
-    if (!p.anrede?.trim()) errors.push('Anrede is required');
-    if (!p.vorname?.trim()) errors.push('Vorname is required');
-    if (!p.nachname?.trim()) errors.push('Nachname is required');
-    if (!p.email?.trim()) errors.push('Email is required');
+    if (!p.anrede?.trim()) errors.push(t('setup.anredeRequired', 'Anrede is required'));
+    if (!p.vorname?.trim()) errors.push(t('setup.vornameRequired', 'Vorname is required'));
+    if (!p.nachname?.trim()) errors.push(t('setup.nachnameRequired', 'Nachname is required'));
+    if (!p.email?.trim()) errors.push(t('setup.emailRequired', 'Email is required'));
     if (p.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email.trim())) {
-      errors.push('Email format is invalid');
+      errors.push(t('setup.emailInvalid', 'Email format is invalid'));
     }
-    if (!p.telefon?.trim()) errors.push('Telefon is required');
-    if (!p.strasse?.trim()) errors.push('Straße is required');
-    if (!p.hausnummer?.trim()) errors.push('Hausnr. is required');
-    if (!p.plz?.trim()) errors.push('PLZ is required');
+    if (!p.telefon?.trim()) errors.push(t('setup.telefonRequired', 'Telefon is required'));
+    if (!p.strasse?.trim()) errors.push(t('setup.strasseRequired', 'Straße is required'));
+    if (!p.hausnummer?.trim()) errors.push(t('setup.hausnrRequired', 'Hausnr. is required'));
+    if (!p.plz?.trim()) errors.push(t('setup.plzRequired', 'PLZ is required'));
     if (p.plz?.trim() && !/^\d{4,5}$/.test(String(p.plz).trim())) {
-      errors.push('PLZ must be 4-5 digits');
+      errors.push(t('setup.plzDigits', 'PLZ must be 4-5 digits'));
     }
-    if (!p.ort?.trim()) errors.push('Ort is required');
-    if (!p.einzug?.trim()) errors.push('Einzug is required');
-    if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push('Einzug Datum is required');
-    if (!p.personen?.trim()) errors.push('Personen is required');
-    if (!p.haustiere?.trim()) errors.push('Haustiere is required');
-    if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push('Anzahl und Tierart is required');
-    if (!p.beschaeftigung?.trim()) errors.push('Beschäftigung is required');
-    if (!p.einkommen?.trim()) errors.push('Einkommen (netto) is required');
-    if (!p.unterlagen?.trim()) errors.push('Unterlagen is required');
+    if (!p.ort?.trim()) errors.push(t('setup.ortRequired', 'Ort is required'));
+    if (!p.einzug?.trim()) errors.push(t('setup.einzugRequired', 'Einzug is required'));
+    if (p.einzug === 'genaues Datum' && !p.einzug_datum?.trim()) errors.push(t('setup.einzugDatumRequired', 'Einzug Datum is required'));
+    if (!p.personen?.trim()) errors.push(t('setup.personenRequired', 'Personen is required'));
+    if (!p.haustiere?.trim()) errors.push(t('setup.haustiereRequired', 'Haustiere is required'));
+    if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push(t('setup.haustiereZusatzRequired', 'Anzahl und Tierart is required'));
+    if (!p.beschaeftigung?.trim()) errors.push(t('setup.beschaeftigungRequired', 'Beschäftigung is required'));
+    if (!p.einkommen?.trim()) errors.push(t('setup.einkommenRequired', 'Einkommen (netto) is required'));
+    if (!p.unterlagen?.trim()) errors.push(t('setup.unterlagenRequired', 'Unterlagen is required'));
     if (errors.length > 0) {
       const msg = errors.length > 3 ? t('settings.personaFields.required') : errors.join('; ');
       showFeedback({ type: 'error', msg });
@@ -205,9 +205,9 @@ export default function SettingsTab() {
     try {
       const res = await window.homelander.createSupportBundle({ scope: 'global' });
       if (res?.ok) showFeedback({ type: 'success', msg: `Bundle exported — path copied` });
-      else showFeedback({ type: 'error', msg: userErrorText(res?.userError || res || 'Bundle export failed', { operation: 'support bundle' }) });
+      else showFeedback({ type: 'error', msg: userErrorText(res?.userError || res || 'Bundle export failed', { operation: 'support bundle' }, t) });
     } catch (err) {
-      showFeedback({ type: 'error', msg: userErrorText(err, { operation: 'support bundle' }) });
+      showFeedback({ type: 'error', msg: userErrorText(err, { operation: 'support bundle' }, t) });
     } finally {
       setSupportBusy(false);
     }
@@ -238,7 +238,7 @@ export default function SettingsTab() {
       const res = await window.homelander.cleanData(cleanupEmail.trim());
       if (res?.error) {
         setCleanupStep('confirm');
-        setCleanupError(userErrorText(res.userError || res, { operation: 'data cleanup' }));
+        setCleanupError(userErrorText(res.userError || res, { operation: 'data cleanup' }, t));
       }
       // On success, app relaunches — no state update needed
     }

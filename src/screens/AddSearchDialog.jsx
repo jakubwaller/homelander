@@ -61,7 +61,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
 
     try {
       if (!window.homelander) {
-        setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }));
+        setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t));
         return;
       }
       const result = await window.homelander.testFilter(url.trim());
@@ -72,7 +72,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
         setTestResult(result.total);
       }
     } catch (err) {
-      setTestError(userErrorText(err.userError || err, { operation: 'search test' }));
+      setTestError(userErrorText(err.userError || err, { operation: 'search test' }, t));
     } finally {
       setTesting(false);
     }
@@ -87,7 +87,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
       setTestError(null);
       try {
         if (!window.homelander) {
-          setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }));
+          setTestError(userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t));
           setTesting(false);
           return;
         }
@@ -106,7 +106,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
         onCancel();
         return;
       } catch (err) {
-        setTestError(userErrorText(err.userError || err, { operation: 'search test' }));
+        setTestError(userErrorText(err.userError || err, { operation: 'search test' }, t));
         setTesting(false);
         return;
       }

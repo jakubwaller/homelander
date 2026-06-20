@@ -189,7 +189,7 @@ function AppInner() {
       }
       if (!keepMessage) setDaemonError(null);
     } catch (err) {
-      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon action' }));
+      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon action' }, t));
     }
   }, [daemonStatus, setDaemonStatus]);
 
@@ -201,7 +201,7 @@ function AppInner() {
       setDaemonStatus(result.status || 'stopped');
       setDaemonError(null);
     } catch (err) {
-      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon stop' }));
+      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon stop' }, t));
     }
   }, [setDaemonStatus]);
 
