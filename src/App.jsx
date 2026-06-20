@@ -26,7 +26,7 @@ function normalizeStats(stats) {
       captcha: stats.captcha || 0,
       seen_unapplied: stats.seen_unapplied || 0,
       today: stats.today || 0,
-      nextPollAt: stats.nextPollAt || null,
+      nextPollAt: stats.nextPollAt || stats.next_poll_at || null,
     };
   }
   return {
