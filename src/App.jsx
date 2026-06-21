@@ -180,6 +180,12 @@ function AppInner() {
           const result = await window.homelander.resumeDaemon();
           if (result?.error) throw result;
           setDaemonStatus(result.status || 'running');
+        } else if (chromeStatus?.cdpHealthy) {
+          // CDP Chrome is running — open a fresh IS24 tab and bring it to front.
+          // openLoginPage detects healthy CDP and navigates a new tab instead of restarting.
+          const result = await window.homelander.openLoginPage();
+          if (result?.error) throw result;
+          setDaemonError(null);
         } else {
           const result = await window.homelander.openLoginPage();
           if (result?.error) throw result;

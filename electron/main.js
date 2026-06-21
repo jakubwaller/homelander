@@ -3,7 +3,7 @@
 // Chrome lifecycle, config, and IPC bridge to renderer.
 
 import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, shell, clipboard } from 'electron';
-import { fork, spawnSync, spawn } from 'node:child_process';
+import { fork, spawnSync, spawn, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, readdirSync, statSync, cpSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join, dirname, basename } from 'node:path';
@@ -661,6 +661,19 @@ function handleDaemonEvent(event) {
       daemonStatus = 'running';
       mainWindow.webContents.send('homelander:event', event);
       break;
+    case 'fatal':
+      console.log(`[daemon] fatal: ${event.reason} — ${event.detail || ''}`);
+      if (event.reason === 'chrome_dead') {
+        // Kill stale Chrome so restart can spawn a fresh one
+        try { execSync('pkill -f "chrome.*remote-debugging-port"', { timeout: 3000 }); } catch {}
+        // Kill daemon and let exit handler auto-restart
+        if (daemonProcess) {
+          daemonStatus = 'running'; // ensure exit handler sees wasRunning=true
+          daemonProcess.kill('SIGTERM');
+        }
+      }
+      mainWindow.webContents.send('homelander:event', event);
+      break;
     case 'config_applied':
       mainWindow.webContents.send('homelander:event', { ...event, daemonStatus: effectiveDaemonStatus() });
       break;
@@ -1076,6 +1089,18 @@ function registerIpcHandlers() {
       return { ...result, error: null };
     } catch (err) {
       return gracefulFailure('chrome:openLogin', err, { code: 'BROWSER_START_FAILED' });
+    }
+  });
+
+  ipcMain.handle('chrome:focus', async () => {
+    try {
+      // Bring the Chromium browser window to front via AppleScript
+      execSync(`osascript -e 'tell application "Google Chrome for Testing" to activate'`, { timeout: 3000 });
+      return { focused: true, error: null };
+    } catch {
+      // Fallback: try regular Chrome
+      try { execSync(`osascript -e 'tell application "Google Chrome" to activate'`, { timeout: 3000 }); } catch {}
+      return { focused: true, error: null };
     }
   });
 

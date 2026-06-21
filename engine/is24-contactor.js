@@ -372,28 +372,55 @@ export class IS24Contactor {
   async checkIS24Login() {
     try {
       return await this.page.evaluate(() => {
-        // IS24's own JS sets this reliably on every expose page
+        // 1. IS24's own JS flag — reliable on expose pages
         const flag = (window.IS24 && window.IS24.expose && window.IS24.expose.userLoggedIn);
         if (typeof flag === 'boolean') return flag;
 
-        // Fallback: check IS24 header CSS classes (works on homepage, search, etc.)
+        // 2. Check .sso-login header text — works on homepage, search, every IS24 page
         const wrapper = document.querySelector('.sso-login');
         if (wrapper) {
-          // Logged-in state: IS24 adds these classes when user is authenticated
-          if (wrapper.classList.contains('sso-login--logged-in')
-              || wrapper.classList.contains('sso-login--logged-in-private')) {
-            return true;
-          }
-          // sso-login present but no logged-in class → logged out
-          return false;
+          const text = wrapper.innerText || '';
+          // "angemeldet als <email>" = logged in
+          if (/angemeldet\s+als/i.test(text)) return true;
+          // "Anmelden" as a visible link = logged out
+          if (/\bAnmelden\b/.test(text)) return false;
         }
 
-        // Last resort: text scan (non-IS24 pages)
-        const text = document.body?.innerText || '';
+        // 3. Fallback: scan full page text
+        const bodyText = document.body?.innerText || '';
         const loggedInRe = /angemeldet\s+als|zu\s+meinem\s+Bereich|Mein\s*Konto|Abmelden/i;
         const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
-        return loggedInRe.test(text) && emailRe.test(text);
+        return loggedInRe.test(bodyText) && emailRe.test(bodyText);
       });
+    } catch { return false; }
+  }
+
+  /** Check login status by opening a fresh IS24 homepage tab.
+   *  Existing tabs may have stale state — a fresh page is the only reliable way. */
+  async checkIS24LoginAnyTab() {
+    const evaluateLogin = () => `(() => {
+      const flag = (window.IS24 && window.IS24.expose && window.IS24.expose.userLoggedIn);
+      if (typeof flag === 'boolean') return flag;
+      const wrapper = document.querySelector('.sso-login');
+      if (wrapper) {
+        const text = wrapper.innerText || '';
+        if (/angemeldet\\s+als/i.test(text)) return true;
+        if (/\\bAnmelden\\b/.test(text)) return false;
+      }
+      const bodyText = document.body?.innerText || '';
+      const loggedInRe = /angemeldet\\s+als|zu\\s+meinem\\s+Bereich|Mein\\s*Konto|Abmelden/i;
+      const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/;
+      return loggedInRe.test(bodyText) && emailRe.test(bodyText);
+    })()`;
+
+    try {
+      const tempPage = await this.browser.newPage();
+      try {
+        await tempPage.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        return await tempPage.evaluate(evaluateLogin);
+      } finally {
+        await tempPage.close().catch(() => {});
+      }
     } catch { return false; }
   }
 

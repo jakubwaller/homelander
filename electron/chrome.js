@@ -225,6 +225,24 @@ export class ChromeManager {
   }
 
   async openManualLoginPage(email, options = {}) {
+    // When CDP is already running (e.g. session-expired re-login), don't
+    // restart the browser — just open a fresh IS24 tab via CDP and show it.
+    // Avoids killing the daemon's CDP connection, works cross-platform.
+    if (await this.isHealthy()) {
+      try {
+        const browser = await this._connectExisting();
+        await browser.newPage();
+        const pages = await browser.pages();
+        const lastPage = pages[pages.length - 1];
+        await lastPage.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await lastPage.bringToFront();
+        await this.showBrowser();
+        return { cdpConnected: true, manualLogin: false };
+      } catch {
+        // CDP navigation failed — fall through to manual-browser path
+      }
+    }
+
     this.profileDir = getProfileDir(email);
     mkdirSync(this.profileDir, { recursive: true });
 

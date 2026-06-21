@@ -188,23 +188,19 @@ async function applyOne(listing, filterId, db) {
   }
 
   try {
-    // ── Per-form login check on the listing page BEFORE submitting ──
-    // Only when already on an IS24 page — skip about:blank (contactor just started)
-    if (!applyPaused && contactor && contactor.page) {
+    // ── Per-form login check — scans ALL open IS24 tabs, opens one if needed ──
+    if (!applyPaused && contactor && contactor.browser && contactor.browser.isConnected()) {
       try {
-        const pageUrl = contactor.page.url();
-        if (pageUrl.includes('immobilienscout24')) {
-          const loggedIn = await contactor.checkIS24Login();
-          if (!loggedIn) {
-            log('*** IS24 login check failed before form submit — pausing apply ***');
-            emit({ type: 'session_expired', reason: 'IS24 login check failed — header missing login indicators' });
-            applyPaused = true;
-            pauseResumeTime = null;
-            writePauseFlag('session_expired');
-            // Navigate to IS24 homepage so the user can log in
-            contactor.page.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
-            return;
-          }
+        const loggedIn = await contactor.checkIS24LoginAnyTab();
+        if (!loggedIn) {
+          log('*** IS24 login check failed before form submit — pausing apply ***');
+          emit({ type: 'session_expired', reason: 'IS24 login check failed — no logged-in IS24 tab found' });
+          applyPaused = true;
+          pauseResumeTime = null;
+          writePauseFlag('session_expired');
+          // Navigate the persistent page to IS24 homepage so the user can log in
+          try { await contactor.page.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch {}
+          return;
         }
       } catch (_) { /* best-effort; don't disrupt apply */ }
     }
@@ -267,7 +263,7 @@ async function applyOne(listing, filterId, db) {
         pauseResumeTime = null;
         writePauseFlag('session_expired');
         // Navigate to IS24 homepage so the user can log in
-        contactor.page.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+        try { await contactor.page?.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch {}
       }
 
       emit({

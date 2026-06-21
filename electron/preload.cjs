@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('homelander', {
   getChromeStatus: () => ipcRenderer.invoke('chrome:status'),
   launchChrome: () => ipcRenderer.invoke('chrome:launch'),
   openLoginPage: () => ipcRenderer.invoke('chrome:openLogin'),
+  focusBrowser: () => ipcRenderer.invoke('chrome:focus'),
   finalizeManualLogin: () => ipcRenderer.invoke('chrome:finalizeManualLogin'),
   openListingInChrome: (exposeIdOrUrl) => ipcRenderer.invoke('chrome:openListing', exposeIdOrUrl),
   checkIs24Login: () => ipcRenderer.invoke('chrome:checkIs24Login'),
