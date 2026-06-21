@@ -208,6 +208,18 @@ function AppInner() {
     }
   }, [setDaemonStatus]);
 
+  const handleResumeAfterExpired = useCallback(async () => {
+    if (!window.homelander) return;
+    try {
+      const result = await window.homelander.resumeDaemon();
+      if (result?.error) throw result;
+      setDaemonStatus(result.status || 'running');
+      setDaemonError(null);
+    } catch (err) {
+      setDaemonError(userErrorText(err.userError || err, { operation: 'daemon resume' }, t));
+    }
+  }, [setDaemonStatus]);
+
   // Show setup wizard on first launch (language is step 0)
   if (!setupComplete) {
     return <SetupWizard onComplete={() => setSetupComplete(true)} />;
@@ -251,7 +263,7 @@ function AppInner() {
           >
             {daemonStatus === 'stopped' ? '▶' : daemonStatus === 'running' ? '⏸' : daemonStatus === 'session_expired' ? '↗' : daemonStatus === 'restarting' ? '⏳' : '▶'}
           </button>
-          {daemonStatus !== 'stopped' && daemonStatus !== 'restarting' && (
+          {daemonStatus !== 'stopped' && daemonStatus !== 'restarting' && daemonStatus !== 'session_expired' && (
             <button
               className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
               onClick={handleStopDaemon}
@@ -259,6 +271,16 @@ function AppInner() {
               style={{ fontSize: '13px', background: 'rgba(239,68,68,0.12)', color: 'var(--danger)' }}
             >
               ⏹
+            </button>
+          )}
+          {daemonStatus === 'session_expired' && (
+            <button
+              className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
+              onClick={handleResumeAfterExpired}
+              title={t('daemon.continue', 'Continue')}
+              style={{ fontSize: '13px', background: 'rgba(59,130,246,0.15)', color: 'var(--accent)' }}
+            >
+              ▶
             </button>
           )}
           {daemonError && (

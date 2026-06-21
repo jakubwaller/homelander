@@ -25,7 +25,8 @@
     "pause": "Pause",
     "resume": "Resume",
     "stop": "Stop",
-    "openChromium": "Open Chromium to log in"
+    "openChromium": "Open Chromium to log in",
+    "continue": "Continue"
   },
   "settings": {
     "persona": "Persona",

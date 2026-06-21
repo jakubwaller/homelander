@@ -190,6 +190,23 @@ export class IS24Contactor {
 
       await jitter(...this.t.spaRenderWait);
 
+      // Check IS24.expose.userLoggedIn on the freshly loaded page
+      try {
+        const loggedIn = await this.page.evaluate(() => {
+          const flag = (window.IS24 && window.IS24.expose && window.IS24.expose.userLoggedIn);
+          return typeof flag === 'boolean' ? flag : null;
+        });
+        if (loggedIn === false) {
+          const ssDir = DEBUG.screenshotDir();
+          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch {}
+          return {
+            success: false, reason: 'SESSION_EXPIRED (IS24 login required — re-login via Settings)',
+            timing_ms: Date.now() - tStart, timing, captcha, form_state: 'session_expired',
+            fields_typed: 0, field_retries: 0,
+          };
+        }
+      } catch {}
+
       // Detect session expiry: IS24 redirects unauthenticated users to login
       try {
         const currentUrl = this.page.url();
@@ -347,6 +364,35 @@ export class IS24Contactor {
         return Array.from(document.querySelectorAll('a, button'))
           .filter(visible)
           .some((el) => /^\s*(Anmelden|Jetzt einloggen|Einloggen)\s*$/i.test(el.textContent || ''));
+      });
+    } catch { return false; }
+  }
+
+  /** Check whether the IS24 header on the current page indicates the user is logged in. */
+  async checkIS24Login() {
+    try {
+      return await this.page.evaluate(() => {
+        // IS24's own JS sets this reliably on every expose page
+        const flag = (window.IS24 && window.IS24.expose && window.IS24.expose.userLoggedIn);
+        if (typeof flag === 'boolean') return flag;
+
+        // Fallback: check IS24 header CSS classes (works on homepage, search, etc.)
+        const wrapper = document.querySelector('.sso-login');
+        if (wrapper) {
+          // Logged-in state: IS24 adds these classes when user is authenticated
+          if (wrapper.classList.contains('sso-login--logged-in')
+              || wrapper.classList.contains('sso-login--logged-in-private')) {
+            return true;
+          }
+          // sso-login present but no logged-in class → logged out
+          return false;
+        }
+
+        // Last resort: text scan (non-IS24 pages)
+        const text = document.body?.innerText || '';
+        const loggedInRe = /angemeldet\s+als|zu\s+meinem\s+Bereich|Mein\s*Konto|Abmelden/i;
+        const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+        return loggedInRe.test(text) && emailRe.test(text);
       });
     } catch { return false; }
   }

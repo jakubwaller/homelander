@@ -25,7 +25,8 @@
     "pause": "Pause",
     "resume": "Fortsetzen",
     "stop": "Stopp",
-    "openChromium": "Chromium zum Anmelden öffnen"
+    "openChromium": "Chromium zum Anmelden öffnen",
+    "continue": "Weiter"
   },
   "settings": {
     "persona": "Persona",
