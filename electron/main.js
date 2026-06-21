@@ -661,17 +661,23 @@ function handleDaemonEvent(event) {
       daemonStatus = 'running';
       mainWindow.webContents.send('homelander:event', event);
       break;
+    case 'chrome_dead':
+      console.log(`[daemon] chrome_dead: ${event.detail || ''}`);
+      daemonStatus = 'stopped';
+      daemonStopping = true; // prevent exit handler auto-restart
+      try { writeFileSync(PAUSE_FLAG, ''); } catch {}
+      mainWindow.webContents.send('homelander:event', {
+        type: 'daemon_stopped',
+        reason: 'chrome_closed',
+      });
+      // Daemon already exiting via process.exit(0) — just clean up
+      if (daemonProcess) {
+        daemonProcess = null;
+      }
+      latestNextPollAt = null;
+      break;
     case 'fatal':
       console.log(`[daemon] fatal: ${event.reason} — ${event.detail || ''}`);
-      if (event.reason === 'chrome_dead') {
-        // Kill stale Chrome so restart can spawn a fresh one
-        try { execSync('pkill -f "chrome.*remote-debugging-port"', { timeout: 3000 }); } catch {}
-        // Kill daemon and let exit handler auto-restart
-        if (daemonProcess) {
-          daemonStatus = 'running'; // ensure exit handler sees wasRunning=true
-          daemonProcess.kill('SIGTERM');
-        }
-      }
       mainWindow.webContents.send('homelander:event', event);
       break;
     case 'config_applied':

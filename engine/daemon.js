@@ -365,19 +365,39 @@ async function applyLoop(db) {
           cdpFailCount++;
           const isFatal = err.message.includes('CDP_FAILED') || err.message.includes('ECONNREFUSED');
           log(`CDP reconnect failed (#${cdpFailCount}): ${err.message}${isFatal ? ' [chrome dead]' : ''}`);
-          if (isFatal && cdpFailCount >= 3) {
-            log('*** Chrome unreachable after 3 attempts — requesting restart ***');
-            emit({ type: 'fatal', reason: 'chrome_dead', detail: err.message });
-            cdpFailCount = 0;
-            await sleep(30000);
-          } else {
-            await sleep(5000);
+          if (isFatal) {
+            log('*** Chrome unreachable — stopping daemon ***');
+            emit({ type: 'chrome_dead', detail: err.message });
+            process.exit(0);
           }
+          await sleep(5000);
           continue;
         }
       } else {
-        await sleep(5000);
-        continue;
+        // Contactor was nulled (e.g. CDP died mid-apply). Try to re-create it.
+        try {
+          contactor = new IS24Contactor(
+            CDP_URL,
+            currentConfig.persona || {},
+            currentConfig.timing?.speed || 'balanced',
+            currentConfig.timing?.overrides || {},
+            { api_key: currentConfig.captcha?.api_key || '' }
+          );
+          await contactor.connect();
+          cdpFailCount = 0;
+          log('Contactor re-created and CDP reconnected');
+        } catch (err) {
+          const isFatal = err.message.includes('CDP_FAILED') || err.message.includes('ECONNREFUSED');
+          log(`Contactor re-create failed: ${err.message}${isFatal ? ' [chrome dead]' : ''}`);
+          if (isFatal) {
+            log('*** Chrome unreachable — stopping daemon ***');
+            emit({ type: 'chrome_dead', detail: err.message });
+            process.exit(0);
+          }
+          contactor = null;
+          await sleep(5000);
+          continue;
+        }
       }
     }
 
@@ -414,9 +434,21 @@ async function applyLoop(db) {
         log(`Apply skipped before send — filter paused/disabled: ${filter.name || filter.id}`);
         continue;
       }
+      // Check CDP alive before every listing — catches Cmd+Q instantly
+      if (!contactor || !contactor.browser || !contactor.browser.isConnected()) {
+        log('CDP disconnected — breaking filter loop');
+        break;
+      }
       log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
       await applyOne(listing, filter.id, db);
       didWork = true;
+
+      // If CDP died inside applyOne (contactor nulled), break the filter
+      // loop so ensureCDPHealthy can handle it at the top of the next iteration.
+      if (!contactor) {
+        log('Contactor lost during apply — breaking filter loop');
+        break;
+      }
 
       if (!applyPaused) await jitter(2000, 5000);
     }
