@@ -437,9 +437,9 @@ export default function SettingsTab() {
                 value={timingDraft.speed}
                 onChange={(e) => updateTimingField('speed', e.target.value)}
               >
-                <option value="fast">{t("settings.fast")}</option>
-                <option value="balanced">{t("settings.balanced")}</option>
                 <option value="slow">{t("settings.slow")}</option>
+                <option value="balanced">{t("settings.balanced")}</option>
+                <option value="fast">{t("settings.fast")}</option>
               </select>
               <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
                 {timingDraft.speed === 'fast' ? t('settings.speedFastDesc', 'Minimum delays, higher captcha risk') : timingDraft.speed === 'slow' ? t('settings.speedSlowDesc', 'Maximum delays, safest') : t('settings.speedBalancedDesc', 'Default balance')}
