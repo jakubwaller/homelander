@@ -112,22 +112,22 @@ describe('_verifySubmission() — failure branches', () => {
     assert.match(r.detail, /captcha/);
   });
 
-  it('premium upsell (Suchen+)', async () => {
+  it('premium upsell after submit is not classified as premium', async () => {
     const c = mockContactor();
-    // formGone=true + premium=true → old code returned SUCCESS, new code returns FAILURE
+    // Premium classification is only trusted before submit: click Nachricht → upsell/no form.
+    // After a real form opened, a disappearing form with generic Plus text is unconfirmed, not premium.
     c.page.evaluate = evaluateSeq(failState({ formGone: true, premium: true }));
     const r = await c._verifySubmission();
     assert.equal(r.verified, false);
-    assert.match(r.detail, /premium upsell/);
+    assert.match(r.detail, /SUBMIT_UNCONFIRMED/);
   });
 
-  it('server error (rate-limit) — treated as premium immediately', async () => {
+  it('server error ("Es ist ein Fehler aufgetreten.") → PREMIUM', async () => {
     const c = mockContactor();
-    // Server error = premium, no retries
     c.page.evaluate = evaluateSeq(failState({ serverError: true }));
     const r = await c._verifySubmission();
     assert.equal(r.verified, false);
-    assert.match(r.detail, /premium/);
+    assert.match(r.detail, /PREMIUM_ONLY/);
   });
 
   it('validation errors (hasErrors)', async () => {
@@ -213,7 +213,7 @@ describe('_verifySubmission() — deadline timeout', () => {
     assert.match(r.detail, /SUBMIT_UNCONFIRMED/);
   });
 
-  it('formGone + structural premium gate at deadline → FAILURE', async () => {
+  it('formGone + structural premium gate at deadline → unconfirmed, not premium', async () => {
     const c = mockContactor();
     c.verifyDeadlineMs = 0;
     c.page.evaluate = evaluateSeq(
@@ -221,7 +221,8 @@ describe('_verifySubmission() — deadline timeout', () => {
     );
     const r = await c._verifySubmission();
     assert.equal(r.verified, false);
-    assert.match(r.detail, /premium upsell/);
+    assert.match(r.detail, /SUBMIT_UNCONFIRMED/);
+    assert.doesNotMatch(r.detail, /premium/i);
   });
 
   it('formGone but no confirmation at deadline → FAILURE', async () => {

@@ -129,6 +129,11 @@ function removePauseFlag() {
   }
 }
 
+function filterIsStillEnabled(db, filterId) {
+  const current = db.getFilter(filterId);
+  return !!current?.enabled;
+}
+
 // ── Config loading ─────────────────────────────────────────────
 
 function loadConfig() {
@@ -148,6 +153,12 @@ let consecutiveCaptchas = 0;
 
 // contactor is a shared reference so the apply loop can reconnect
 let contactor = null;
+
+// last-tick timestamp for sleep/wake detection — both loops update this
+let lastTick = Date.now();
+
+// consecutive CDP connect failures — escalate to Electron after threshold
+let cdpFailCount = 0;
 
 // Mutable config — all fields hot-reload without restart
 let currentConfig = null;
@@ -205,20 +216,22 @@ async function applyOne(listing, filterId, db) {
       const reason = result.reason || '';
       const reasonLower = reason.toLowerCase();
       const isDeactivated = reasonLower.includes('deactivated');
+      const isPremium = reasonLower.includes('premium') || reasonLower.includes('suchen+');
       const isSessionExpired = reasonLower.includes('session_expired');
       const isError = reason.startsWith('ERROR:');
       const failureReason = isSessionExpired ? 'session_expired'
         : isDeactivated ? 'deactivated'
+        : isPremium ? 'premium'
         : reasonLower.includes('captcha') ? 'captcha'
-        : reasonLower.includes('premium') || reasonLower.includes('suchen+') ? 'premium'
         : reasonLower.includes('server_error') || reasonLower.includes('server error') ? 'server_error'
         : reasonLower.includes('no_form') ? 'no_form'
         : isError ? 'error'
         : 'unknown';
 
-      const outcome = isDeactivated ? 'DEACTIVATED' : 'FAIL';
+      const outcome = isDeactivated ? 'DEACTIVATED' : isPremium ? 'PREMIUM' : 'FAIL';
       db.markSent(listing.hash, outcome, reason, failureReason);
-      log(`  ${isDeactivated ? '◌' : '✗'} ${outcome} | ${listing.expose_id} | ${listing.title} | ${reason}`);
+      const logIcon = isDeactivated ? '◌' : isPremium ? '💎' : '✗';
+      log(`  ${logIcon} ${outcome} | ${listing.expose_id} | ${listing.title} | ${reason}`);
 
       if (failureReason === 'captcha') {
         consecutiveCaptchas++;
@@ -247,9 +260,20 @@ async function applyOne(listing, filterId, db) {
       });
     }
   } catch (err) {
-    log(`  ERROR | ${listing.expose_id} | ${err.message}`);
-    db.markSent(listing.hash, 'FAIL', `ERROR: ${err.message}`, 'error');
+    const errMsg = err?.message || String(err);
+    log(`  ERROR | ${listing.expose_id} | ${errMsg}`);
+    db.markSent(listing.hash, 'FAIL', `ERROR: ${errMsg}`, 'error');
     consecutiveCaptchas = 0;
+
+    // CDP-level errors mean the browser connection is toast — null the
+    // contactor so the next loop iteration forces a full reconnect. IS24
+    // form-fill errors (TypeError, timeout loading page) are left alone.
+    const cdpFatal = /Target closed|Session closed|Protocol error|WebSocket is not open|Connection closed|Detached from target|Browser has been disconnected/i;
+    if (cdpFatal.test(errMsg) || (contactor?.browser && !contactor.browser.isConnected())) {
+      log('  CDP connection lost — nulling contactor for reconnect');
+      contactor = null;
+    }
+
     emit({
       type: 'listing',
       outcome: 'FAIL',
@@ -272,6 +296,13 @@ async function applyLoop(db) {
   log('Apply loop started');
 
   while (true) {
+    // ── Detect wake from sleep — force CDP reconnect ──────────
+    if (Date.now() - lastTick > (pollIntervalSec * 3000)) {
+      log(`Time jump detected (${Math.round((Date.now() - lastTick) / 1000)}s) — forcing CDP reconnect`);
+      contactor = null;
+    }
+    lastTick = Date.now();
+
     // ── Wait if paused ───────────────────────────────────────
     // Honour both in-memory flag (IPC set) and filesystem flag (belt-and-suspenders)
     if (applyPaused || checkPauseFlag()) {
@@ -309,10 +340,20 @@ async function applyLoop(db) {
       if (contactor) {
         try {
           await contactor.connect();
+          cdpFailCount = 0;
           log('CDP reconnected');
         } catch (err) {
-          log(`CDP reconnect failed: ${err.message}`);
-          await sleep(5000);
+          cdpFailCount++;
+          const isFatal = err.message.includes('CDP_FAILED') || err.message.includes('ECONNREFUSED');
+          log(`CDP reconnect failed (#${cdpFailCount}): ${err.message}${isFatal ? ' [chrome dead]' : ''}`);
+          if (isFatal && cdpFailCount >= 3) {
+            log('*** Chrome unreachable after 3 attempts — requesting restart ***');
+            emit({ type: 'fatal', reason: 'chrome_dead', detail: err.message });
+            cdpFailCount = 0;
+            await sleep(30000);
+          } else {
+            await sleep(5000);
+          }
           continue;
         }
       } else {
@@ -330,7 +371,11 @@ async function applyLoop(db) {
 
     let didWork = false;
     for (const filter of filters) {
-      if (applyPaused) break;
+      if (applyPaused || checkPauseFlag()) break;
+      if (!filterIsStillEnabled(db, filter.id)) {
+        log(`Apply skipped — filter paused/disabled: ${filter.name || filter.id}`);
+        continue;
+      }
 
       const queue = db.getSeenListings(filter.id);
       if (queue.length === 0) continue;
@@ -346,6 +391,10 @@ async function applyLoop(db) {
       }
 
       const listing = queue[0];
+      if (applyPaused || checkPauseFlag() || !filterIsStillEnabled(db, filter.id)) {
+        log(`Apply skipped before send — filter paused/disabled: ${filter.name || filter.id}`);
+        continue;
+      }
       log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
       await applyOne(listing, filter.id, db);
       didWork = true;
@@ -367,6 +416,11 @@ async function pollLoop(db) {
   emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
 
   while (true) {
+    // ── Detect wake from sleep ────────────────────────────────
+    if (Date.now() - lastTick > (pollIntervalSec * 3000)) {
+      log(`Time jump detected (${Math.round((Date.now() - lastTick) / 1000)}s) — poll cycle resuming after suspend`);
+    }
+    lastTick = Date.now();
     const cycleStart = Date.now();
 
     // ── Poll all enabled filters ─────────────────────────────
@@ -375,10 +429,18 @@ async function pollLoop(db) {
 
     let totalNew = 0;
     for (const filter of filters) {
+      if (!filterIsStillEnabled(db, filter.id)) {
+        log(`Poll skipped — filter paused/disabled: ${filter.name || filter.id}`);
+        continue;
+      }
       try {
         const MAX_PAGES = 5, PAGE_SIZE = 20;
         let filterNew = 0, filterFetched = 0;
         for (let page = 1; page <= MAX_PAGES; page++) {
+          if (!filterIsStillEnabled(db, filter.id)) {
+            log(`Poll stopped — filter paused/disabled: ${filter.name || filter.id}`);
+            break;
+          }
           const { listings, error } = await fetchListings(filter.web_url, page);
           if (error) {
             if (page === 1) {
@@ -399,10 +461,12 @@ async function pollLoop(db) {
           totalNew += filterNew;
         }
 
-        db.updateFilter(filter.id, {
-          last_polled_at: new Date().toISOString(),
-          total_seen: (filter.total_seen || 0) + filterNew,
-        });
+        if (filterIsStillEnabled(db, filter.id)) {
+          db.updateFilter(filter.id, {
+            last_polled_at: new Date().toISOString(),
+            total_seen: (filter.total_seen || 0) + filterNew,
+          });
+        }
       } catch (err) {
         log(`Poll error [${filter.id}]: ${err.message}`);
         emit({ type: 'poll_error', filter_id: filter.id, error: err.message });
@@ -434,6 +498,7 @@ function setupIpc(db) {
       try {
         const filter = db.getFilter(msg.filterId);
         if (!filter) { log(`Poll-now: filter ${msg.filterId} not found`); return; }
+        if (!filter.enabled) { log(`Poll-now skipped — filter paused/disabled: ${filter.name || filter.id}`); return; }
         log(`Manual poll for: ${filter.name || filter.id}`);
 
         const MAX_PAGES = 5, PAGE_SIZE = 20;

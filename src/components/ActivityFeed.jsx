@@ -131,9 +131,9 @@ export default function ActivityFeed() {
         const isCaptcha = (item.detail || '').toLowerCase().includes('captcha')
           || failureReason.toLowerCase().includes('captcha');
         const safeDetail = item.detail ? userErrorText(item.detail, { operation: 'listing apply' }, t) : '';
-        const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : 'var(--danger)';
-        const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : '✗';
-        const outcomeLabel = isSent ? t('livefeed.sent', 'Sent') : isDeactivated ? t('livefeed.deactivated', 'Deactivated') : t('livefeed.failed', 'Failed');
+        const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : isPremium ? '#a855f7' : 'var(--danger)';
+        const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : isPremium ? '💎' : '✗';
+        const outcomeLabel = isSent ? t('livefeed.sent', 'Sent') : isDeactivated ? t('livefeed.deactivated', 'Deactivated') : isPremium ? t('livefeed.premium', 'Premium') : t('livefeed.failed', 'Failed');
 
         return (
           <div
@@ -187,7 +187,7 @@ export default function ActivityFeed() {
                   {isCaptcha && (
                     <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.captchaTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.captchaBadge', '🔐 Captcha')}</span>
                   )}
-                  {isPremium && (
+                  {isPremium && item.outcome !== 'PREMIUM' && (
                     <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.premiumTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.premiumBadge', '💎 Premium')}</span>
                   )}
                 </div>

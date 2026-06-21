@@ -1,9 +1,10 @@
 // Setup Wizard — first-launch guided setup for Homelander.
 // 6 steps: Language → Persona → Message → IS24 Login → 2captcha → First Search → Done
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../stores/appStore';
 import { useLocale } from '../locales/LocaleContext';
+import { compactValidationError, deriveSearchName, visibleIgnoredParams } from '../shared/searchUrlUi';
 import {
   IS24_SALUTATION,
   IS24_MOVE_IN,
@@ -49,6 +50,11 @@ export default function SetupWizard({ onComplete }) {
   const [is24Status, setIs24Status] = useState('pending');
   const [captchaValidating, setCaptchaValidating] = useState(false);
   const [searchUrl, setSearchUrl] = useState('');
+  const [searchName, setSearchName] = useState('');
+  const [searchTesting, setSearchTesting] = useState(false);
+  const [searchTestResult, setSearchTestResult] = useState(null);
+  const [searchTestError, setSearchTestError] = useState(null);
+  const [searchValidation, setSearchValidation] = useState(null);
 
   // Floating feedback toast (matches SettingsTab pattern)
   const [feedback, setFeedback] = useState(null);
@@ -75,6 +81,45 @@ export default function SetupWizard({ onComplete }) {
     }
     load();
   }, []);
+
+  const suggestedSearchName = useMemo(() => deriveSearchName(searchUrl), [searchUrl]);
+  const ignoredSearchParams = visibleIgnoredParams(searchValidation);
+
+  const resetSearchValidation = () => {
+    setSearchTestResult(null);
+    setSearchTestError(null);
+    setSearchValidation(null);
+  };
+
+  const testSearchUrl = useCallback(async () => {
+    if (!searchUrl.trim()) return null;
+    setSearchTesting(true);
+    setSearchTestResult(null);
+    setSearchTestError(null);
+    setSearchValidation(null);
+
+    try {
+      if (!window.homelander) {
+        const msg = userErrorText('Backend unavailable', { code: 'BACKEND_UNAVAILABLE' }, t);
+        setSearchTestError(msg);
+        return null;
+      }
+      const result = await window.homelander.testFilter(searchUrl.trim(), locale);
+      setSearchValidation(result.validation || null);
+      if (result.error) {
+        const msg = compactValidationError(result.validation, userErrorText(result.userError || result, { operation: 'search test' }, t), t);
+        setSearchTestError(msg);
+        return null;
+      }
+      setSearchTestResult(result.total);
+      return result;
+    } catch (err) {
+      setSearchTestError(userErrorText(err.userError || err, { operation: 'search test' }, t));
+      return null;
+    } finally {
+      setSearchTesting(false);
+    }
+  }, [locale, searchUrl, t]);
 
   const updateConfig = useCallback((patch) => {
     setConfig((prev) => {
@@ -188,16 +233,16 @@ export default function SetupWizard({ onComplete }) {
       }
 
       if (step === 5) {
-        // First search: validate URL if provided
+        // First search: validate URL with the same flow as Add Search.
         if (searchUrl.trim()) {
-          const testResult = await window.homelander.testFilter(searchUrl.trim());
-          if (testResult.error) {
-            showFeedback({ type: 'error', msg: userErrorText(testResult.userError || testResult, { operation: 'search test' }, t) });
+          const currentResult = searchTestResult === null ? await testSearchUrl() : { total: searchTestResult };
+          if (!currentResult) {
             setSaving(false);
             return;
           }
           // Save the filter before completing setup so new users do not land on an empty dashboard.
-          const addResult = await window.homelander.addFilter(searchUrl.trim(), '');
+          const finalName = searchName.trim() || suggestedSearchName;
+          const addResult = await window.homelander.addFilter(searchUrl.trim(), finalName);
           if (addResult?.error) {
             showFeedback({ type: 'error', msg: userErrorText(addResult.userError || addResult, { operation: 'search add' }, t) });
             setSaving(false);
@@ -555,12 +600,76 @@ export default function SetupWizard({ onComplete }) {
             <div>
               <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('setup.searchUrlLabel', 'IS24 search URL')}</label>
               <input
-                className="input"
+                className="input mb-3"
                 placeholder="https://www.immobilienscout24.de/Suche/de/..."
                 value={searchUrl}
-                onChange={(e) => setSearchUrl(e.target.value)}
+                onChange={(e) => { setSearchUrl(e.target.value); resetSearchValidation(); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchUrl.trim() && searchTestResult !== null) saveAndNext();
+                }}
               />
             </div>
+
+            <div>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>
+                {t('search.name', 'Name')} <span style={{ color: 'var(--text-muted)' }}>— {t('search.autoGeneratedFromUrl', 'automatisch aus URL')}</span>
+              </label>
+              <input
+                className="input"
+                placeholder={suggestedSearchName || t('search.searchPlaceholder', 'z.B. Berlin 2-Zimmer')}
+                value={searchName}
+                onChange={(e) => setSearchName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchUrl.trim() && searchTestResult !== null) saveAndNext();
+                }}
+              />
+            </div>
+
+            {searchValidation?.preview && (
+              <div className="px-3 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('search.parsedSearch', 'Gelesene Suche')}</div>
+                {searchValidation.preview.location && (
+                  <div className="text-sm mb-1">📍 {searchValidation.preview.location}</div>
+                )}
+                <div className="flex flex-col gap-1">
+                  {(searchValidation.preview.filters || []).map((line) => (
+                    <div key={line} className="text-sm">{line}</div>
+                  ))}
+                </div>
+                {ignoredSearchParams.length > 0 && (
+                  <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+                    {t('search.ignoredByMobileApi', '{{count}} Filter von Mobile API ignoriert').replace('{{count}}', ignoredSearchParams.length)}
+                  </div>
+                )}
+                {!searchTestError && searchValidation.unsupportedParams?.length > 0 && (
+                  <div className="text-xs mt-2" style={{ color: 'var(--danger)' }}>
+                    {t('search.unsupportedFilterCount', '{{count}} nicht unterstützte Filter').replace('{{count}}', searchValidation.unsupportedParams.length)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {searchTestResult !== null && (
+              <div className="px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--bg-secondary)' }}>
+                <span style={{ color: 'var(--success)', fontSize: 14 }}>✓</span>
+                <span className="text-sm">{t('search.resultsFound', '{{count}} Ergebnisse gefunden').replace('{{count}}', searchTestResult.toLocaleString())}</span>
+              </div>
+            )}
+
+            {searchTestError && (
+              <div className="px-3 py-2 rounded-lg flex items-center gap-2" style={{ background: 'var(--bg-secondary)' }}>
+                <span style={{ color: 'var(--danger)', fontSize: 14 }}>✗</span>
+                <span className="text-sm" style={{ color: 'var(--danger)' }}>{searchTestError}</span>
+              </div>
+            )}
+
+            <button
+              className="btn btn-secondary w-full"
+              onClick={testSearchUrl}
+              disabled={!searchUrl.trim() || searchTesting || saving}
+            >
+              {searchTesting ? t('search.testing', 'Prüfe…') : t('search.test', 'Prüfen')}
+            </button>
 
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {t('setup.searchSkip', 'Leave empty to skip — you can add searches later.')}
@@ -581,7 +690,7 @@ export default function SetupWizard({ onComplete }) {
           <button
             className="btn btn-primary"
             onClick={saveAndNext}
-            disabled={saving}
+            disabled={saving || searchTesting}
           >
             {saving ? t('setup.saving', 'Saving…') : step === 5 ? t('setup.startSearching', 'Start searching') : t('setup.continueButton', 'Continue →')}
           </button>

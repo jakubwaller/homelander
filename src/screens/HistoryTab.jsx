@@ -110,13 +110,13 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
     ? rawBadges.filter(b => b.toUpperCase() !== outcomeFilter.toUpperCase())
     : rawBadges;
 
-  // Icon + color — deactivated is its own outcome, not generic "Failed"
-  const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : isDryRun ? '○' : '✗';
-  const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : isDryRun ? 'var(--text-muted)' : 'var(--danger)';
+  // Icon + color — premium/deactivated are their own outcomes, not generic "Failed"
+  const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : isPremium ? '💎' : isDryRun ? '○' : '✗';
+  const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : isPremium ? '#a855f7' : isDryRun ? 'var(--text-muted)' : 'var(--danger)';
 
-  const outcomeLabel = isSent ? t('history.sent', 'Sent') : isDeactivated ? t('history.deactivated', 'Deactivated') : isDryRun ? t('history.dryRun', 'Dry Run') : t('history.failed', 'Failed');
+  const outcomeLabel = isSent ? t('history.sent', 'Sent') : isDeactivated ? t('history.deactivated', 'Deactivated') : isPremium ? t('history.premiumLabel', 'Premium') : isDryRun ? t('history.dryRun', 'Dry Run') : t('history.failed', 'Failed');
 
-  const badgeClass = isSent ? 'badge-success' : isDeactivated ? 'badge-deactivated' : isDryRun ? '' : 'badge-fail';
+  const badgeClass = isSent ? 'badge-success' : isDeactivated ? 'badge-deactivated' : isPremium ? 'badge-premium' : isDryRun ? '' : 'badge-fail';
   const safeDetail = listing.detail ? userErrorText(listing.detail, { operation: 'listing apply' }, t) : '';
 
   return (
@@ -173,7 +173,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
             {showBadges.includes('Captcha') && (
               <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.captchaTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.captchaBadge', '🔐 Captcha')}</span>
             )}
-            {showBadges.includes('Premium') && (
+            {showBadges.includes('Premium') && listing.outcome !== 'PREMIUM' && (
               <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.premiumTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.premiumBadge', '💎 Premium')}</span>
             )}
           </div>

@@ -242,7 +242,7 @@ export class IS24Contactor {
         await this.page.screenshot({ path: join(ssDir, `${exposeId}_${formState}.png`), fullPage: true });
         return {
           success: false, reason: premium
-            ? 'SUBMIT_FAILED (PREMIUM_ONLY — Plus listing, cannot contact without subscription)'
+            ? 'PREMIUM_ONLY (Nachricht opened a Plus/Suchen+ upsell instead of the contact form)'
             : 'NO_FORM (contact form not found)',
           timing_ms: Date.now() - tStart, timing, captcha, form_state: formState,
           fields_typed: 0, field_retries: 0,
@@ -692,19 +692,50 @@ export class IS24Contactor {
       await jitter(100, 200);
       const actual = await this.page.evaluate((s) => document.querySelector(s)?.value || null, sel);
       if (actual !== val) {
-        await this.page.evaluate(({ s, v }) => {
+        // IS24's React onChange can reject keyboard.type() values — email and
+        // address fields are common victims.  Instead of a single requestAnimationFrame,
+        // run a retry loop inside the page that sets + verifies the value across
+        // multiple microtask ticks so React's render cycle has time to settle.
+        const stuck = await this.page.evaluate(({ s, v }) => {
           const el = document.querySelector(s);
-          if (!el) return;
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          if (!el) return false;
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+
+          // Helper — fire the full event sequence IS24's React expects
+          const fireEvents = () => {
+            el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: v }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          };
+
+          // Clear first
           nativeSetter.call(el, '');
           el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContent' }));
-          requestAnimationFrame(() => {
+
+          // Set + re-verify across several microtask ticks
+          let attempts = 0;
+          const trySet = () => {
             nativeSetter.call(el, v);
-            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-          });
+            fireEvents();
+            // must read .value, not el.value, to get the real DOM property
+            if (el.value === v) return true;
+            attempts++;
+            if (attempts < 6) {
+              // schedule next attempt after a short timeout so React can settle
+              return new Promise(resolve => {
+                setTimeout(() => resolve(trySet()), 30 + attempts * 15);
+              });
+            }
+            return false;
+          };
+          return trySet();
         }, { s: sel, v: val });
-        await jitter(200, 400);
-        retries++;
+        if (!stuck) {
+          retries++;
+          process.stderr.write(`[contactor] Failed to fill ${sel} after retries\\n`);
+        }
       }
       filled++;
     }
@@ -748,13 +779,18 @@ export class IS24Contactor {
           const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
           nativeSetter.call(el, '');
           el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContent' }));
-          return new Promise((resolve) => {
-            requestAnimationFrame(() => {
-              nativeSetter.call(el, msg);
-              el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-              resolve(true);
-            });
-          });
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          // Retry loop — IS24's React may revert the value after the first set
+          let n = 0;
+          const trySet = () => {
+            nativeSetter.call(el, msg);
+            el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: msg }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            if (el.value === msg) return;
+            if (++n < 4) setTimeout(() => trySet(), 50 + n * 20);
+          };
+          trySet();
         }, { sel: textareaSel, msg: message });
         await jitter(200, 400);
         retries++;
@@ -762,20 +798,34 @@ export class IS24Contactor {
     }
 
     // Final verify: IS24 auto-fill can asynchronously revert fields after the bot types.
-    // Re-check every field and native-set any that lost their value.
+    // Re-check every field and robustly re-set any that lost their value.
     for (const { sel, val } of fields) {
       if (!val) continue;
       const actual = await this.page.evaluate((s) => document.querySelector(s)?.value || '', sel);
       if (actual !== val) {
-        await this.page.evaluate(({ s, v }) => {
+        const ok = await this.page.evaluate(({ s, v }) => {
           const el = document.querySelector(s);
-          if (!el) return;
-          const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-          nativeSetter.call(el, v);
-          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+          if (!el) return false;
+          const nativeSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype, 'value'
+          ).set;
+          const fireEvents = () => {
+            el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+            el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: v }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          };
+          let n = 0;
+          const trySet = () => {
+            nativeSetter.call(el, v);
+            fireEvents();
+            if (el.value === v) return true;
+            if (++n < 4) return new Promise(r => setTimeout(() => r(trySet()), 40 + n * 20));
+            return false;
+          };
+          return trySet();
         }, { s: sel, v: val });
+        if (!ok) retries++;
         await jitter(100, 200);
-        retries++;
       }
     }
 
@@ -935,14 +985,8 @@ export class IS24Contactor {
         return { verified: false, detail: 'captcha (unsolved)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
       }
 
-      if (state.premium && state.formGone) return { verified: false, detail: 'premium upsell (Suchen+)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
-
       if (state.serverError) {
-        if (state.premium && state.formGone) return { verified: false, detail: 'premium upsell (Suchen+)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
-        if (state.formGone) return { verified: false, detail: `premium (IS24 generic submit error after closing form): ${state.errorText || 'unknown'}`, captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
-
-        // Generic "Es ist ein Fehler aufgetreten" means premium — no retries
-        return { verified: false, detail: `premium (IS24 generic submit error): ${state.errorText || 'unknown'}`, captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
+        return { verified: false, detail: 'PREMIUM_ONLY (Es ist ein Fehler aufgetreten. — Plus/Suchen+ required)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended, error_text: state.errorText };
       }
 
       if (state.hasErrors || state.validationText) {
@@ -991,14 +1035,12 @@ export class IS24Contactor {
       };
     });
     const formGone = fallbackState?.formGone === true;
-    const isPremium = fallbackState?.premium === true;
     const isServerError = fallbackState?.serverError === true;
 
     if (fallbackState?.successText === true) return { verified: true, detail: 'confirmed (success text)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (formGone && fallbackState?.loggedOut === true) return { verified: false, detail: 'SESSION_EXPIRED (login required — form closed to expose page)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
-    if (formGone && isPremium) return { verified: false, detail: 'premium upsell (Suchen+)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (formGone) return { verified: false, detail: 'SUBMIT_UNCONFIRMED (form closed without confirmation)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
-    if (isServerError && !formGone) return { verified: false, detail: 'premium (IS24 generic submit error)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    if (isServerError && !formGone) return { verified: false, detail: 'PREMIUM_ONLY (Es ist ein Fehler aufgetreten. — Plus/Suchen+ required)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (sawValidation) return { verified: false, detail: 'validation errors persisted', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     return { verified: false, detail: 'no confirmation after 5s', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
   }

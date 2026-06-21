@@ -53,6 +53,10 @@ export class ChromeManager {
     const opts = this._options(options);
     this.profileDir = getProfileDir(email);
 
+    if (this.isManualLoginRunning()) {
+      await this.stopManualLoginProcess();
+    }
+
     if (await this.isHealthy()) {
       await this._connectExisting().catch(() => {});
       if (opts.visibility === 'always_show') await this.showBrowser();
@@ -193,6 +197,33 @@ export class ChromeManager {
     return !!this.manualLoginProcess && this.manualLoginProcess.exitCode === null && !this.manualLoginProcess.killed;
   }
 
+  async stopManualLoginProcess(timeoutMs = 2500) {
+    const proc = this.manualLoginProcess;
+    if (!proc) return;
+    if (proc.exitCode !== null || proc.killed) {
+      this.manualLoginProcess = null;
+      return;
+    }
+
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(killTimer);
+        clearTimeout(doneTimer);
+        if (this.manualLoginProcess === proc) this.manualLoginProcess = null;
+        resolve();
+      };
+      const killTimer = setTimeout(() => {
+        try { proc.kill('SIGKILL'); } catch {}
+      }, Math.max(500, timeoutMs - 500));
+      const doneTimer = setTimeout(done, timeoutMs);
+      proc.once('exit', done);
+      try { proc.kill('SIGTERM'); } catch { done(); }
+    });
+  }
+
   async openManualLoginPage(email, options = {}) {
     this.profileDir = getProfileDir(email);
     mkdirSync(this.profileDir, { recursive: true });
@@ -227,9 +258,11 @@ export class ChromeManager {
   }
 
   async finalizeManualLogin(email, options = {}) {
-    // Leave the manual-login Chromium open — user is logged in, keep it.
-    // CDP-controlled browser launches later when the daemon starts.
-    return { manualLogin: !!this.isManualLoginRunning(), cdpHealthy: false };
+    // The login cookies/profile are persisted on disk. Close the plain manual
+    // browser before CDP startup; Chromium refuses to open the same profile in a
+    // second process and exits with "Wird in einer aktuellen Browsersitzung geöffnet.".
+    await this.stopManualLoginProcess();
+    return { manualLogin: false, cdpHealthy: false };
   }
 
   async openListing(exposeIdOrUrl, email, options = {}) {

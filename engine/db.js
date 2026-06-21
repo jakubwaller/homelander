@@ -174,10 +174,11 @@ export class HomelanderDB {
   }
 
   markSent(hash, outcome, detail, failureReason = '') {
+    const status = outcome === 'SENT' ? 'sent' : 'failed';
     this.db.prepare(`
       UPDATE listings SET status = ?, outcome = ?, sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), detail = ?, failure_reason = ?
       WHERE hash = ?
-    `).run(outcome === 'SENT' ? 'sent' : 'failed', outcome, detail || '', failureReason || '', hash);
+    `).run(status, outcome, detail || '', failureReason || '', hash);
 
     this.db.prepare(`
       INSERT INTO results (listing_hash, outcome, detail) VALUES (?, ?, ?)
@@ -211,8 +212,8 @@ export class HomelanderDB {
         sql += ' AND (failure_reason LIKE ? OR detail LIKE ?)';
         params.push('%captcha%', '%captcha%');
       } else if (outcome === 'PREMIUM') {
-        sql += ' AND (failure_reason LIKE ? OR detail LIKE ?)';
-        params.push('%premium%', '%premium%');
+        sql += ' AND (failure_reason LIKE ? OR detail LIKE ? OR detail LIKE ?)';
+        params.push('%premium%', '%premium%', '%Suchen+%');
       } else {
         sql += ' AND outcome = ?';
         params.push(outcome);
@@ -229,10 +230,10 @@ export class HomelanderDB {
     
     const total = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status IN ('sent', 'failed')${whereFilter}`).get(...params());
     const sent = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'sent'${whereFilter}`).get(...params());
-    const failed = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'failed' AND outcome != 'DEACTIVATED'${whereFilter}`).get(...params());
+    const failed = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%'${whereFilter}`).get(...params());
     const deactivated = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE outcome = 'DEACTIVATED'${whereFilter}`).get(...params());
     const premium = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%premium%' OR detail LIKE '%premium%')${whereFilter}`
+      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%')${whereFilter}`
     ).get(...params());
     const captcha = this.db.prepare(
       `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%')${whereFilter}`
@@ -258,17 +259,17 @@ export class HomelanderDB {
     const whereFilter = filterId ? ' AND filter_id = ?' : '';
     const params = (sql) => filterId ? [filterId] : [];
     
-    const total = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status IN ('sent', 'failed') AND date(COALESCE(sent_at, discovered_at)) = date('now', 'localtime')${whereFilter}`).get(...params());
+    const total = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status IN ('sent', 'failed') AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
     const sent = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'sent' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
-    const failed = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'failed' AND outcome != 'DEACTIVATED' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
+    const failed = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
     const deactivated = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE outcome = 'DEACTIVATED' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
     const premium = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%premium%' OR detail LIKE '%premium%') AND date(COALESCE(sent_at, discovered_at)) = date('now', 'localtime')${whereFilter}`
+      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%') AND date(sent_at) = date('now', 'localtime')${whereFilter}`
     ).get(...params());
     const captcha = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') AND date(COALESCE(sent_at, discovered_at)) = date('now', 'localtime')${whereFilter}`
+      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') AND date(sent_at) = date('now', 'localtime')${whereFilter}`
     ).get(...params());
-    const seenUnapplied = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'seen'${whereFilter}`).get(...params());
+    const seenUnapplied = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'seen' AND date(discovered_at) = date('now', 'localtime')${whereFilter}`).get(...params());
 
     return {
       total: total.count,
@@ -303,7 +304,7 @@ export class HomelanderDB {
 
     let consecutive = 0;
     for (const row of rows) {
-      if (row.failure_reason === 'captcha' || row.outcome === 'FAIL') {
+      if (row.failure_reason === 'captcha' || (row.outcome === 'FAIL' && (row.failure_reason || '').includes('captcha'))) {
         consecutive++;
       } else {
         break;

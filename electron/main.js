@@ -794,6 +794,7 @@ function registerIpcHandlers() {
       try {
         const filter = db.getFilter(filterId);
         if (!filter) return { ok: false, error: 'Suche nicht gefunden' };
+        if (!filter.enabled) return { ok: false, error: 'Suche ist pausiert' };
 
         // A manual card poll is intentionally scoped to this one search. Push the
         // daemon's automatic all-search poll deadline away before fetching, so an
@@ -821,7 +822,7 @@ function registerIpcHandlers() {
 
         const nextPollAt = setNextPollFromNow('manual_poll');
         resetDaemonPollSchedule('manual_poll_finished');
-        const stats = { ...db.getStats(), nextPollAt, next_poll_at: nextPollAt };
+        const stats = { ...db.getTodayStats(), nextPollAt, next_poll_at: nextPollAt };
         broadcastStats(stats);
         if (mainWindow) {
           if (allInserted > 0) {

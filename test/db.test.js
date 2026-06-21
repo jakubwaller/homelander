@@ -637,16 +637,16 @@ describe('getStats', () => {
     const h5 = seedListing(db, { expose_id: 'st5', price: 500 });
 
     db.markSent(h1, 'SENT', 'ok');                     // sent
-    db.markSent(h2, 'FAIL', 'error');                   // failed (not deactivated)
+    db.markSent(h2, 'FAIL', 'error');                   // failed (not deactivated/premium)
     db.markSent(h3, 'DEACTIVATED', 'listing gone');     // deactivated
-    db.markSent(h4, 'FAIL', 'premium required', 'premium upsell');   // premium
+    db.markSent(h4, 'PREMIUM', 'PREMIUM_ONLY (Suchen+)', 'premium');   // premium
     db.markSent(h5, 'CAPTCHA', 'captcha detected', 'captcha');        // captcha
 
     const stats = db.getStats();
-    assert.equal(stats.total, 5);           // 5 processed (sent or failed)
+    assert.equal(stats.total, 5);           // 5 processed (sent or terminal non-seen)
     assert.equal(stats.sent, 1);            // h1
-    assert.equal(stats.failed, 3);          // h2 (FAIL), h4 (FAIL/premium), h5 (CAPTCHA)
-                                            // h3 is DEACTIVATED — excluded from failed, counted separately
+    assert.equal(stats.failed, 2);          // h2 (FAIL), h5 (CAPTCHA)
+                                            // h3 deactivated and h4 premium are counted separately
     assert.equal(stats.deactivated, 1);     // h3
     assert.equal(stats.premium, 1);         // h4
     assert.equal(stats.captcha, 1);         // h5
@@ -692,11 +692,17 @@ describe('getTodayStats', () => {
     db.close();
   });
 
-  it('counts seen today', () => {
+  it('counts premium today separately from failed', () => {
     const db = seededDB();
-    seedListing(db, { expose_id: 'tseen', price: 100 });
+    const premiumHash = seedListing(db, { expose_id: 'tpremium', price: 100 });
+    const failHash = seedListing(db, { expose_id: 'tfail', price: 200 });
+    db.markSent(premiumHash, 'PREMIUM', 'PREMIUM_ONLY (Suchen+)', 'premium');
+    db.markSent(failHash, 'FAIL', 'validation error', 'form error');
+
     const stats = db.getTodayStats();
-    assert.equal(stats.seen_unapplied, 1);
+    assert.equal(stats.premium, 1);
+    assert.equal(stats.failed, 1);
+    assert.equal(stats.total, 2);
     db.close();
   });
 });
@@ -760,6 +766,16 @@ describe('getHistory', () => {
     const failHistory = db.getHistory(100, 0, null, 'FAIL');
     assert.equal(failHistory.length, 1);
     assert.equal(failHistory[0].outcome, 'FAIL');
+  });
+
+  it('filters by premium outcome/badge', () => {
+    const premiumHash = seedListing(db, { expose_id: 'h-premium', title: 'Premium listing', price: 450 });
+    db.markSent(premiumHash, 'PREMIUM', 'PREMIUM_ONLY (Suchen+)', 'premium');
+
+    const history = db.getHistory(100, 0, null, 'PREMIUM');
+    assert.equal(history.length, 1);
+    assert.equal(history[0].outcome, 'PREMIUM');
+    assert.equal(history[0].failure_reason, 'premium');
   });
 
   it('filters by CAPTCHA outcome (LIKE search)', () => {
@@ -861,12 +877,12 @@ describe('getCaptchaConsecutive', () => {
     db.close();
   });
 
-  it('counts FAIL outcome without captcha reason as consecutive', () => {
+  it('does NOT count FAIL outcome without captcha reason', () => {
     const db = seededDB();
     const h1 = seedListing(db, { expose_id: 'ccf1', price: 100 });
     db.markSent(h1, 'FAIL', '', '');
-    // failure_reason is '' but outcome is 'FAIL' → counts
-    assert.equal(db.getCaptchaConsecutive(), 1);
+    // failure_reason is '' and outcome is 'FAIL' → NOT a captcha → 0
+    assert.equal(db.getCaptchaConsecutive(), 0);
     db.close();
   });
 

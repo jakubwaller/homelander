@@ -297,7 +297,7 @@ export default function SearchTab() {
       {/* ── Stats row ──────────────────────────────────────────── */}
       <div className="flex items-center gap-3 flex-wrap mt-2">
         <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{t('search.today', 'Today')}</span>
-        <StatBadge label={t('search.processed', 'Processed')} value={`${(stats.sent + stats.failed + (stats.deactivated || 0))}/${stats.seen}`} color="var(--accent)" />
+        <StatBadge label={t('search.processed', 'Processed')} value={`${(stats.sent + stats.failed + (stats.deactivated || 0) + (stats.premium || 0))}/${stats.seen}`} color="var(--accent)" />
         <StatBadge label={t('search.sent', 'Sent')} value={stats.sent} color="var(--success)" />
         <StatBadge label={t('search.failed', 'Failed')} value={stats.failed} color="var(--danger)" />
         <StatBadge label={t('livefeed.deactivated', 'Deactivated')} value={stats.deactivated || 0} color="var(--text-muted)" tooltip={t('livefeed.deactivatedTip')} />

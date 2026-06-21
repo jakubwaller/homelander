@@ -421,6 +421,8 @@ export function parseSearchUrl(webUrl) {
         safeIgnoredParams.push({
           key: rawKey,
           value,
+          label: MOBILE_UNSUPPORTED_WEB_FILTER_LABELS[key],
+          mobileRejected: true,
           reason: `The IS24 mobile API rejects ${MOBILE_UNSUPPORTED_WEB_FILTER_LABELS[key]} filters; Homelander keeps the supported parts of the search.`,
         });
         seenKnownKeys.add(key);
