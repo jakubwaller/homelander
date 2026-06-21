@@ -55,6 +55,7 @@ function AppInner() {
   const setSetupComplete = useStore((s) => s.setSetupComplete);
   const setConfig = useStore((s) => s.setConfig);
   const setDaemonStatus = useStore((s) => s.setDaemonStatus);
+  const setAppVersion = useStore((s) => s.setAppVersion);
   const setStats = useStore((s) => s.setStats);
   const addActivity = useStore((s) => s.addActivity);
   const setFilters = useStore((s) => s.setFilters);
@@ -93,8 +94,9 @@ function AppInner() {
       const { filters } = await window.homelander.getFilters();
       if (filters) setFilters(filters);
 
-      const { status } = await window.homelander.getDaemonStatus();
+      const { status, version } = await window.homelander.getDaemonStatus();
       setDaemonStatus(status);
+      if (version) setAppVersion(version);
     }
     init();
   }, []);

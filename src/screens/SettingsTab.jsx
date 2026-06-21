@@ -56,6 +56,7 @@ function Section({ title, children }) {
 export default function SettingsTab() {
   const { t, locale, setLocale } = useLocale();
   const config = useStore((s) => s.config);
+  const appVersion = useStore((s) => s.appVersion);
   const setConfig = useStore((s) => s.setConfig);
 
   // Local editing state
@@ -578,6 +579,10 @@ export default function SettingsTab() {
             {t('settings.purgingAll', 'Purging all data…')}
           </button>
         )}
+      </div>
+
+      <div className="pt-6 border-t text-center" style={{ borderColor: 'var(--border)' }}>
+        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Homelander v{appVersion}</span>
       </div>
     </div>
   );

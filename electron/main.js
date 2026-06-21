@@ -783,7 +783,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('daemon:status', () => {
-    return { status: effectiveDaemonStatus() };
+    return { status: effectiveDaemonStatus(), version: app.getVersion() };
   });
 
   ipcMain.handle('daemon:poll-now', async (_event, filterId) => {

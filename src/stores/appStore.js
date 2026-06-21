@@ -13,6 +13,10 @@ export const useStore = create((set, get) => ({
   setDaemonStatus: (status) => set({ daemonStatus: status }),
   setChromeStatus: (status) => set({ chromeStatus: status }),
 
+  // ── App metadata ────────────────────────────────────────────
+  appVersion: '…',
+  setAppVersion: (v) => set({ appVersion: v }),
+
   // ── Filters ────────────────────────────────────────────────
   filters: [],
   setFilters: (filters) => set({ filters }),
