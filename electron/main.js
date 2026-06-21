@@ -2,7 +2,7 @@
 // Manages app lifecycle, BrowserWindow, daemon child process,
 // Chrome lifecycle, config, and IPC bridge to renderer.
 
-import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, nativeImage, shell, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, shell, clipboard } from 'electron';
 import { fork, spawnSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, readdirSync, statSync, cpSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -43,7 +43,9 @@ const CDP_URL = 'http://localhost:9222';
 const PAUSE_FLAG = join(DATA_DIR, '.apply-paused');
 const SUPPORT_DIR = join(DATA_DIR, 'support-bundles');
 const DEBUG_DIR = join(DATA_DIR, 'debug');
-const APP_ICON_PNG = join(__dirname, '..', 'resources', 'icon.png');
+const APP_ICON_PNG = process.resourcesPath
+  ? join(process.resourcesPath, 'icon.png')
+  : join(__dirname, '..', 'resources', 'icon.png');
 
 // ── State ──────────────────────────────────────────────────────
 
@@ -605,6 +607,7 @@ function handleDaemonEvent(event) {
             title: '✓ Bewerbung gesendet',
             body: `${event.title} — ${event.address || 'keine Adresse'}`,
             silent: true,
+            icon: APP_ICON_PNG,
           }).show();
         } else if (event.outcome === 'FAIL') {
           const userError = toUserError(event.detail || event.failureReason || 'Application failed', { operation: 'listing apply' });
@@ -612,6 +615,7 @@ function handleDaemonEvent(event) {
             title: 'Bewerbung braucht Aufmerksamkeit',
             body: `${event.title} — ${userError.title}`,
             silent: true,
+            icon: APP_ICON_PNG,
           }).show();
         }
       }
@@ -623,6 +627,7 @@ function handleDaemonEvent(event) {
           title: '🔐 Captcha-Wand erkannt',
           body: `Nach ${event.consecutive} Captchas automatisch für 15 Minuten pausiert`,
           silent: true,
+          icon: APP_ICON_PNG,
         }).show();
       }
       break;
@@ -638,6 +643,7 @@ function handleDaemonEvent(event) {
           title: '⚠ IS24-Anmeldung abgelaufen',
           body: 'Melde dich erneut über Einstellungen → IS24-Konto an',
           silent: false,
+          icon: APP_ICON_PNG,
         }).show();
       }
       break;
@@ -1195,9 +1201,6 @@ function deepMerge(target, patch) {
 
 app.whenReady().then(async () => {
   app.setName('Homelander');
-  if (process.platform === 'darwin' && existsSync(APP_ICON_PNG)) {
-    app.dock.setIcon(nativeImage.createFromPath(APP_ICON_PNG));
-  }
 
   loadConfig();
   registerIpcHandlers();

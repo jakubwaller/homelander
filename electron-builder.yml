@@ -17,6 +17,8 @@ files:
   - package.json
 
 extraResources:
+  - from: resources/icon.png
+    to: icon.png
   - from: engine
     to: engine
 
