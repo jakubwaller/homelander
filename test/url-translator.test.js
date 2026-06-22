@@ -344,11 +344,11 @@ describe('translateUrl — parameter mappings', () => {
     assert.ok(fullUrl.includes('petsallowedtypes=yes'));  // auto-translated: 1→yes
   });
 
-  it('flags energy-efficiency as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
+  it('translates energy-efficiency=A+ → energyefficiencyclasses=a_plus', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?energy-efficiency=A%2B'
     );
-    assert.ok(!fullUrl.includes('energyEfficiency=A%2B'));  // mobile API rejects, filtered
+    assert.ok(fullUrl.includes('energyefficiencyclasses=a_plus'));  // auto-translated A+→a_plus
   });
 
   it('maps guest-toilet and built-in-kitchen → equipment', () => {
@@ -611,13 +611,6 @@ describe('translateUrl — mobile-unsupported web filters', () => {
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?ageofconstruction=3'
     );
     assert.ok(!fullUrl.includes('ageOfConstruction'));
-  });
-
-  it('flags energy-efficiency as mobile-unsupported', () => {
-    const { fullUrl } = translateUrl(
-      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?energy-efficiency=A%2B'
-    );
-    assert.ok(!fullUrl.includes('energyEfficiency'));
   });
 });
 

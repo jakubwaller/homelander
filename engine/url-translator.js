@@ -58,12 +58,17 @@ const SEO_PATH_EQUIPMENT_MAP = {
   'barrierefreie-wohnung-mieten': { equipment: ['HANDICAPPED_ACCESSIBLE'] },
 };
 
-// The web UI uses "swapflat", but the mobile API only understands "swap_flat".
-// An unknown value is not ignored: the API silently returns 0 results for the
-// whole search. Other values (e.g. "projectlisting") are identical on both APIs.
-// From Fredy's EXCLUSION_CRITERIA_MAP.
+// Value corrections for IS24 web params that use different value formats
+// than the mobile API.
 const EXCLUSION_CRITERIA_CORRECTIONS = {
   swapflat: 'swap_flat',
+};
+
+// Web uses A%2B/A+/A_PLUS, mobile uses a_plus
+const ENERGY_EFFICIENCY_CORRECTIONS = {
+  'a_plus': 'a_plus', 'a+': 'a_plus', 'a+b': 'a_plus', 'aplus': 'a_plus',
+  'a': 'a', 'b': 'b', 'c': 'c', 'd': 'd', 'e': 'e',
+  'f': 'f', 'g': 'g', 'h': 'h',
 };
 
 // SEO-optimized warmrent paths: "wohnung-bis-800-euro-warm" → implicit price + pricetype.
@@ -213,6 +218,7 @@ const SAFE_IGNORED_PARAM_PATTERNS = [
 const DIRECT_PARAM_MAP = {
   'exclusioncriteria': 'exclusioncriteria',
   'energyefficiencyclasses': 'energyefficiencyclasses',
+  'energy-efficiency': 'energyefficiencyclasses',  // IS24 web → value-corrected
   'petsallowedtypes': 'petsallowedtypes',
   'pets-allowed': 'petsallowedtypes',        // IS24 web param → value-corrected
   'floor': 'floor',
@@ -341,7 +347,6 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   // Removed DIRECT_PARAM_MAP entries (2026-06-22) — confirmed 412 by live conformance test
   'has-pictures': 'listing pictures filter',
   'ageofconstruction': 'age of construction',
-  'energy-efficiency': 'energy rating filter',
   // Original entries
   gender: 'flatmate gender',
   smokingallowed: 'smoking allowed',
@@ -598,12 +603,14 @@ export function parseSearchUrl(webUrl) {
         seenKnownKeys.add(key);
       } else if (DIRECT_PARAM_MAP[key]) {
         const mappedKey = DIRECT_PARAM_MAP[key];
-        // Apply value corrections (e.g. swapflat → swap_flat, 1/true → yes for pets)
+        // Apply value corrections (e.g. swapflat → swap_flat, 1/true → yes for pets, A%2B → a_plus)
         const correctedValue = mappedKey === 'exclusioncriteria'
           ? splitValues(value).map(v => EXCLUSION_CRITERIA_CORRECTIONS[v.toLowerCase()] || v).join(',')
           : mappedKey === 'petsallowedtypes' && key === 'pets-allowed'
             ? (value === '1' || value === 'true' ? 'yes' : value === '0' || value === 'false' ? 'no' : value)
-            : value;
+            : mappedKey === 'energyefficiencyclasses' && key === 'energy-efficiency'
+              ? (ENERGY_EFFICIENCY_CORRECTIONS[value.toLowerCase()] || value)
+              : value;
         // Populate structured canonical fields from query params (skip directParams
         // for fields that buildMobileApiUrl already outputs from canonical structure)
         const skipDirect = mappedKey === 'newbuilding' || mappedKey === 'fulltext' || mappedKey === 'apartmenttypes';
