@@ -346,6 +346,12 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   onlywithcookingpossibility: 'cooking possibility',
   onlywithambulantnursingservice: 'ambulant nursing service',
   assistedlivingcommercializationtype: 'commercialization type',
+  onlywithcareofdementiapatients: 'dementia care',
+  onlywithcareofartificalrespirationpatients: 'respiration care',
+  onlywithcareofvegetativestatepatients: 'vegetative state care',
+  caretypes: 'care type',
+  seniorcarelevels: 'care level',
+  roomtypes: 'room type',
 };
 
 const EQUIPMENT_CHECKBOX_PARAMS = new Set([
