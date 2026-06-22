@@ -1,0 +1,18 @@
+name: Param Coverage
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 1'  # weekly Monday 8am UTC
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test param coverage against live mobile API
+        run: HOMELANDER_LIVE_PARAM_TEST=1 node scripts/test-param-coverage.js
