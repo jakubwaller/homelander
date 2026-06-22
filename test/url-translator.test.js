@@ -360,6 +360,41 @@ describe('translateUrl — parameter mappings', () => {
 
   // ── Remaining DIRECT_PARAM_MAP entries ──────────────────────────────────
 
+  it('maps floor → floor', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?floor=1-'
+    );
+    assert.ok(fullUrl.includes('floor=1-'));
+  });
+
+  it('maps apartmenttypes → apartmenttypes', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?apartmenttypes=groundfloor'
+    );
+    assert.ok(fullUrl.includes('apartmenttypes=groundfloor'));
+  });
+
+  it('maps haspromotion → haspromotion', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?haspromotion=true'
+    );
+    assert.ok(fullUrl.includes('haspromotion=true'));
+  });
+
+  it('maps newbuilding → newbuilding=true (also sets canonical flag)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?newbuilding=true'
+    );
+    assert.ok(fullUrl.includes('newbuilding=true'));
+  });
+
+  it('maps fulltext → fulltext', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?fulltext=Altbau'
+    );
+    assert.ok(fullUrl.includes('fulltext=Altbau'));
+  });
+
   it('maps constructionyear → constructionyear', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?constructionyear=2000-'
