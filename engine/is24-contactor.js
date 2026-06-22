@@ -549,7 +549,7 @@ export class IS24Contactor {
         const text = document.body?.innerText || '';
         const url = document.location?.href || '';
         // IS24 shows these when listing is gone
-        if (/(nicht mehr verfügbar|nicht mehr verfuegbar|(Anzeige|Angebot).{0,30}nicht gefunden|Anzeige.{0,30}existiert nicht|wurde deaktiviert|Objekt wurde.{0,30}entfernt|Leider wurde das Objekt|Diese Seite existiert nicht|Angebot ist abgelaufen|wurde bereits vergeben|ist bereits vergeben|nicht mehr online|expose.{0,10}not found)/i.test(text)) return true;
+        if (/(nicht mehr (verfügbar|verfuegbar|aktuell)|(Anzeige|Angebot|Objekt).{0,30}nicht gefunden|(Anzeige|Inserat).{0,30}existiert nicht|wurde deaktiviert|Objekt wurde.{0,30}entfernt|Leider wurde das Objekt|Diese Seite existiert nicht|Angebot ist abgelaufen|wurde bereits vergeben|ist bereits vergeben|bereits (vermittelt|vermietet|verkauft)|nicht mehr online|expose.{0,10}not found)/i.test(text)) return true;
         // 404 redirects or page title says "not found"
         if (/Seite nicht gefunden|Page not found|404/i.test(document.title || '')) return true;
         return false;
