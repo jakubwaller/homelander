@@ -224,6 +224,9 @@ const DIRECT_PARAM_MAP = {
   'pets-allowed': 'petsAllowed',
   'energy-efficiency': 'energyEfficiency',
   'apartmenttypes': 'apartmenttypes',
+  'haspromotion': 'haspromotion',
+  'constructionyear': 'constructionyear',
+  'newbuilding': 'newbuilding',
 };
 
 const HEATING_TYPE_MAP = {
@@ -264,6 +267,7 @@ const EQUIPMENT_MAP = {
   balcony: 'BALCONY',
   garden: 'GARDEN',
   builtinKitchen: 'BUILT_IN_KITCHEN',
+  builtinkitchen: 'BUILT_IN_KITCHEN',
   'built-in-kitchen': 'BUILT_IN_KITCHEN',
   kitchen: 'BUILT_IN_KITCHEN',
   elevator: 'LIFT',
@@ -312,6 +316,11 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   startrentaldate: 'rental start date',
   furniture: 'furnished',
   rentalduration: 'rental duration',
+  osmtags: 'proximity to POIs',
+  minimuminternetspeed: 'minimum internet speed',
+  exclusiveonis24: '"only on IS24" filter',
+  comingsoon: '"coming soon" filter',
+  paywall: 'paywall filter',
 };
 
 function parseWgSlug(segment) {
