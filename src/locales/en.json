@@ -238,7 +238,7 @@
     "is24LaunchingStatus": "Opening Chromium…",
     "is24LaunchingDesc": "Chromium is starting.",
     "is24WaitingStatus": "Log in, then continue",
-    "is24WaitingDesc": "Only click Continue after IS24 shows you are logged in.",
+    "is24WaitingDesc": "Only click Continue after IS24 shows you are logged in. Do not close or hide the Chromium window.",
     "is24PreparingStatus": "Saving session…",
     "is24PreparingDesc": "Keeping this login for future applications.",
     "is24ClosedStatus": "Chromium closed",

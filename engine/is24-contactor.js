@@ -4,14 +4,25 @@
 // Debug outputs saved to debug/ (html/, screenshots/).
 
 import puppeteer from 'puppeteer';
-import { mkdirSync, existsSync, writeFileSync, readdirSync, unlinkSync, statSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readdirSync, unlinkSync, statSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IS24_EXPOSE_URL = 'https://www.immobilienscout24.de/expose';
 const DEBUG_DIR = process.env.HOMELANDER_DEBUG_DIR || join(__dirname, '..', 'debug');
 const DEFAULT_WINDOW = { windowState: 'normal', left: 80, top: 60, width: 1200, height: 850 };
+const DAEMON_LOG = join(homedir(), '.homelander', 'daemon.log');
+
+// Diagnostic logger — writes to stderr (captured by Electron main → daemon.log).
+// console.log goes to stdout which is JSON-parsed and non-JSON lines are dropped.
+function diagLog(msg) {
+  const ts = new Date().toISOString().slice(11, 19);
+  const line = `[${ts}] ${msg}`;
+  process.stderr.write(line + '\n');
+  try { appendFileSync(DAEMON_LOG, line + '\n', 'utf8'); } catch {}
+}
 
 /** Ensure a debug directory exists, return its path. */
 function ensureDir(subdir) {
@@ -479,8 +490,10 @@ export class IS24Contactor {
   }
 
   /** Check login status across already-open IS24 tabs — no new pages, no focus steal.
-   *  The authoritative check runs inside apply() on the freshly loaded listing page. */
+   *  The authoritative check runs inside apply() on the freshly loaded listing page.
+   *  Retries when the .sso-login header hasn't rendered yet (page still hydrating). */
   async checkIS24LoginAnyTab() {
+    const t0 = Date.now();
     const evaluateLogin = () => `(() => {
       const flag = (window.IS24 && window.IS24.expose && window.IS24.expose.userLoggedIn);
       if (typeof flag === 'boolean') return flag;
@@ -496,21 +509,83 @@ export class IS24Contactor {
       return loggedInRe.test(bodyText) && emailRe.test(bodyText);
     })()`;
 
+    const domSnapshot = () => `(() => {
+      const wrapper = document.querySelector('.sso-login');
+      const ssoText = wrapper ? (wrapper.innerText || '').slice(0, 200) : 'NO_SSO_LOGIN_ELEMENT';
+      const bodyPreview = (document.body?.innerText || '').slice(0, 500);
+      const hasIS24 = typeof window.IS24 !== 'undefined';
+      const is24Keys = hasIS24 ? Object.keys(window.IS24).join(',') : 'NONE';
+      return JSON.stringify({url: window.location.href, title: document.title, ssoText, bodyPreview: bodyPreview.slice(0, 300), hasIS24, is24Keys, webdriver: navigator.webdriver});
+    })()`;
+
+    const hasSsoLogin = () => `(() => {
+      return !!document.querySelector('.sso-login');
+    })()`;
+
     try {
       const pages = await this.browser.pages();
+      const allUrls = pages.map(p => { try { return p.url(); } catch { return '<closed>'; } });
+      diagLog(`[contactor:loginCheck] scanning ${pages.length} pages: ${JSON.stringify(allUrls)}`);
+
       const is24Pages = pages.filter(p => {
-        const url = p.url();
-        return url.includes('immobilienscout24.de') && !url.includes('sso.immobilienscout24.de');
+        try {
+          const url = p.url();
+          return url.includes('immobilienscout24.de') && !url.includes('sso.immobilienscout24.de');
+        } catch { return false; }
       });
-      if (is24Pages.length === 0) return true; // no IS24 tabs — assume OK, apply() will catch
+      diagLog(`[contactor:loginCheck] found ${is24Pages.length} IS24 pages (excl. SSO)`);
+      if (is24Pages.length === 0) { diagLog('[contactor:loginCheck] no IS24 tabs — assuming OK, apply() will catch'); return true; }
+
+      // Dump DOM state of every IS24 page
+      for (const [i, page] of is24Pages.entries()) {
+        try {
+          const snap = await page.evaluate(domSnapshot());
+          diagLog(`[contactor:loginCheck] page[${i}] DOM: ${snap}`);
+        } catch (err) {
+          diagLog(`[contactor:loginCheck] page[${i}] DOM snapshot failed: ${err.message}`);
+        }
+      }
+
+      // If .sso-login hasn't rendered yet on any IS24 page, the page is still
+      // hydrating. Retry up to 5 times (2.5s total) before falling through.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        let allReady = true;
+        for (const page of is24Pages) {
+          try {
+            const ready = await page.evaluate(hasSsoLogin());
+            if (!ready) { allReady = false; break; }
+          } catch { /* skip stale pages */ }
+        }
+        if (allReady) {
+          diagLog(`[contactor:loginCheck] .sso-login found on all pages after ${attempt} retries (${Date.now() - t0}ms)`);
+          break;
+        }
+        if (attempt < 4) {
+          diagLog(`[contactor:loginCheck] .sso-login not ready — retry ${attempt + 1}/4`);
+          await new Promise(r => setTimeout(r, 500));
+        } else {
+          diagLog(`[contactor:loginCheck] .sso-login STILL not ready after 5 attempts (${Date.now() - t0}ms) — falling through`);
+        }
+      }
+
       for (const page of is24Pages) {
         try {
-          const loggedIn = await page.evaluate(evaluateLogin);
-          if (!loggedIn) return false;
-        } catch { /* skip stale/closed pages */ }
+          const loggedIn = await page.evaluate(evaluateLogin());
+          diagLog(`[contactor:loginCheck] page ${page.url()} → loggedIn=${loggedIn}`);
+          if (!loggedIn) {
+            diagLog(`[contactor:loginCheck] RESULT: false (page ${page.url()} reports NOT logged in) — elapsed=${Date.now() - t0}ms`);
+            return false;
+          }
+        } catch (err) {
+          diagLog(`[contactor:loginCheck] page ${page.url()} evaluate failed: ${err.message}`);
+        }
       }
+      diagLog(`[contactor:loginCheck] RESULT: true (all IS24 pages report logged in) — elapsed=${Date.now() - t0}ms`);
       return true;
-    } catch { return true; } // can't check — don't block
+    } catch (err) {
+      diagLog(`[contactor:loginCheck] outer try/catch caught: ${err.message} — returning true (don't block)`);
+      return true;
+    } // can't check — don't block
   }
 
   async _isBlocked() {

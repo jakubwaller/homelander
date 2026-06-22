@@ -2,7 +2,7 @@
 // Owns one Puppeteer-managed Chromium profile, keeps CDP available for the daemon,
 // and controls browser visibility without touching user-owned tabs.
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -32,6 +32,20 @@ function getProfileDir(email) {
   return join(homedir(), '.homelander', 'chrome-profiles', `profile-${hash}`);
 }
 
+function logCookiesState(label, profileDir) {
+  try {
+    const cookiesPath = join(profileDir, 'Default', 'Cookies');
+    if (!existsSync(cookiesPath)) {
+      console.log(`[chrome:cookies] ${label} — Cookies file MISSING at ${cookiesPath}`);
+      return;
+    }
+    const stat = statSync(cookiesPath);
+    console.log(`[chrome:cookies] ${label} — size=${stat.size} mtime=${stat.mtime.toISOString()} mtimeMs=${stat.mtimeMs}`);
+  } catch (err) {
+    console.log(`[chrome:cookies] ${label} — stat failed: ${err.message}`);
+  }
+}
+
 function clampMaxTabs(maxTabs) {
   const n = Number(maxTabs || DEFAULT_MAX_TABS);
   return Math.min(5, Math.max(1, Number.isFinite(n) ? Math.floor(n) : DEFAULT_MAX_TABS));
@@ -55,14 +69,29 @@ export class ChromeManager {
   }
 
   async launch(email, options = {}) {
+    const t0 = Date.now();
     const opts = this._options(options);
     this.profileDir = getProfileDir(email);
+    console.log(`[chrome:launch] email=${email} profileDir=${this.profileDir} manualLoginRunning=${this.isManualLoginRunning()}`);
+    logCookiesState('launch-entry', this.profileDir);
 
-    if (this.isManualLoginRunning()) {
-      await this.stopManualLoginProcess();
+    // If CDP is already running (e.g. setup browser still alive), connect to it.
+    // No kill + relaunch — the session stays alive in the running browser.
+    const healthy = await this.isHealthy();
+    console.log(`[chrome:launch] isHealthy=${healthy} (${Date.now() - t0}ms elapsed)`);
+    if (healthy) {
+      console.log('[chrome:launch] CDP already healthy — connecting to existing browser (setup session preserved)');
+      await this._connectExisting().catch((err) => { swallow(err, 'chrome/connect-existing'); });
+      if (opts.visibility === 'always_show') await this.showBrowser();
+      else await this.hideBrowser().catch((err) => { swallow(err, 'chrome/hide-browser'); });
+      return this._versionInfo();
     }
 
-    if (await this.isHealthy()) {
+    // CDP not running — maybe manual login browser was configured but
+    // never started. Start it fresh.
+    if (this.isManualLoginRunning()) {
+      console.log('[chrome:launch] manual login running but CDP not healthy — waiting for CDP');
+      await this._waitForCdp(15000);
       await this._connectExisting().catch((err) => { swallow(err, 'chrome/connect-existing'); });
       if (opts.visibility === 'always_show') await this.showBrowser();
       else await this.hideBrowser().catch((err) => { swallow(err, 'chrome/hide-browser'); });
@@ -82,6 +111,8 @@ export class ChromeManager {
     }
     this._restartWindow.push(now);
 
+    console.log(`[chrome:launch] puppeteer.launch() starting... userDataDir=${this.profileDir}`);
+    const launchT0 = Date.now();
     this.browser = await puppeteer.launch({
       executablePath,
       headless: false,
@@ -108,23 +139,84 @@ export class ChromeManager {
         '--disable-features=NetworkServiceSandbox',
       ],
     });
+    console.log(`[chrome:launch] puppeteer.launch() done in ${Date.now() - launchT0}ms`);
+    logCookiesState('launch-after-puppeteer', this.profileDir);
 
-    this.browser.on('disconnected', () => { this.browser = null; });
+    // --remote-debugging-port causes Chromium to set navigator.webdriver=true
+    // regardless of --disable-blink-features=AutomationControlled. IS24 detects
+    // this and treats the browser as a bot, invalidating the session. Inject
+    // the override on every existing page and all future pages.
+    const injectWebdriverOverride = async (page) => {
+      try {
+        await page.evaluateOnNewDocument(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        });
+      } catch { /* page might close before injection */ }
+    };
+    // Apply to all existing pages
+    for (const p of await this.browser.pages()) {
+      await injectWebdriverOverride(p).catch(() => {});
+    }
+    // Apply to every new page that opens
+    this.browser.on('targetcreated', async (target) => {
+      if (target.type() === 'page') {
+        try {
+          const p = await target.page();
+          if (p) await injectWebdriverOverride(p);
+        } catch { /* target might close */ }
+      }
+    });
+    console.log('[chrome:launch] injected navigator.webdriver=false for all pages');
 
+    this.browser.on('disconnected', () => { console.log('[chrome:launch] browser disconnected event'); this.browser = null; });
+
+    console.log('[chrome:launch] waiting for CDP...');
+    const cdpT0 = Date.now();
     await this._waitForCdp(30000);
+    console.log(`[chrome:launch] CDP ready in ${Date.now() - cdpT0}ms`);
     const pages = await this.browser.pages();
-    if (pages.length === 0) await this.browser.newPage();
+    console.log(`[chrome:launch] browser has ${pages.length} pages: ${pages.map(p => p.url()).join(', ')}`);
+    if (pages.length === 0) { console.log('[chrome:launch] no pages — creating new page'); await this.browser.newPage(); }
     const page = (await this.browser.pages())[0];
     if (page && page.url() === 'about:blank') {
+      console.log('[chrome:launch] page is about:blank — navigating to IS24');
+      const navT0 = Date.now();
       await page.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch((err) => { swallow(err, 'chrome/navigate-is24-home'); });
+      console.log(`[chrome:launch] IS24 navigation done in ${Date.now() - navT0}ms, url now: ${page.url()}`);
     }
+    console.log(`[chrome:launch] total launch time: ${Date.now() - t0}ms`);
     return this._versionInfo();
   }
 
   async _connectExisting() {
     if (this.browser?.isConnected?.()) return this.browser;
     this.browser = await puppeteer.connect({ browserURL: this.cdpUrl, defaultViewport: null });
-    this.browser.on('disconnected', () => { this.browser = null; });
+    this.browser.on('disconnected', () => { console.log('[chrome] browser disconnected'); this.browser = null; });
+
+    // Spoof navigator.webdriver on ALL pages (existing + future).
+    // --remote-debugging-port forces webdriver=true in Chrome 148+;
+    // IS24 checks this and rejects sessions from automated browsers.
+    const spoofWebdriver = async (page) => {
+      try {
+        await page.evaluateOnNewDocument(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        });
+        await page.evaluate(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        });
+      } catch { /* page may close before injection */ }
+    };
+    const pages = await this.browser.pages();
+    for (const page of pages) {
+      await spoofWebdriver(page).catch(() => {});
+    }
+    this.browser.on('targetcreated', async (target) => {
+      if (target.type() === 'page') {
+        const page = await target.page().catch(() => null);
+        if (page) await spoofWebdriver(page).catch(() => {});
+      }
+    });
+
     return this.browser;
   }
 
@@ -204,38 +296,50 @@ export class ChromeManager {
     return !!this.manualLoginProcess && this.manualLoginProcess.exitCode === null && !this.manualLoginProcess.killed;
   }
 
-  async stopManualLoginProcess(timeoutMs = 2500) {
+  async stopManualLoginProcess(timeoutMs = 20000) {
     const proc = this.manualLoginProcess;
+    console.log(`[chrome:stopManual] called — proc=${!!proc} pid=${proc?.pid} exitCode=${proc?.exitCode} killed=${proc?.killed}`);
     if (!proc) return;
     if (proc.exitCode !== null || proc.killed) {
+      console.log(`[chrome:stopManual] process already exited (exitCode=${proc.exitCode}, killed=${proc.killed}) — clearing ref`);
       this.manualLoginProcess = null;
       return;
     }
 
+    const t0 = Date.now();
+    console.log(`[chrome:stopManual] sending SIGTERM to pid ${proc.pid}...`);
+    try { proc.kill('SIGTERM'); } catch (err) { console.log(`[chrome:stopManual] SIGTERM failed: ${err.message}`); this.manualLoginProcess = null; return; }
+
     await new Promise((resolve) => {
       let settled = false;
-      const done = () => {
+      const done = (reason) => {
         if (settled) return;
         settled = true;
+        const elapsed = Date.now() - t0;
         clearTimeout(killTimer);
-        clearTimeout(doneTimer);
+        console.log(`[chrome:stopManual] done — reason=${reason} elapsed=${elapsed}ms exitCode=${proc.exitCode} killed=${proc.killed}`);
         if (this.manualLoginProcess === proc) this.manualLoginProcess = null;
         resolve();
       };
       const killTimer = setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch (err) { swallow(err, 'chrome/sigkill-manual-login'); }
-      }, Math.max(500, timeoutMs - 500));
-      const doneTimer = setTimeout(done, timeoutMs);
-      proc.once('exit', done);
-      try { proc.kill('SIGTERM'); } catch { done(); }
+        console.log(`[chrome:stopManual] ${timeoutMs}ms elapsed — sending SIGKILL to pid ${proc.pid}`);
+        try { proc.kill('SIGKILL'); } catch (err) { console.log(`[chrome:stopManual] SIGKILL failed: ${err.message}`); }
+        done('timeout-sigkill');
+      }, timeoutMs);
+      proc.once('exit', (code, signal) => {
+        console.log(`[chrome:stopManual] process exited — code=${code} signal=${signal} elapsed=${Date.now() - t0}ms`);
+        done('exit');
+      });
     });
   }
 
   async openManualLoginPage(email, options = {}) {
+    console.log(`[chrome:openManualLogin] called — email=${email}`);
     // When CDP is already running (e.g. session-expired re-login), don't
     // restart the browser — just open a fresh IS24 tab via CDP and show it.
     // Avoids killing the daemon's CDP connection, works cross-platform.
     if (await this.isHealthy()) {
+      console.log('[chrome:openManualLogin] CDP healthy — opening login tab via existing browser');
       try {
         const browser = await this._connectExisting();
         await browser.newPage();
@@ -246,11 +350,13 @@ export class ChromeManager {
         await this.showBrowser();
         return { cdpConnected: true, manualLogin: false };
       } catch {
+        console.log('[chrome:openManualLogin] CDP tab open failed — falling through to manual browser');
         // CDP navigation failed — fall through to manual-browser path
       }
     }
 
     this.profileDir = getProfileDir(email);
+    console.log(`[chrome:openManualLogin] profileDir=${this.profileDir}`);
     mkdirSync(this.profileDir, { recursive: true });
 
     // Login/SSO pages are more aggressive than expose pages. Opening login via
@@ -259,16 +365,21 @@ export class ChromeManager {
     // Chromium profile as a plain user-started process: no CDP, no Puppeteer
     // connection, no --enable-automation. The manual browser stays open
     // after login; CDP launches later when the daemon starts.
-    if (await this.isHealthy()) await this.shutdown();
-    if (this.isManualLoginRunning()) return { manualLogin: true, profileDir: this.profileDir };
+    if (await this.isHealthy()) { console.log('[chrome:openManualLogin] CDP became healthy — shutting down first'); await this.shutdown(); }
+    if (this.isManualLoginRunning()) { console.log('[chrome:openManualLogin] manual login already running'); return { manualLogin: true, profileDir: this.profileDir }; }
 
     const executablePath = getBundledChromiumPath();
     if (!executablePath) {
       throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
     }
 
+    // Launch with CDP enabled so the daemon can connect to the SAME browser
+    // process later — no kill + relaunch, no session loss.
+    console.log(`[chrome:openManualLogin] spawning Chromium with CDP — userDataDir=${this.profileDir}`);
     this.manualLoginProcess = spawn(executablePath, [
       `--user-data-dir=${this.profileDir}`,
+      `--remote-debugging-port=${CDP_PORT}`,
+      '--disable-blink-features=AutomationControlled',
       '--no-first-run',
       '--no-default-browser-check',
       '--window-size=1200,850',
@@ -277,17 +388,29 @@ export class ChromeManager {
       detached: false,
       stdio: 'ignore',
     });
-    this.manualLoginProcess.once('exit', () => { this.manualLoginProcess = null; });
+    console.log(`[chrome:openManualLogin] spawned — pid=${this.manualLoginProcess.pid}`);
+    this.manualLoginProcess.once('exit', (code, signal) => {
+      console.log(`[chrome:openManualLogin] manual browser exited — code=${code} signal=${signal}`);
+      this.manualLoginProcess = null;
+    });
     this.manualLoginProcess.unref();
     return { manualLogin: true, profileDir: this.profileDir };
   }
 
   async finalizeManualLogin(email, options = {}) {
-    // The login cookies/profile are persisted on disk. Close the plain manual
-    // browser before CDP startup; Chromium refuses to open the same profile in a
-    // second process and exits with "Wird in einer aktuellen Browsersitzung geöffnet.".
-    await this.stopManualLoginProcess();
-    return { manualLogin: false, cdpHealthy: false };
+    console.log(`[chrome:finalizeManualLogin] called — manualLoginRunning=${this.isManualLoginRunning()}`);
+    logCookiesState('finalize-before', this.profileDir);
+    // DO NOT kill the browser. The daemon will connect to this same CDP-enabled
+    // Chromium via puppeteer.connect() — no process restart, no session loss.
+    // The login cookies/profile stay alive in the running browser.
+    if (!(await this.isHealthy())) {
+      console.log('[chrome:finalizeManualLogin] CDP not healthy yet — waiting for browser to start');
+      await this._waitForCdp(10000);
+      console.log(`[chrome:finalizeManualLogin] CDP healthy=${await this.isHealthy()}`);
+    }
+    logCookiesState('finalize-after', this.profileDir);
+    console.log('[chrome:finalizeManualLogin] done — browser still running, daemon will connect');
+    return { manualLogin: false, cdpHealthy: await this.isHealthy() };
   }
 
   async openListing(exposeIdOrUrl, email, options = {}) {

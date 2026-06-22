@@ -238,7 +238,7 @@
     "is24LaunchingStatus": "Chromium wird geöffnet…",
     "is24LaunchingDesc": "Chromium startet.",
     "is24WaitingStatus": "Anmelden, dann fortfahren",
-    "is24WaitingDesc": "Klicke erst auf Weiter, wenn IS24 dich als angemeldet anzeigt.",
+    "is24WaitingDesc": "Klicke erst auf Weiter, wenn IS24 dich als angemeldet anzeigt. Das Chromium-Fenster nicht schließen oder verstecken.",
     "is24PreparingStatus": "Sitzung wird gespeichert…",
     "is24PreparingDesc": "Diese Anmeldung wird für zukünftige Bewerbungen gespeichert.",
     "is24ClosedStatus": "Chromium geschlossen",
