@@ -196,11 +196,8 @@ async function applyOne(listing, filterId, db) {
     // ── Per-form login check — scans ALL open IS24 tabs, opens one if needed ──
     if (!applyPaused && contactor && contactor.browser && contactor.browser.isConnected()) {
       try {
-        log(`[daemon:applyOne] running per-form login check for ${listing.expose_id}...`);
         const loggedIn = await contactor.checkIS24LoginAnyTab();
-        log(`[daemon:applyOne] login check result for ${listing.expose_id}: ${loggedIn}`);
         if (!loggedIn) {
-          log(`[daemon:applyOne] LOGIN CHECK FAILED for ${listing.expose_id} — emitting session_expired`);
           log('*** IS24 login check failed before form submit — pausing apply ***');
           emit({ type: 'session_expired', reason: 'IS24 login check failed — no logged-in IS24 tab found' });
           applyPaused = true;
@@ -344,25 +341,6 @@ async function applyLoop(db) {
   DEBUG.prune(50);
 
   log('Apply loop started');
-
-  // Give IS24 page time to hydrate before the first login check.
-  // At startup the page was just navigated to; React hydration and the
-  // .sso-login header take 2-5 seconds after domcontentloaded.
-  if (contactor && contactor.browser && contactor.browser.isConnected()) {
-    log(`[daemon:applyLoop] page is ${contactor.page?.url()} — waiting 3s for hydration`);
-    await new Promise(r => setTimeout(r, 3000));
-    log(`[daemon:applyLoop] startup delay done — page now: ${contactor.page?.url()}`);
-
-    // Do an immediate login check and log the result for diagnostics
-    try {
-      const preCheck = await contactor.checkIS24LoginAnyTab();
-      log(`[daemon:applyLoop] startup login check: ${preCheck}`);
-    } catch (err) {
-      log(`[daemon:applyLoop] startup login check failed: ${err.message}`);
-    }
-  } else {
-    log(`[daemon:applyLoop] contactor not ready — skipping startup delay (browser=${!!contactor?.browser} connected=${contactor?.browser?.isConnected?.()})`);
-  }
 
   while (true) {
     // ── Detect wake from sleep — force CDP reconnect ──────────
@@ -730,7 +708,6 @@ function setupIpc(db) {
 // ── Main ───────────────────────────────────────────────────────
 
 async function main() {
-  const mainT0 = Date.now();
   log('Homelander daemon starting...');
 
   // Ensure data directory exists
@@ -745,15 +722,12 @@ async function main() {
   // Load config
   currentConfig = loadConfig();
   log(`Config loaded: ${currentConfig.persona?.email || 'unknown'}, speed=${currentConfig.timing?.speed || 'balanced'}`);
-  log(`[daemon:main] config loaded — email=${currentConfig.persona?.email} is24Email=${currentConfig.is24?.email} (${Date.now() - mainT0}ms)`);
 
   // Open database
   const db = new HomelanderDB(DB_PATH);
   log('Database opened');
-  log(`[daemon:main] DB opened (${Date.now() - mainT0}ms)`);
 
   // Connect to Chrome
-  log(`[daemon:main] connecting to CDP at ${CDP_URL}...`);
   try {
     contactor = new IS24Contactor(
       CDP_URL,
@@ -762,35 +736,27 @@ async function main() {
       currentConfig.timing?.overrides || {},
       { api_key: currentConfig.captcha?.api_key || '' }
     );
-    const connectT0 = Date.now();
     await contactor.connect();
-    log(`[daemon:main] CDP connected in ${Date.now() - connectT0}ms — contactor.page.url=${contactor.page?.url()}`);
     log('Chrome CDP connected');
   } catch (err) {
     log(`Chrome CDP connection failed: ${err.message}`);
-    log(`[daemon:main] CDP connection FAILED: ${err.message} (${Date.now() - mainT0}ms)`);
     emit({ type: 'error', message: `Chrome unavailable: ${err.message}` });
     contactor = null;
   }
 
   // Set up IPC from Electron parent
   setupIpc(db);
-  log(`[daemon:main] IPC set up (${Date.now() - mainT0}ms)`);
 
   // ── Check for persisted pause flag ─────────────────────────
   if (checkPauseFlag()) {
     applyPaused = true;
     pauseResumeTime = null;
     log('Starting in paused state (pause flag found on disk)');
-    log('[daemon:main] pause flag found — starting paused');
     emit({ type: 'paused', reason: 'manual' });
-  } else {
-    log('[daemon:main] no pause flag — starting active');
   }
 
   // ── Start both independent loops ───────────────────────────
   log('Starting poll + apply loops...');
-  log(`[daemon:main] launching pollLoop + applyLoop (${Date.now() - mainT0}ms)`);
   await Promise.all([
     pollLoop(db),
     applyLoop(db),

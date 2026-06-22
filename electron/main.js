@@ -820,9 +820,7 @@ function registerIpcHandlers() {
 
       // Launch Chrome first
       const email = config?.is24?.email || config?.persona?.email || 'default';
-      console.log(`[main:daemon:start] launching chrome with email=${email} profileDir=${chromeManager.profileDir} manualLoginRunning=${chromeManager.isManualLoginRunning()}`);
       await chromeManager.launch(email, browserOptions());
-      console.log(`[main:daemon:start] chrome launched — profileDir=${chromeManager.profileDir}`);
       // Then start the daemon
       startDaemon();
     } catch (err) {
