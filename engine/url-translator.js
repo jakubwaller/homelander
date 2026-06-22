@@ -578,8 +578,10 @@ export function parseSearchUrl(webUrl) {
         const correctedValue = mappedKey === 'exclusioncriteria'
           ? splitValues(value).map(v => EXCLUSION_CRITERIA_CORRECTIONS[v.toLowerCase()] || v).join(',')
           : value;
-        canonical.directParams.push({ key: mappedKey, value: correctedValue });
-        // Populate structured canonical fields from query params
+        // Populate structured canonical fields from query params (skip directParams
+        // for fields that buildMobileApiUrl already outputs from canonical structure)
+        const skipDirect = mappedKey === 'newbuilding' || mappedKey === 'fulltext' || mappedKey === 'apartmenttypes';
+        if (!skipDirect) canonical.directParams.push({ key: mappedKey, value: correctedValue });
         if (mappedKey === 'newbuilding') canonical.construction.newBuildingOnly = true;
         if (mappedKey === 'fulltext') canonical.fullText = String(value);
         if (mappedKey === 'apartmenttypes') canonical.apartmentTypes = splitValues(value);
@@ -638,11 +640,21 @@ export function buildMobileApiUrl(canonical, { page = 1, pageSize = 20, includeL
   if (canonical.equipment?.length) {
     params.set('equipment', canonical.equipment.map(v => EQUIPMENT_MOBILE_VALUE[v] || v).join(','));
   }
-  for (const { key, value } of canonical.directParams || []) params.append(key, value);
+  for (const { key, value } of canonical.directParams || []) {
+    // Merge exclusioncriteria values into a single comma-separated param
+    if (key === 'exclusioncriteria') continue; // handled below
+    params.append(key, value);
+  }
+  // Collect all exclusion criteria: from directParams + swap_flat
+  const exclValues = (canonical.directParams || [])
+    .filter(p => p.key === 'exclusioncriteria')
+    .map(p => p.value)
+    .flatMap(v => v.split(','));
+  if (canonical.excludeSwapFlat) exclValues.push('swap_flat');
+  if (exclValues.length) params.set('exclusioncriteria', exclValues.join(','));
   if (canonical.apartmentTypes?.length) {
     params.append('apartmenttypes', canonical.apartmentTypes.join(','));
   }
-  if (canonical.excludeSwapFlat) params.append('exclusioncriteria', 'swap_flat');
   if (includeListControls) {
     params.set('sorting', '-firstactivation');
     params.set('pagenumber', String(page));
