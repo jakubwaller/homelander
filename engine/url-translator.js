@@ -322,6 +322,7 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   startrentaldate: 'rental start date',
   furniture: 'furnished',
   rentalduration: 'rental duration',
+  wohnberechtigungsscheinneeded: 'WBS required',
 };
 
 // IS24 search type slugs that the mobile API has no realestatetype for.
