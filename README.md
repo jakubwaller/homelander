@@ -95,7 +95,7 @@ All settings editable from the Settings tab:
 - **Persona** — your contact details
 - **Message template** — use `{{title}}`, `{{address}}`, `{{name}}` as placeholders
 - **Timing** — speed preset (fast/balanced/slow), poll interval, send limits
-- **2captcha API key** — stored encrypted on your machine
+- **2captcha API key** — stored encrypted in your OS keychain
 
 Config is stored at `~/.homelander/config.json`.
 

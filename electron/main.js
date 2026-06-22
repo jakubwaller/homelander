@@ -2,7 +2,7 @@
 // Manages app lifecycle, BrowserWindow, daemon child process,
 // Chrome lifecycle, config, and IPC bridge to renderer.
 
-import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, shell, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, shell, clipboard, safeStorage } from 'electron';
 import { fork, spawnSync, spawn, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, readdirSync, statSync, cpSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -12,6 +12,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { ChromeManager } from './chrome.js';
 import { createSupportId, rawErrorText, redact, toUserError } from '../src/shared/userErrors.js';
+import { openSharedDb, closeSharedDb, db } from './db-service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -42,6 +43,7 @@ const DAEMON_LOG = join(DATA_DIR, 'daemon.log');
 const CDP_URL = 'http://localhost:9222';
 const PAUSE_FLAG = join(DATA_DIR, '.apply-paused');
 const SUPPORT_DIR = join(DATA_DIR, 'support-bundles');
+openSharedDb(DB_PATH);
 const DEBUG_DIR = join(DATA_DIR, 'debug');
 const APP_ICON_PNG = process.resourcesPath
   ? join(process.resourcesPath, 'icon.png')
@@ -72,6 +74,10 @@ function loadConfig() {
     const raw = readFileSync(CONFIG_PATH, 'utf8');
     config = JSON.parse(raw);
     setupComplete = config._setupComplete || false;
+    // Decrypt secrets that were encrypted with safeStorage
+    if (safeStorage.isEncryptionAvailable()) {
+      decryptConfigSecrets(config);
+    }
     return config;
   } catch {
     config = getDefaultConfig();
@@ -82,7 +88,52 @@ function loadConfig() {
 
 function saveConfig() {
   ensureDataDir();
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+  const toWrite = JSON.parse(JSON.stringify(config));  // deep clone
+  // Encrypt secrets before writing to disk
+  if (safeStorage.isEncryptionAvailable()) {
+    encryptConfigSecrets(toWrite);
+  }
+  writeFileSync(CONFIG_PATH, JSON.stringify(toWrite, null, 2), 'utf8');
+}
+
+// ── safeStorage wrappers for secrets ─────────────────────────────
+
+const ENCRYPTED_PREFIX = '_safeStorage:';
+
+function encryptConfigSecrets(cfg) {
+  const secretFields = [
+    ['captcha', 'api_key'],
+    ['is24', 'password'],
+  ];
+  for (const [section, key] of secretFields) {
+    const val = cfg[section]?.[key];
+    if (val && typeof val === 'string' && !val.startsWith(ENCRYPTED_PREFIX)) {
+      try {
+        cfg[section][key] = ENCRYPTED_PREFIX + safeStorage.encryptString(val).toString('base64');
+      } catch (err) {
+        swallow(err, 'config/encrypt-secret');
+      }
+    }
+  }
+}
+
+function decryptConfigSecrets(cfg) {
+  const secretFields = [
+    ['captcha', 'api_key'],
+    ['is24', 'password'],
+  ];
+  for (const [section, key] of secretFields) {
+    const val = cfg[section]?.[key];
+    if (val && typeof val === 'string' && val.startsWith(ENCRYPTED_PREFIX)) {
+      try {
+        const buf = Buffer.from(val.slice(ENCRYPTED_PREFIX.length), 'base64');
+        cfg[section][key] = safeStorage.decryptString(buf);
+      } catch (err) {
+        swallow(err, 'config/decrypt-secret');
+        cfg[section][key] = '';  // clear unrecoverable ciphertext
+      }
+    }
+  }
 }
 
 
@@ -237,10 +288,8 @@ async function createSupportBundle(payload = {}) {
   let dbListing = null;
   if (exposeId) {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      try { dbListing = db.getHistory(5000, 0).find((row) => String(row.expose_id) === String(exposeId)) || null; }
-      finally { db.close(); }
+      try { dbListing = db().getHistory(5000, 0).find((row) => String(row.expose_id) === String(exposeId)) || null; }
+      catch (err) { swallow(err, 'main/support-bundle-db-lookup'); }
     } catch (err) { swallow(err, 'main/support-bundle-db-lookup'); }
   }
 
@@ -568,7 +617,7 @@ function getNextPollAt(db) {
 
   const pollIntervalMsValue = pollIntervalMs();
   try {
-    const filters = db.getFilters();
+    const filters = db().getFilters();
     const lastPoll = filters.reduce((max, f) => {
       const t = f.last_polled_at ? new Date(f.last_polled_at).getTime() : 0;
       return t > max ? t : max;
@@ -819,11 +868,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('daemon:poll-now', async (_event, filterId) => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const { fetchListings } = await import('../engine/url-translator.js');
-      const db = new HomelanderDB(DB_PATH);
+            const { fetchListings } = await import('../engine/url-translator.js');
       try {
-        const filter = db.getFilter(filterId);
+        const filter = db().getFilter(filterId);
         if (!filter) return { ok: false, error: 'Suche nicht gefunden' };
         if (!filter.enabled) return { ok: false, error: 'Suche ist pausiert' };
 
@@ -840,20 +887,20 @@ function registerIpcHandlers() {
           const { listings, error } = await fetchListings(filter.web_url, page);
           if (error) break;
           allFetched += listings.length;
-          const inserted = db.insertListings(listings, filter.id);
+          const inserted = db().insertListings(listings, filter.id);
           allInserted += inserted;
           if (listings.length < PAGE_SIZE) break;
           if (inserted === 0) break;
         }
 
-        db.updateFilter(filter.id, {
+        db().updateFilter(filter.id, {
           last_polled_at: new Date().toISOString(),
           total_seen: (filter.total_seen || 0) + allInserted,
         });
 
         const nextPollAt = setNextPollFromNow('manual_poll');
         resetDaemonPollSchedule('manual_poll_finished');
-        const stats = { ...db.getTodayStats(), nextPollAt, next_poll_at: nextPollAt };
+        const stats = { ...db().getTodayStats(), nextPollAt, next_poll_at: nextPollAt };
         broadcastStats(stats);
         if (mainWindow) {
           if (allInserted > 0) {
@@ -867,7 +914,6 @@ function registerIpcHandlers() {
 
         return { ok: true, inserted: allInserted, fetched: allFetched };
       } finally {
-        db.close();
       }
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:poll-now', err, { code: 'SEARCH_POLL_FAILED' }) };
@@ -882,13 +928,11 @@ function registerIpcHandlers() {
     }
     // Fallback: direct DB access when daemon not running
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      try {
-        const result = db.retryListing(exposeId);
+            try {
+        const result = db().retryListing(exposeId);
         if (result.error) return { ok: false, ...gracefulFailure('daemon:retry-listing', new Error(result.error), { code: 'LISTING_RETRY_FAILED', exposeId }) };
         return { ok: true, error: null };
-      } finally { db.close(); }
+      } finally { }
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:retry-listing', err, { code: 'LISTING_RETRY_FAILED', exposeId }) };
     }
@@ -897,10 +941,7 @@ function registerIpcHandlers() {
   // Filters
   ipcMain.handle('filters:list', async () => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      const filters = db.getFilters();
-      db.close();
+            const filters = db().getFilters();
       return { filters, error: null };
     } catch (err) {
       return { filters: [], ...gracefulFailure('filters:list', err, { code: 'DATABASE_ERROR' }) };
@@ -918,17 +959,14 @@ function registerIpcHandlers() {
         };
       }
 
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      const id = randomUUID();
-      db.addFilter({
+            const id = randomUUID();
+      db().addFilter({
         id,
         name: name || '',
         web_url: webUrl,
         mobile_params: validation.mobileUrl,
       });
-      const filter = db.getFilter(id);
-      db.close();
+      const filter = db().getFilter(id);
       return { filter, error: null };
     } catch (err) {
       return gracefulFailure('ipc action', err);
@@ -937,10 +975,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('filters:remove', async (_e, id) => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      db.removeFilter(id);
-      db.close();
+            db().removeFilter(id);
       return { error: null };
     } catch (err) {
       return gracefulFailure('filters:remove', err, { code: 'DATABASE_ERROR', filterId: id });
@@ -949,10 +984,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('filters:update', async (_e, id, patch) => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      db.updateFilter(id, patch);
-      db.close();
+            db().updateFilter(id, patch);
       return { error: null };
     } catch (err) {
       return gracefulFailure('filters:update', err, { code: 'DATABASE_ERROR', filterId: id });
@@ -979,10 +1011,7 @@ function registerIpcHandlers() {
   // Listings
   ipcMain.handle('listings:history', async (_e, limit, offset, filterId, outcome) => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      const listings = db.getHistory(limit || 100, offset || 0, filterId, outcome);
-      db.close();
+            const listings = db().getHistory(limit || 100, offset || 0, filterId, outcome);
       return { listings, error: null };
     } catch (err) {
       return { listings: [], ...gracefulFailure('listings:history', err, { code: 'DATABASE_ERROR' }) };
@@ -991,12 +1020,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('listings:stats', async (_event, filterId) => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      const stats = db.getStats(filterId || null);
-      const recent = db.getRecentActivity(20);
+            const stats = db().getStats(filterId || null);
+      const recent = db().getRecentActivity(20);
       const nextPollAt = getNextPollAt(db);
-      db.close();
       return { stats: { ...stats, nextPollAt }, recent, error: null };
     } catch (err) {
       return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, recent: [], ...gracefulFailure('listings:stats', err, { code: 'DATABASE_ERROR' }) };
@@ -1005,11 +1031,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('listings:todayStats', async (_event, filterId) => {
     try {
-      const { HomelanderDB } = await import('../engine/db.js');
-      const db = new HomelanderDB(DB_PATH);
-      const stats = db.getTodayStats(filterId || null);
+            const stats = db().getTodayStats(filterId || null);
       const nextPollAt = getNextPollAt(db);
-      db.close();
       return { stats: { ...stats, nextPollAt }, error: null };
     } catch (err) {
       return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, ...gracefulFailure('listings:todayStats', err, { code: 'DATABASE_ERROR' }) };
@@ -1040,12 +1063,9 @@ function registerIpcHandlers() {
       if (pollIntervalChanged) {
         const nextPollAt = setNextPollFromNow('poll_interval_changed');
         if (nextPollAt) {
-          const { HomelanderDB } = await import('../engine/db.js');
-          const db = new HomelanderDB(DB_PATH);
-          try {
-            broadcastStats({ ...db.getStats(), nextPollAt, next_poll_at: nextPollAt, reason: 'poll_interval_changed' });
+                    try {
+            broadcastStats({ ...db().getStats(), nextPollAt, next_poll_at: nextPollAt, reason: 'poll_interval_changed' });
           } finally {
-            db.close();
           }
         }
       }
@@ -1261,6 +1281,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  closeSharedDb();
   app.isQuitting = true;
   stopDaemon();
   chromeManager.shutdown().catch((err) => { swallow(err, 'main/chrome-shutdown-close'); });

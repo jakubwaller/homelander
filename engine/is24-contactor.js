@@ -305,9 +305,13 @@ export class IS24Contactor {
       const { verified, detail } = await this._verifySubmission(exposeId, captcha);
       timing.verify_ms = Date.now() - tVerify;
 
-      // Dump page HTML AFTER verification
+      // Dump page HTML AFTER verification (strip form values for privacy)
       try {
-        const html = await this.page.content();
+        let html = await this.page.content();
+        // Strip PII: remove input values and textarea contents
+        html = html.replace(/\svalue="[^"]*"/gi, ' value=""');
+        html = html.replace(/\svalue='[^']*'/gi, " value=''");
+        html = html.replace(/(<textarea[^>]*>)[\s\S]*?(<\/textarea>)/gi, '$1$2');
         const htmlDir = DEBUG.htmlDir();
         const outcomeTag = verified ? 'SENT' : (detail.includes('captcha') ? 'CAPTCHA_FAIL' : 'FAIL');
         writeFileSync(join(htmlDir, `${exposeId}_${outcomeTag}.html`), html, 'utf8');
