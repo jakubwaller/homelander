@@ -317,6 +317,19 @@ async function applyOne(listing, filterId, db) {
 // Polling is completely independent — it runs in pollLoop().
 
 async function applyLoop(db) {
+  // Restore captcha-wall pause if daemon restarted during cooldown
+  try {
+    if (existsSync(PAUSE_FLAG)) {
+      const data = JSON.parse(readFileSync(PAUSE_FLAG, 'utf8'));
+      if (data?.reason === 'captcha_wall') {
+        applyPaused = true;
+        pauseResumeTime = Date.now() + 15 * 60 * 1000;  // conservative restart
+        log('Restored captcha-wall pause from flag');
+        emit({ type: 'paused', reason: 'captcha_wall_restored', resume_in_sec: 900 });
+      }
+    }
+  } catch (err) { swallow(err, 'daemon/restore-captcha-pause'); }
+
   log('Apply loop started');
 
   while (true) {
@@ -429,6 +442,7 @@ async function applyLoop(db) {
         log('Captcha wall detected — pausing apply for 15 minutes');
         applyPaused = true;
         pauseResumeTime = Date.now() + 15 * 60 * 1000;
+        writePauseFlag('captcha_wall');
         emit({ type: 'captcha_wall', consecutive: consecutiveCaptchas });
         emit({ type: 'paused', reason: 'captcha_wall', resume_in_sec: 900 });
         break;

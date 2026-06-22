@@ -645,7 +645,7 @@ export async function fetchListings(webUrl, page = 1) {
       };
     });
 
-    return { listings, error: null, validation };
+    return { listings: listings.filter(l => l.expose_id), error: null, validation };
   } catch (err) {
     return { listings: [], error: err.message, validation };
   }

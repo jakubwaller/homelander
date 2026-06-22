@@ -246,6 +246,7 @@ export default function SearchTab() {
 
   // ── Countdown for next auto-poll ──────────────────────────────
   const [nextPollCountdown, setNextPollCountdown] = useState('');
+  const [configAppliedFlash, setConfigAppliedFlash] = useState(false);
 
   // ── Config-applied flash ─────────────────────────────────────
   useEffect(() => {
