@@ -343,6 +343,9 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   furnishing: 'furnishing',
   flatmategender: 'flatmate gender',
   garagetypes: 'garage type',
+  onlywithcookingpossibility: 'cooking possibility',
+  onlywithambulantnursingservice: 'ambulant nursing service',
+  assistedlivingcommercializationtype: 'commercialization type',
 };
 
 const EQUIPMENT_CHECKBOX_PARAMS = new Set([
