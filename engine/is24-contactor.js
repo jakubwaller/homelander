@@ -362,6 +362,7 @@ export class IS24Contactor {
 
         if (submitRetries < MAX_SUBMIT_RETRIES) {
           submitRetries++;
+          process.stderr.write(`[contactor] Submit retry #${submitRetries} — re-filling fields and re-submitting\n`);
           // Re-fill fields that IS24's React validation may have cleared
           fillResult = await this._fillForm(message);
           fieldCount += fillResult.filled;
