@@ -90,7 +90,9 @@ export class ChromeManager {
       ignoreDefaultArgs: ['--enable-automation'],
       args: [
         `--remote-debugging-port=${CDP_PORT}`,
-        opts.visibility === 'always_show' ? '--window-size=1200,850' : `--window-position=${DEFAULT_WINDOW_POSITION.left},${DEFAULT_WINDOW_POSITION.top}`,
+        ...(opts.visibility === 'always_show'
+          ? ['--window-size=1200,850']
+          : [`--window-position=${DEFAULT_WINDOW_POSITION.left},${DEFAULT_WINDOW_POSITION.top}`, '--inactive']),
         '--disable-blink-features=AutomationControlled',
         '--no-first-run',
         '--no-default-browser-check',
