@@ -186,15 +186,15 @@ export class HomelanderDB {
   }
 
   /** Reset a listing back to 'seen' so the apply loop picks it up again.
-   *  Preserves outcome/detail/failure_reason/sent_at so the listing
-   *  remains visible in history.  Returns { hash, already_seen } so
-   *  the caller can skip duplicate event emission. */
+   *  Clears outcome/detail/failure_reason/sent_at so the listing
+   *  disappears from history until the daemon re-processes it. */
   retryListing(exposeId) {
     const row = this.db.prepare('SELECT hash, status FROM listings WHERE expose_id = ?').get(exposeId);
     if (!row) return { error: 'Listing not found' };
     if (row.status === 'seen') return { hash: row.hash, already_seen: true };
     this.db.prepare(`
-      UPDATE listings SET status = 'seen'
+      UPDATE listings SET status = 'seen', outcome = NULL, detail = NULL, 
+        failure_reason = NULL, sent_at = NULL
       WHERE hash = ?
     `).run(row.hash);
     return { hash: row.hash };

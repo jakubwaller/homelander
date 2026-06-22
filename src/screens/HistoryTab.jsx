@@ -433,13 +433,25 @@ export default function HistoryTab() {
   // Listen for daemon listing events — refresh stats + listings while tab is active.
   useEffect(() => {
     if (!window.homelander) return;
-    const unsub = window.homelander.onListing(() => {
+    const unsubListing = window.homelander.onListing(() => {
       if (activeTab === 'history') {
         loadStats(filterId);
         fetchListingsRef.current?.(false);
       }
     });
-    return unsub;
+    // Also refresh when a retry is queued — the listing's outcome was cleared
+    // and should disappear from the current filter view immediately.
+    const onRetryQueued = () => {
+      if (activeTab === 'history') {
+        loadStats(filterId);
+        fetchListingsRef.current?.(false);
+      }
+    };
+    window.addEventListener('homelander:retry-queued', onRetryQueued);
+    return () => {
+      unsubListing();
+      window.removeEventListener('homelander:retry-queued', onRetryQueued);
+    };
   }, [activeTab, filterId, loadStats]);
 
   // Reset and reload when filters change

@@ -566,16 +566,16 @@ describe('retryListing', () => {
 
     const row = db.db.prepare('SELECT * FROM listings WHERE expose_id = ?').get('rl1');
     assert.equal(row.status, 'seen');
-    // Outcome/detail/failure_reason preserved for history
-    assert.equal(row.outcome, 'FAIL');
-    assert.equal(row.detail, 'validation error');
-    assert.equal(row.failure_reason, 'form invalid');
-    // sent_at also preserved
-    assert.ok(row.sent_at);
+    // Outcome/detail/failure_reason/sent_at cleared so the listing
+    // disappears from history until the daemon re-processes it.
+    assert.equal(row.outcome, null);
+    assert.equal(row.detail, null);
+    assert.equal(row.failure_reason, null);
+    assert.equal(row.sent_at, null);
     db.close();
   });
 
-  it('preserves SENT listings in history after retry', () => {
+  it('clears outcome fields on retry (listing disappears from history until re-processed)', () => {
     const db = seededDB();
     const hash = seedListing(db, { expose_id: 'rl2', price: 600 });
     db.markSent(hash, 'SENT', 'all good');
@@ -583,12 +583,12 @@ describe('retryListing', () => {
     db.retryListing('rl2');
     const row = db.db.prepare('SELECT * FROM listings WHERE expose_id = ?').get('rl2');
     assert.equal(row.status, 'seen');
-    assert.equal(row.outcome, 'SENT');
+    assert.equal(row.outcome, null);
 
-    // Still appears in history (outcome IS NOT NULL)
+    // No longer appears in history (outcome IS NOT NULL filter excludes it)
     const history = db.getHistory();
     const ids = history.map(r => r.expose_id);
-    assert.ok(ids.includes('rl2'));
+    assert.ok(!ids.includes('rl2'));
     db.close();
   });
 
