@@ -161,6 +161,12 @@ export class IS24Contactor {
     // Pre-create one persistent background page for all applies.
     // Reusing it avoids the OS-level app activation that newPage() triggers.
     await this._ensurePage();
+    // Prevent IS24's JS from stealing focus via window.focus() / window.open().
+    // Runs on every document load while this page stays alive.
+    await this.page.evaluateOnNewDocument(() => {
+      window.focus = () => {};
+      window.open = () => null;
+    });
   }
 
   /** Get or create the single persistent background page. */
