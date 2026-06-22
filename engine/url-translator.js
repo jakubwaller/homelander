@@ -214,6 +214,7 @@ const DIRECT_PARAM_MAP = {
   'exclusioncriteria': 'exclusioncriteria',
   'energyefficiencyclasses': 'energyefficiencyclasses',
   'petsallowedtypes': 'petsallowedtypes',
+  'pets-allowed': 'petsallowedtypes',        // IS24 web param → value-corrected
   'floor': 'floor',
   'apartmenttypes': 'apartmenttypes',
   'haspromotion': 'haspromotion',
@@ -265,6 +266,7 @@ const EQUIPMENT_MAP = {
   handicappedaccessible: 'HANDICAPPED_ACCESSIBLE',
   barrierfree: 'HANDICAPPED_ACCESSIBLE',
   onlywithbarrierfree: 'HANDICAPPED_ACCESSIBLE',
+  'barrier-free': 'HANDICAPPED_ACCESSIBLE',   // IS24 web param → equipment
   balcony: 'BALCONY',
   onlywithbalcony: 'BALCONY',
   garden: 'GARDEN',
@@ -339,8 +341,6 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   // Removed DIRECT_PARAM_MAP entries (2026-06-22) — confirmed 412 by live conformance test
   'has-pictures': 'listing pictures filter',
   'ageofconstruction': 'age of construction',
-  'barrier-free': 'barrier-free filter',
-  'pets-allowed': 'pets allowed filter',
   'energy-efficiency': 'energy rating filter',
   // Original entries
   gender: 'flatmate gender',
@@ -383,6 +383,7 @@ const EQUIPMENT_CHECKBOX_PARAMS = new Set([
   'onlywithbasement', 'onlywithbarrierfree',
   'balcony', 'garden', 'parking', 'cellar', 'elevator',
   'onlywithinternet', 'onlywithfridge', 'onlywithcooker',
+  'barrier-free',   // IS24 web param → equipment=handicappedaccessible
 ]);
 
 // IS24 search type slugs that the mobile API has no realestatetype for.
@@ -597,10 +598,12 @@ export function parseSearchUrl(webUrl) {
         seenKnownKeys.add(key);
       } else if (DIRECT_PARAM_MAP[key]) {
         const mappedKey = DIRECT_PARAM_MAP[key];
-        // Apply value corrections (e.g. swapflat → swap_flat)
+        // Apply value corrections (e.g. swapflat → swap_flat, 1/true → yes for pets)
         const correctedValue = mappedKey === 'exclusioncriteria'
           ? splitValues(value).map(v => EXCLUSION_CRITERIA_CORRECTIONS[v.toLowerCase()] || v).join(',')
-          : value;
+          : mappedKey === 'petsallowedtypes' && key === 'pets-allowed'
+            ? (value === '1' || value === 'true' ? 'yes' : value === '0' || value === 'false' ? 'no' : value)
+            : value;
         // Populate structured canonical fields from query params (skip directParams
         // for fields that buildMobileApiUrl already outputs from canonical structure)
         const skipDirect = mappedKey === 'newbuilding' || mappedKey === 'fulltext' || mappedKey === 'apartmenttypes';

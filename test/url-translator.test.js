@@ -323,11 +323,11 @@ describe('translateUrl — parameter mappings', () => {
     assert.ok(!fullUrl.includes('ageOfConstruction=3'));  // mobile API rejects, filtered
   });
 
-  it('flags barrier-free as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
+  it('translates barrier-free=1 → equipment=handicappedaccessible', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?barrier-free=1'
     );
-    assert.ok(!fullUrl.includes('barrierFree=1'));  // mobile API rejects, filtered
+    assert.ok(fullUrl.includes('equipment=handicappedaccessible'));  // auto-translated
   });
 
   it('maps parking via equipment param', () => {
@@ -337,11 +337,11 @@ describe('translateUrl — parameter mappings', () => {
     assert.ok(fullUrl.includes('equipment=parking'));
   });
 
-  it('flags pets-allowed as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
+  it('translates pets-allowed=1 → petsallowedtypes=yes', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?pets-allowed=1'
     );
-    assert.ok(!fullUrl.includes('petsAllowed=1'));  // mobile API rejects, filtered
+    assert.ok(fullUrl.includes('petsallowedtypes=yes'));  // auto-translated: 1→yes
   });
 
   it('flags energy-efficiency as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
@@ -611,20 +611,6 @@ describe('translateUrl — mobile-unsupported web filters', () => {
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?ageofconstruction=3'
     );
     assert.ok(!fullUrl.includes('ageOfConstruction'));
-  });
-
-  it('flags barrier-free as mobile-unsupported', () => {
-    const { fullUrl } = translateUrl(
-      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?barrier-free=1'
-    );
-    assert.ok(!fullUrl.includes('barrierFree'));
-  });
-
-  it('flags pets-allowed as mobile-unsupported', () => {
-    const { fullUrl } = translateUrl(
-      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?pets-allowed=1'
-    );
-    assert.ok(!fullUrl.includes('petsAllowed'));
   });
 
   it('flags energy-efficiency as mobile-unsupported', () => {
