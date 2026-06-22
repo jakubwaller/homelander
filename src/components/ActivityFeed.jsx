@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../locales/LocaleContext';
+import { swallow } from '../shared/logCatch.js';
 import { useStore } from '../stores/appStore';
 import { userErrorText } from '../shared/userErrors';
 
@@ -70,7 +71,7 @@ export default function ActivityFeed() {
       await window.homelander.retryListing(exposeId);
       // Show queued feedback immediately (daemon also confirms via event)
       window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId } }));
-    } catch {}
+    } catch (err) { swallow(err, 'renderer/retry-queue-event'); }
     setTimeout(() => setRetrying(prev => {
       const next = new Set(prev);
       next.delete(exposeId);
@@ -79,7 +80,7 @@ export default function ActivityFeed() {
   }, []);
 
   const handleCopy = useCallback(async (text) => {
-    try { await navigator.clipboard.writeText(text); } catch {}
+    try { await navigator.clipboard.writeText(text); } catch (err) { swallow(err, 'renderer/clipboard'); }
     setCopied(text);
     setTimeout(() => setCopied(null), 1500);
   }, []);
@@ -101,7 +102,7 @@ export default function ActivityFeed() {
           image_url: item.imageUrl,
         },
       });
-    } catch {}
+    } catch (err) { swallow(err, 'renderer/retry-queue-event'); }
     setTimeout(() => setSupportBusyId(null), 1500);
   }, []);
 

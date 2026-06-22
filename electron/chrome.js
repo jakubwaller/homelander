@@ -13,12 +13,17 @@ const CDP_PORT = 9222;
 const DEFAULT_MAX_TABS = 5;
 const DEFAULT_WINDOW_POSITION = { left: 80, top: 60, width: 1200, height: 850 };
 const IS24_HOME = 'https://www.immobilienscout24.de/';
+/** Logged-catch replacement — never throws, logs to console. */
+function swallow(err, context) {
+  try { console.error(`[chrome swallow] ${context}: ${err?.message || err}`); } catch {}
+}
+
 
 function getBundledChromiumPath() {
   try {
     const executablePath = puppeteer.executablePath();
     if (executablePath && existsSync(executablePath)) return executablePath;
-  } catch {}
+  } catch (err) { swallow(err, 'chrome/get-bundled-chromium'); }
   return null;
 }
 
@@ -58,9 +63,9 @@ export class ChromeManager {
     }
 
     if (await this.isHealthy()) {
-      await this._connectExisting().catch(() => {});
+      await this._connectExisting().catch((err) => { swallow(err, 'chrome/connect-existing'); });
       if (opts.visibility === 'always_show') await this.showBrowser();
-      else await this.hideBrowser().catch(() => {});
+      else await this.hideBrowser().catch((err) => { swallow(err, 'chrome/hide-browser'); });
       return this._versionInfo();
     }
 
@@ -109,7 +114,7 @@ export class ChromeManager {
     if (pages.length === 0) await this.browser.newPage();
     const page = (await this.browser.pages())[0];
     if (page && page.url() === 'about:blank') {
-      await page.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+      await page.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch((err) => { swallow(err, 'chrome/navigate-is24-home'); });
     }
     return this._versionInfo();
   }
@@ -132,7 +137,7 @@ export class ChromeManager {
       try {
         const resp = await fetch(`${this.cdpUrl}/json/version`);
         if (resp.ok) return await resp.json();
-      } catch {}
+      } catch (err) { swallow(err, 'chrome/cdp-version-check'); }
       await new Promise(r => setTimeout(r, 500));
     }
     throw new Error(`Chromium CDP not available after ${timeoutMs}ms`);
@@ -163,7 +168,7 @@ export class ChromeManager {
       const { windowId } = await session.send('Browser.getWindowForTarget');
       await session.send('Browser.setWindowBounds', { windowId, bounds });
     } finally {
-      await session.detach().catch(() => {});
+      await session.detach().catch((err) => { swallow(err, 'chrome/session-detach'); });
     }
   }
   async showBrowser() {
@@ -171,7 +176,7 @@ export class ChromeManager {
     const page = (await browser.pages())[0];
     if (!page) return;
     await this._setWindowBounds(page, DEFAULT_WINDOW_POSITION);
-    await page.bringToFront().catch(() => {});
+    await page.bringToFront().catch((err) => { swallow(err, 'chrome/bring-to-front'); });
   }
 
   async hideBrowser() {
@@ -184,7 +189,7 @@ export class ChromeManager {
     await this.launch(email, { ...opts, visibility: 'always_show' });
     const browser = await this._connectExisting();
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch((err) => { swallow(err, 'chrome/open-url-goto'); });
     await this.showBrowser();
     return this._versionInfo();
   }
@@ -216,7 +221,7 @@ export class ChromeManager {
         resolve();
       };
       const killTimer = setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch {}
+        try { proc.kill('SIGKILL'); } catch (err) { swallow(err, 'chrome/sigkill-manual-login'); }
       }, Math.max(500, timeoutMs - 500));
       const doneTimer = setTimeout(done, timeoutMs);
       proc.once('exit', done);
@@ -373,7 +378,7 @@ export class ChromeManager {
         const browser = await puppeteer.connect({ browserURL: this.cdpUrl, defaultViewport: null });
         await browser.close();
       }
-    } catch {}
+    } catch (err) { swallow(err, 'chrome/shutdown'); }
     this.browser = null;
   }
 

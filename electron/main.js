@@ -85,6 +85,12 @@ function saveConfig() {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
 }
 
+
+/** Logged-catch replacement — never throws, logs to daemon log. */
+function swallow(err, context) {
+  try { logRawError(context, err, { code: 'SWALLOW' }); } catch {}
+}
+
 function logRawError(operation, err, context = {}) {
   ensureDataDir();
   const supportId = context.supportId || createSupportId();
@@ -92,7 +98,7 @@ function logRawError(operation, err, context = {}) {
   const stack = redact(err?.stack || '');
   const ctx = redact(JSON.stringify(context));
   const line = `[${new Date().toISOString()}] [${supportId}] ${operation} failed raw=${raw} context=${ctx}`;
-  try { appendFileSync(DAEMON_LOG, `${line}${stack ? `\n${stack}` : ''}\n`, 'utf8'); } catch {}
+  try { appendFileSync(DAEMON_LOG, `${line}${stack ? `\\n${stack}` : ''}\\n`, 'utf8'); } catch (err) { swallow(err, 'main/append-error-log'); }
   console.error(`[main] ${operation} failed [${supportId}]:`, raw);
   return supportId;
 }
@@ -186,7 +192,7 @@ function listDebugArtifacts(exposeId = null, limit = 80) {
         if (!st.isFile()) continue;
         if (exposeId && !name.includes(String(exposeId))) continue;
         files.push({ path, name, dir: basename(dir), mtimeMs: st.mtimeMs, size: st.size });
-      } catch {}
+      } catch (err) { swallow(err, 'main/list-debug-artifacts'); }
     }
   }
   return files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, exposeId ? 40 : limit);
@@ -235,7 +241,7 @@ async function createSupportBundle(payload = {}) {
       const db = new HomelanderDB(DB_PATH);
       try { dbListing = db.getHistory(5000, 0).find((row) => String(row.expose_id) === String(exposeId)) || null; }
       finally { db.close(); }
-    } catch {}
+    } catch (err) { swallow(err, 'main/support-bundle-db-lookup'); }
   }
 
   const chromeStatus = await chromeManager.isHealthy()
@@ -433,7 +439,7 @@ function startDaemon() {
   daemonProcess.stderr.on('data', (data) => {
     const text = data.toString().trim();
     console.error('[daemon]', text);
-    try { appendFileSync(DAEMON_LOG, text + '\n', 'utf8'); } catch {}
+    try { appendFileSync(DAEMON_LOG, text + '\n', 'utf8'); } catch (err) { swallow(err, 'main/append-daemon-stderr'); }
   });
 
   daemonProcess.on('exit', (code) => {
@@ -492,7 +498,7 @@ function stopDaemon() {
     _stopKillTimer = null;
     // Only SIGKILL if this is still the SAME process AND still alive
     if (daemonProcess === proc) {
-      try { proc.kill('SIGKILL'); } catch {}
+      try { proc.kill('SIGKILL'); } catch (err) { swallow(err, 'main/sigkill-fallback'); }
       daemonProcess = null;
       daemonStopping = false;
       latestNextPollAt = null;
@@ -527,7 +533,7 @@ function markDaemonAlive(reason = 'daemon_activity') {
 
 function resetDaemonPollSchedule(reason = 'schedule_reset') {
   if (daemonProcess && daemonProcess.connected) {
-    try { daemonProcess.send({ type: 'reset_poll_schedule', reason }); } catch {}
+    try { daemonProcess.send({ type: 'reset_poll_schedule', reason }); } catch (err) { swallow(err, 'main/daemon-ipc-send'); }
   }
 }
 
@@ -571,7 +577,7 @@ function getNextPollAt(db) {
       const fromDb = new Date(lastPoll + pollIntervalMsValue).toISOString();
       if (new Date(fromDb).getTime() > Date.now()) return fromDb;
     }
-  } catch {}
+  } catch (err) { swallow(err, 'main/get-next-poll-at-fallback'); }
 
   // Startup / first-cycle fallback: daemon is alive but no future schedule has
   // arrived yet. Show a real countdown instead of the useless "bald" state.
@@ -633,7 +639,7 @@ function handleDaemonEvent(event) {
       break;
     case 'session_expired':
       daemonStatus = 'session_expired';
-      try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'session_expired' }), 'utf8'); } catch {}
+      try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'session_expired' }), 'utf8'); } catch (err) { swallow(err, 'main/write-pause-flag'); }
       mainWindow.webContents.send('homelander:event', {
         type: 'session_expired',
         reason: event.reason,
@@ -665,7 +671,7 @@ function handleDaemonEvent(event) {
       console.log(`[daemon] chrome_dead: ${event.detail || ''}`);
       daemonStatus = 'stopped';
       daemonStopping = true; // prevent exit handler auto-restart
-      try { writeFileSync(PAUSE_FLAG, ''); } catch {}
+      try { writeFileSync(PAUSE_FLAG, ''); } catch (err) { swallow(err, 'main/clear-pause-flag'); }
       mainWindow.webContents.send('homelander:event', {
         type: 'daemon_stopped',
         reason: 'chrome_closed',
@@ -761,7 +767,7 @@ function registerIpcHandlers() {
     try {
       // Start means run now. Never inherit a stale persisted pause from an old
       // stop/restart/debug session; Pause is the only action allowed to create it.
-      try { unlinkSync(PAUSE_FLAG); } catch {}
+      try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
 
       // Launch Chrome first
       const email = config?.is24?.email || config?.persona?.email || 'default';
@@ -777,7 +783,7 @@ function registerIpcHandlers() {
   ipcMain.handle('daemon:stop', () => {
     daemonStatus = 'stopped'; // must be set BEFORE kill — exit handler checks this
     latestNextPollAt = null;
-    try { unlinkSync(PAUSE_FLAG); } catch {} // clear pause flag so restart doesn't inherit pause
+    try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag-stop'); } // clear pause flag so restart doesn't inherit pause
     stopDaemon();
     return { status: effectiveDaemonStatus() };
   });
@@ -797,7 +803,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('daemon:resume', () => {
-    try { unlinkSync(PAUSE_FLAG); } catch {}
+    try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
     if (daemonProcess && daemonProcess.connected) {
       daemonProcess.send({ type: 'resume_apply' });
       daemonStatus = 'running';
@@ -1105,7 +1111,7 @@ function registerIpcHandlers() {
       return { focused: true, error: null };
     } catch {
       // Fallback: try regular Chrome
-      try { execSync(`osascript -e 'tell application "Google Chrome" to activate'`, { timeout: 3000 }); } catch {}
+      try { execSync(`osascript -e 'tell application "Google Chrome" to activate'`, { timeout: 3000 }); } catch (err) { swallow(err, 'main/osascript-activate'); }
       return { focused: true, error: null };
     }
   });
@@ -1196,16 +1202,16 @@ function registerIpcHandlers() {
     // Stop daemon first
     daemonStatus = 'stopped';
     latestNextPollAt = null;
-    try { unlinkSync(PAUSE_FLAG); } catch {}
+    try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
     stopDaemon();
 
     // Shutdown Chrome
-    chromeManager.shutdown().catch(() => {});
+    chromeManager.shutdown().catch((err) => { swallow(err, 'main/chrome-shutdown-quit'); });
 
     // Delete data files
     try { unlinkSync(DB_PATH); } catch (err) { logRawError('data:clean db delete', err, { code: 'DATABASE_ERROR' }); }
     try { unlinkSync(CONFIG_PATH); } catch (err) { logRawError('data:clean config delete', err, { code: 'CONFIG_SAVE_FAILED' }); }
-    try { unlinkSync(PAUSE_FLAG); } catch {}
+    try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
 
     // Relaunch fresh — config will be recreated with defaults
     app.relaunch();
@@ -1257,5 +1263,5 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuitting = true;
   stopDaemon();
-  chromeManager.shutdown().catch(() => {});
+  chromeManager.shutdown().catch((err) => { swallow(err, 'main/chrome-shutdown-close'); });
 });

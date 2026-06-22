@@ -12,12 +12,12 @@ function detectLocale() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored && LOCALES[stored]) return stored;
-  } catch {}
+  } catch (err) { swallow(err, 'renderer/locale-read'); }
   // Detect browser language
   try {
     const lang = navigator.language || '';
     if (lang.startsWith('de')) return 'de';
-  } catch {}
+  } catch (err) { swallow(err, 'renderer/locale-system-detect'); }
   return 'de';
 }
 
@@ -33,7 +33,7 @@ export function LocaleProvider({ children, onLocaleReady }) {
     if (!LOCALES[l]) return;
     setLocaleState(l);
     setChosen(true);
-    try { localStorage.setItem(STORAGE_KEY, l); } catch {}
+    try { localStorage.setItem(STORAGE_KEY, l); } catch (err) { swallow(err, 'renderer/locale-write'); } // i18n-allow-hardcoded
     document.documentElement.lang = l;
   }, []);
 

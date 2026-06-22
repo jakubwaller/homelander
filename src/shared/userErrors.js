@@ -128,7 +128,7 @@ export function createSupportId(prefix = 'HML') {
     if (bytes.some(Boolean)) {
       return `${prefix}-${Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
     }
-  } catch {}
+  } catch (err) { /* intentional: drop circular/error-stringify failure */ }
   return `${prefix}-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
 }
 

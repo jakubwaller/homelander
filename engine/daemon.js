@@ -62,8 +62,13 @@ function log(msg) {
   const ts = new Date().toISOString().slice(11, 19);
   const line = `[${ts}] ${msg}`;
   process.stderr.write(line + '\n');
-  try { appendFileSync(DAEMON_LOG, line + '\n', 'utf8'); } catch {}
+  try { appendFileSync(DAEMON_LOG, line + '\n', 'utf8'); } catch (err) { swallow(err, 'daemon/append-log'); }
 }
+/** Logged-catch replacement for bare catch {} — never throws, always logs to daemon log. */
+function swallow(err, context) {
+  try { log(`[swallow] ${context}: ${err?.message || err}`); } catch {}
+}
+
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -199,7 +204,7 @@ async function applyOne(listing, filterId, db) {
           pauseResumeTime = null;
           writePauseFlag('session_expired');
           // Navigate the persistent page to IS24 homepage so the user can log in
-          try { await contactor.page.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch {}
+          try { await contactor.page.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch (err) { swallow(err, 'apply/session-expiry-redirect'); }
           return;
         }
       } catch (_) { /* best-effort; don't disrupt apply */ }
@@ -263,7 +268,7 @@ async function applyOne(listing, filterId, db) {
         pauseResumeTime = null;
         writePauseFlag('session_expired');
         // Navigate to IS24 homepage so the user can log in
-        try { await contactor.page?.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch {}
+        try { await contactor.page?.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch (err) { swallow(err, 'apply/session-expiry-redirect2'); }
       }
 
       emit({

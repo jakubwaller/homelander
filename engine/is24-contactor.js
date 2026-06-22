@@ -24,6 +24,11 @@ export const DEBUG = {
   htmlDir: () => ensureDir('html'),
   screenshotDir: () => ensureDir('screenshots'),
 };
+/** Logged-catch replacement for bare catch {} — never throws, always logs. */
+function swallow(err, context, logFn = console.error) {
+  try { logFn(`[swallow] ${context}: ${err?.message || err}`); } catch {}
+}
+
 
 /**
  * Timing presets for 'fast', 'balanced', and 'slow' modes (all values in ms).
@@ -149,7 +154,7 @@ export class IS24Contactor {
     this.page = await this.browser.newPage();
     // Use default window position — no off-screen shenanigans
     await this._setWindowBounds(this.page);
-    await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+    await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
     return this.page;
   }
 
@@ -162,9 +167,9 @@ export class IS24Contactor {
         const { windowId } = await session.send('Browser.getWindowForTarget');
         await session.send('Browser.setWindowBounds', { windowId, bounds: DEFAULT_WINDOW });
       } finally {
-        await session.detach().catch(() => {});
+        await session.detach().catch((err) => { swallow(err, 'CDP/session-detach'); });
       }
-    } catch {}
+    } catch (err) { swallow(err, 'CDP/restore-window'); }
   }
 
   /**
@@ -198,14 +203,14 @@ export class IS24Contactor {
         });
         if (loggedIn === false) {
           const ssDir = DEBUG.screenshotDir();
-          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch {}
+          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/session_expired'); }
           return {
             success: false, reason: 'SESSION_EXPIRED (IS24 login required — re-login via Settings)',
             timing_ms: Date.now() - tStart, timing, captcha, form_state: 'session_expired',
             fields_typed: 0, field_retries: 0,
           };
         }
-      } catch {}
+      } catch (err) { swallow(err, 'apply/session-expiry-url-check'); }
 
       // Detect session expiry: IS24 redirects unauthenticated users to login
       try {
@@ -215,19 +220,19 @@ export class IS24Contactor {
           || currentUrl.includes('sso.immobilienscout24');
         if (isLoginRedirect || !currentUrl.includes(exposeId)) {
           const ssDir = DEBUG.screenshotDir();
-          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch {}
+          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/session_expired'); }
           return {
             success: false, reason: 'SESSION_EXPIRED (IS24 login required — re-login via Settings)',
             timing_ms: Date.now() - tStart, timing, captcha, form_state: 'session_expired',
             fields_typed: 0, field_retries: 0,
           };
         }
-      } catch {}
+      } catch (err) { swallow(err, 'apply/loggedout-session-check'); }
 
       const loggedOutSession = await this._isLoggedOutSession();
       if (loggedOutSession) {
         const ssDir = DEBUG.screenshotDir();
-        try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch {}
+        try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_session_expired.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/session_expired'); }
         return {
           success: false, reason: 'SESSION_EXPIRED (IS24 login required — re-login via Settings)',
           timing_ms: Date.now() - tStart, timing, captcha, form_state: 'session_expired',
@@ -239,7 +244,7 @@ export class IS24Contactor {
       const isDeactivated = await this._isDeactivated();
       if (isDeactivated) {
         const ssDir = DEBUG.screenshotDir();
-        try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_deactivated.png`), fullPage: true }); } catch {}
+        try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_deactivated.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/deactivated'); }
         return {
           success: false, reason: 'DEACTIVATED (listing no longer available)',
           timing_ms: Date.now() - tStart, timing, captcha, form_state: 'deactivated',
@@ -286,7 +291,7 @@ export class IS24Contactor {
       }
       if (!formStillOpen) {
         const ssDir = DEBUG.screenshotDir();
-        try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_form_closed_before_submit.png`), fullPage: true }); } catch {}
+        try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_form_closed_before_submit.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/form_closed'); }
         return {
           success: false, reason: 'SUBMIT_FAILED (contact form closed before submit)',
           timing_ms: Date.now() - tStart, timing, captcha, form_state: 'form_closed_before_submit',
@@ -306,13 +311,13 @@ export class IS24Contactor {
         const htmlDir = DEBUG.htmlDir();
         const outcomeTag = verified ? 'SENT' : (detail.includes('captcha') ? 'CAPTCHA_FAIL' : 'FAIL');
         writeFileSync(join(htmlDir, `${exposeId}_${outcomeTag}.html`), html, 'utf8');
-      } catch {}
+      } catch (err) { swallow(err, 'debug/write-html'); }
 
       formState = verified ? 'confirmed' : (detail.includes('captcha') ? 'captcha_fail' : detail.substring(0, 40));
 
       if (!verified) {
         const ssDir = DEBUG.screenshotDir();
-        try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_submit_failed.png`), fullPage: true }); } catch {}
+        try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_submit_failed.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/submit_failed'); }
         return {
           success: false, reason: `SUBMIT_FAILED (${detail})`,
           timing_ms: Date.now() - tStart, timing, captcha, form_state: formState,
@@ -328,7 +333,7 @@ export class IS24Contactor {
     } catch (err) {
       formState = 'error';
       const ssDir = DEBUG.screenshotDir();
-      try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_error.png`), fullPage: true }); } catch {}
+      try { await this.page?.screenshot({ path: join(ssDir, `${exposeId}_error.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/error'); }
       return {
         success: false, reason: `ERROR: ${err.message}`,
         timing_ms: Date.now() - tStart, timing, captcha, form_state: formState,
@@ -339,9 +344,9 @@ export class IS24Contactor {
       // Closing it would force a newPage() which activates Chromium.
       try {
         if (this.page && !this.page.isClosed() && this.browser?.isConnected()) {
-          await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+          await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
         }
-      } catch {}
+      } catch (err) { swallow(err, 'apply/about-blank-cleanup'); }
     }
   }
 
@@ -419,7 +424,7 @@ export class IS24Contactor {
         await tempPage.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 });
         return await tempPage.evaluate(evaluateLogin);
       } finally {
-        await tempPage.close().catch(() => {});
+        await tempPage.close().catch((err) => { swallow(err, 'CDP/tempPage-close'); });
       }
     } catch { return false; }
   }
@@ -519,7 +524,7 @@ export class IS24Contactor {
         }
       });
       await jitter(1000, 2000);
-    } catch {}
+    } catch (err) { swallow(err, 'form/dismiss-cookie-consent'); }
   }
 
   async _fillForm(message) {
@@ -1199,7 +1204,7 @@ export class IS24Contactor {
           !!document.querySelector('[class*="StatusMessage_status-confirm"]')
         );
         if (succeeded) { captchaStats.solved = true; return true; }
-      } catch {}
+      } catch (err) { swallow(err, 'captcha/check-solved'); }
       return false;
     }
   }
@@ -1254,8 +1259,8 @@ export class IS24Contactor {
   }
 
   async disconnect() {
-    try { if (this.page) await this.page.close(); } catch {}
-    try { if (this.browser) await this.browser.disconnect(); } catch {}
+    try { if (this.page) await this.page.close(); } catch (err) { swallow(err, 'page/close-cleanup'); }
+    try { if (this.browser) await this.browser.disconnect(); } catch (err) { swallow(err, 'browser/disconnect-cleanup'); }
     this.browser = null;
     this.page = null;
   }

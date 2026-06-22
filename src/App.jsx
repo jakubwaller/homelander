@@ -10,6 +10,7 @@ import SetupWizard from './screens/SetupWizard';
 import StatusDot from './components/StatusDot';
 import { LocaleProvider, useLocale } from './locales/LocaleContext';
 import { userErrorText } from './shared/userErrors';
+import { swallow } from './shared/logCatch.js';
 import homelanderKey from './assets/homelander-key.png';
 
 const TABS = ['searches', 'history', 'settings'];
@@ -113,7 +114,7 @@ function AppInner() {
       // Refresh per-search counts so FilterCards stay live
       window.homelander.getFilters().then(({ filters }) => {
         if (filters) setFilters(filters);
-      }).catch(() => {});
+      }).catch((err) => { swallow(err, 'renderer/getFilters-refresh'); });
     }));
 
     unsubs.push(window.homelander.onListing((data) => {

@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocale } from '../locales/LocaleContext';
+import { swallow } from '../shared/logCatch.js';
 import { useStore } from '../stores/appStore';
 import { userErrorText } from '../shared/userErrors';
 
@@ -259,7 +260,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                   style={{ color: copied === listing.expose_id ? 'var(--success)' : 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(listing.expose_id).catch(() => {});
+                    navigator.clipboard.writeText(listing.expose_id).catch((err) => { swallow(err, 'renderer/clipboard-expose-id'); });
                     setCopied(listing.expose_id);
                     setTimeout(() => setCopied(null), 1500);
                   }}
@@ -272,7 +273,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                   style={{ color: copied === listing.expose_id ? 'var(--success)' : 'var(--text-muted)', cursor: 'pointer' }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(listing.expose_id).catch(() => {});
+                    navigator.clipboard.writeText(listing.expose_id).catch((err) => { swallow(err, 'renderer/clipboard-expose-id'); });
                     setCopied(listing.expose_id);
                     setTimeout(() => setCopied(null), 1500);
                   }}
@@ -296,7 +297,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
-                    navigator.clipboard.writeText(safeDetail).catch(() => {});
+                    navigator.clipboard.writeText(safeDetail).catch((err) => { swallow(err, 'renderer/clipboard-detail'); });
                     setCopied(safeDetail);
                     setTimeout(() => setCopied(null), 1500);
                   }}
@@ -367,7 +368,7 @@ export default function HistoryTab() {
     if (!window.homelander) return;
     window.homelander.getStats(forFilterId || undefined).then(({ stats, error }) => {
       if (!error && stats) setAllTimeStats(stats);
-    }).catch(() => {});
+    }).catch((err) => { swallow(err, 'renderer/retry-listing'); });
   }, []);
 
   // ── Fetch listings ───────────────────────────────────────────────────────
@@ -489,7 +490,7 @@ export default function HistoryTab() {
     try {
       await window.homelander.retryListing(exposeId);
       window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId } }));
-    } catch {}
+    } catch (err) { swallow(err, 'renderer/retry-queue-event'); }
     setTimeout(() => setRetrying(prev => {
       const next = new Set(prev); next.delete(exposeId); return next;
     }), 2000);
@@ -501,7 +502,7 @@ export default function HistoryTab() {
     setSupportBusyId(exposeId);
     try {
       await window.homelander.createSupportBundle({ scope: 'entry', listing });
-    } catch {}
+    } catch (err) { swallow(err, 'renderer/retry-queue-event'); }
     setTimeout(() => setSupportBusyId(null), 1500);
   }, []);
 
