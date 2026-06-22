@@ -169,8 +169,23 @@ export class IS24Contactor {
     this.page = await this.browser.newPage();
     // Use default window position — no off-screen shenanigans
     await this._setWindowBounds(this.page);
-    await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
+    // newPage() already returns a page at about:blank — no navigation needed.
     return this.page;
+  }
+
+  /**
+   * Navigate the persistent page to a URL without triggering Chromium's
+   * window activation (which page.goto() causes via CDP in Electron 42).
+   *
+   * Uses in-page window.location assignment + waitForNavigation instead
+   * of the CDP Page.navigate command that page.goto() delegates to.
+   */
+  async _navigate(url, { timeout = 20000 } = {}) {
+    // navigate to about:blank from about:blank is a no-op
+    if (url === 'about:blank' && this.page?.url() === 'about:blank') return;
+    const nav = this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout });
+    await this.page.evaluate((u) => { window.location.href = u; }, url);
+    await nav;
   }
 
   /** Position a page's Chromium window at default coords via CDP. */
@@ -205,7 +220,7 @@ export class IS24Contactor {
 
     try {
       const tGoto = Date.now();
-      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await this._navigate(url);
       timing.goto_ms = Date.now() - tGoto;
 
       await jitter(...this.t.spaRenderWait);
@@ -366,7 +381,7 @@ export class IS24Contactor {
       // Closing it would force a newPage() which activates Chromium.
       try {
         if (this.page && !this.page.isClosed() && this.browser?.isConnected()) {
-          await this.page.goto('about:blank', { waitUntil: 'domcontentloaded', timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
+          await this._navigate('about:blank', { timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
         }
       } catch (err) { swallow(err, 'apply/about-blank-cleanup'); }
     }
