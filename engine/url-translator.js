@@ -285,6 +285,9 @@ const EQUIPMENT_MAP = {
   internet: 'INTERNET',
   onlywithguesttoilet: 'GUEST_TOILET',
   onlywithbasement: 'CELLAR',
+  onlywithinternet: 'INTERNET',
+  onlywithfridge: 'FRIDGE',
+  onlywithcooker: 'COOKER',
 };
 
 const EQUIPMENT_MOBILE_VALUE = Object.fromEntries(
@@ -335,6 +338,10 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   numberofpersons: 'number of persons',
   withfurniture: 'furnishing',
   smokingpermitted: 'smoking permitted',
+  flatsharesize: 'WG size',
+  rentdurationinmonths: 'rental duration (months)',
+  furnishing: 'furnishing',
+  flatmategender: 'flatmate gender',
 };
 
 const EQUIPMENT_CHECKBOX_PARAMS = new Set([
@@ -342,6 +349,7 @@ const EQUIPMENT_CHECKBOX_PARAMS = new Set([
   'onlywithkitchen', 'onlywithelevator', 'onlywithguesttoilet',
   'onlywithbasement', 'onlywithbarrierfree',
   'balcony', 'garden', 'parking', 'cellar', 'elevator',
+  'onlywithinternet', 'onlywithfridge', 'onlywithcooker',
 ]);
 
 // IS24 search type slugs that the mobile API has no realestatetype for.
