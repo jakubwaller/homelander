@@ -249,7 +249,7 @@ describe('translateUrl — Berlin', () => {
     assert.ok(fullUrl.includes('price=-1500'));
     assert.ok(fullUrl.includes('livingspace=60'));
     assert.ok(fullUrl.includes('hasPictures=1'));
-    assert.ok(fullUrl.includes('balcony=1'));
+    assert.ok(fullUrl.includes('equipment=balcony'));
   });
 });
 
@@ -268,10 +268,7 @@ describe('translateUrl — Munich', () => {
       'https://www.immobilienscout24.de/Suche/de/bayern/muenchen/wohnung-mieten?balcony=1&elevator=1&parking=1&cellar=1'
     );
     assert.equal(error, null);
-    assert.ok(fullUrl.includes('balcony=1'));
-    assert.ok(fullUrl.includes('elevator=1'));
-    assert.ok(fullUrl.includes('parkingSpace=1'));   // mapped
-    assert.ok(fullUrl.includes('cellar=1'));
+    assert.ok(fullUrl.includes('equipment=balcony%2Celevator%2Cparking%2Ccellar'));
   });
 
   it('Munich with unmapped query params are excluded', () => {
@@ -332,11 +329,11 @@ describe('translateUrl — parameter mappings', () => {
     assert.ok(fullUrl.includes('barrierFree=1'));
   });
 
-  it('maps parking → parkingSpace', () => {
+  it('maps parking via equipment param', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?parking=1'
     );
-    assert.ok(fullUrl.includes('parkingSpace=1'));
+    assert.ok(fullUrl.includes('equipment=parking'));
   });
 
   it('maps pets-allowed → petsAllowed', () => {

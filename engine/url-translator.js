@@ -215,12 +215,7 @@ const DIRECT_PARAM_MAP = {
   'energyefficiencyclasses': 'energyefficiencyclasses',
   'petsallowedtypes': 'petsallowedtypes',
   'floor': 'floor',
-  'balcony': 'balcony',
-  'garden': 'garden',
-  'cellar': 'cellar',
-  'elevator': 'elevator',
   'barrier-free': 'barrierFree',
-  'parking': 'parkingSpace',
   'pets-allowed': 'petsAllowed',
   'energy-efficiency': 'energyEfficiency',
   'apartmenttypes': 'apartmenttypes',
@@ -288,6 +283,8 @@ const EQUIPMENT_MAP = {
   cooker: 'COOKER',
   petsallowed: 'PETS_ALLOWED',
   internet: 'INTERNET',
+  onlywithguesttoilet: 'GUEST_TOILET',
+  onlywithbasement: 'CELLAR',
 };
 
 const EQUIPMENT_MOBILE_VALUE = Object.fromEntries(
@@ -298,6 +295,7 @@ EQUIPMENT_MOBILE_VALUE.BUILT_IN_KITCHEN = 'builtinKitchen';
 EQUIPMENT_MOBILE_VALUE.GUEST_TOILET = 'guesttoilet';
 EQUIPMENT_MOBILE_VALUE.PARKING_SPACE = 'parking';
 EQUIPMENT_MOBILE_VALUE.LIFT = 'elevator';
+EQUIPMENT_MOBILE_VALUE.CELLAR = 'cellar';
 EQUIPMENT_MOBILE_VALUE.FRIDGE = 'fridge';
 EQUIPMENT_MOBILE_VALUE.COOKER = 'cooker';
 EQUIPMENT_MOBILE_VALUE.PETS_ALLOWED = 'petsallowed';
@@ -330,7 +328,21 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   onlywithoutcourtage: 'commission-free',
   sitedevelopmenttypes: 'site development type',
   siteconstructibletypes: 'site constructible type',
+  rentalperiodvalue: 'rental period',
+  rentalperiodtype: 'rental period type',
+  beginrent: 'move-in date',
+  shorttermaccommodationtype: 'accommodation type',
+  numberofpersons: 'number of persons',
+  withfurniture: 'furnishing',
+  smokingpermitted: 'smoking permitted',
 };
+
+const EQUIPMENT_CHECKBOX_PARAMS = new Set([
+  'onlywithbalcony', 'onlywithgarden', 'onlywithparking',
+  'onlywithkitchen', 'onlywithelevator', 'onlywithguesttoilet',
+  'onlywithbasement', 'onlywithbarrierfree',
+  'balcony', 'garden', 'parking', 'cellar', 'elevator',
+]);
 
 // IS24 search type slugs that the mobile API has no realestatetype for.
 // These categories are desktop-only; searching them via the mobile API would
@@ -535,6 +547,12 @@ export function parseSearchUrl(webUrl) {
         seenKnownKeys.add(key);
       } else if (key === 'equipment') {
         canonical.equipment.push(...mapMultiValues(value, EQUIPMENT_MAP, rawKey, unsupportedParams));
+        seenKnownKeys.add(key);
+      } else if (EQUIPMENT_CHECKBOX_PARAMS.has(key)) {
+        // Equipment checkboxes (onlyWithBalcony, etc.) must go into the
+        // equipment= param — standalone booleans return 412 from mobile API.
+        const mapped = EQUIPMENT_MAP[key];
+        if (mapped) canonical.equipment.push(mapped);
         seenKnownKeys.add(key);
       } else if (DIRECT_PARAM_MAP[key]) {
         const mappedKey = DIRECT_PARAM_MAP[key];
