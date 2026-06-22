@@ -233,6 +233,8 @@ const DIRECT_PARAM_MAP = {
   'exclusiveonis24': 'exclusiveonis24',
   'comingsoon': 'comingsoon',
   'paywall': 'paywall',
+  'buildingtypes': 'buildingtypes',
+  'ground': 'ground',
 };
 
 const HEATING_TYPE_MAP = {
