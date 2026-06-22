@@ -1,7 +1,7 @@
 // Activity feed — live-scrolling list of sent/failed listings.
 // Each entry is clickable: expands to show detail + IS24 link.
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocale } from '../locales/LocaleContext';
 import { swallow } from '../shared/logCatch.js';
 import { useStore } from '../stores/appStore';
@@ -36,11 +36,71 @@ export default function ActivityFeed() {
   const [hoveredImage, setHoveredImage] = useState(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [tip, setTip] = useState(null);
+  const activeTipTargetRef = useRef(null);
 
-  const showTip = (text, e) => {
+  const hideTip = useCallback(() => {
+    activeTipTargetRef.current = null;
+    setTip(null);
+  }, []);
+
+  const showTip = useCallback((text, e) => {
+    if (!text || !e?.currentTarget) {
+      hideTip();
+      return;
+    }
+    activeTipTargetRef.current = e.currentTarget;
     setTip({ text, x: e.clientX, y: e.clientY });
-  };
-  const hideTip = () => setTip(null);
+  }, [hideTip]);
+
+  const moveTip = useCallback((e) => {
+    const target = activeTipTargetRef.current || e?.currentTarget;
+    if (!target || !e) return;
+    activeTipTargetRef.current = target;
+    const rect = target.getBoundingClientRect();
+    if (
+      e.clientX < rect.left ||
+      e.clientX > rect.right ||
+      e.clientY < rect.top ||
+      e.clientY > rect.bottom
+    ) {
+      hideTip();
+      return;
+    }
+    setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+  }, [hideTip]);
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e) => {
+      const target = activeTipTargetRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      if (
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom
+      ) {
+        hideTip();
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (activeTipTargetRef.current) hideTip();
+    };
+    const handleWindowScroll = () => {
+      if (activeTipTargetRef.current) hideTip();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove, true);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('scroll', handleWindowScroll, true);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove, true);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('scroll', handleWindowScroll, true);
+    };
+  }, [hideTip]);
 
   // Listen for daemon retry_queued events
   useEffect(() => {
@@ -179,17 +239,27 @@ export default function ActivityFeed() {
                   <span className="text-sm font-medium truncate">
                     {item.title || t('livefeed.unknownListing', 'Unknown Listing')}
                   </span>
-                  <span className="badge badge-sm text-xs" style={{ background: statusColor + '20', color: statusColor }}>
+                  <span
+                    className="badge badge-sm text-xs"
+                    style={{ background: statusColor + '20', color: statusColor }}
+                    onMouseEnter={(e) => {
+                      e.stopPropagation();
+                      const tipKey = isSent ? 'sentTip' : isPremium ? 'premiumTip' : isDeactivated ? 'deactivatedTip' : isCaptcha ? 'captchaTip' : 'failedTip';
+                      showTip(t(`livefeed.${tipKey}`, ''), e);
+                    }}
+                    onMouseMove={moveTip}
+                    onMouseLeave={hideTip}
+                  >
                     {outcomeLabel}
                   </span>
                   {isDeactivated && (
-                    <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.deactivatedTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.deactivatedBadge', '🪦 Deactivated')}</span>
+                    <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.deactivatedTip'), e); }} onMouseMove={moveTip} onMouseLeave={hideTip}>{t('livefeed.deactivatedBadge', '🪦 Deactivated')}</span>
                   )}
                   {isCaptcha && (
-                    <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.captchaTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.captchaBadge', '🔐 Captcha')}</span>
+                    <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.captchaTip'), e); }} onMouseMove={moveTip} onMouseLeave={hideTip}>{t('livefeed.captchaBadge', '🔐 Captcha')}</span>
                   )}
                   {isPremium && item.outcome !== 'PREMIUM' && (
-                    <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.premiumTip'), e); }} onMouseMove={(e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)} onMouseLeave={hideTip} onMouseOut={hideTip}>{t('livefeed.premiumBadge', '💎 Premium')}</span>
+                    <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.premiumTip'), e); }} onMouseMove={moveTip} onMouseLeave={hideTip}>{t('livefeed.premiumBadge', '💎 Premium')}</span>
                   )}
                 </div>
                 {item.address && (
@@ -344,8 +414,8 @@ export default function ActivityFeed() {
           <img
             src={hoveredImage}
             alt="Preview"
-            className="rounded shadow-lg object-cover bg-gray-700"
-            style={{ width: 360, height: 270 }}
+            className="rounded shadow-lg object-cover"
+            style={{ width: 360, height: 270, background: 'var(--bg-primary)' }}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
         </div>

@@ -165,17 +165,26 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
             <span className="text-sm font-medium truncate">
               {listing.title || t('history.unknownListing', 'Unknown Listing')}
             </span>
-            <span className={`badge ${badgeClass} text-xs`}>
+            <span
+              className={`badge ${badgeClass} text-xs`}
+              onMouseEnter={(e) => {
+                e.stopPropagation();
+                const tipKey = isSent ? 'sentTip' : isPremium ? 'premiumTip' : isDeactivated ? 'deactivatedTip' : isCaptcha ? 'captchaTip' : 'failedTip';
+                onTipShow(t(`history.${tipKey}`, t(`livefeed.${tipKey}`, '')), e);
+              }}
+              onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }}
+              onMouseLeave={onTipHide}
+            >
               {outcomeLabel}
             </span>
             {showBadges.includes('Deactivated') && (
-              <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.deactivatedTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.deactivatedBadge', '🪦 Deactivated')}</span>
+              <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.deactivatedTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide}>{t('history.deactivatedBadge', '🪦 Deactivated')}</span>
             )}
             {showBadges.includes('Captcha') && (
-              <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.captchaTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.captchaBadge', '🔐 Captcha')}</span>
+              <span className="badge badge-captcha text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.captchaTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide}>{t('history.captchaBadge', '🔐 Captcha')}</span>
             )}
             {showBadges.includes('Premium') && listing.outcome !== 'PREMIUM' && (
-              <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.premiumTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide} onMouseOut={onTipHide}>{t('history.premiumBadge', '💎 Premium')}</span>
+              <span className="badge badge-premium text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.premiumTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide}>{t('history.premiumBadge', '💎 Premium')}</span>
             )}
           </div>
           {listing.address && (
@@ -355,13 +364,71 @@ export default function HistoryTab() {
   const [hoveredImage, setHoveredImage] = useState(null);
   const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
   const [tip, setTip] = useState(null);
+  const activeTipTargetRef = useRef(null);
 
-  const showTip = (text, e) => {
-    if (!text) { hideTip(); return; }
-    if (e) setTip({ text, x: e.clientX, y: e.clientY });
-  };
-  const moveTip = (e) => setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
-  const hideTip = () => setTip(null);
+  const hideTip = useCallback(() => {
+    activeTipTargetRef.current = null;
+    setTip(null);
+  }, []);
+
+  const showTip = useCallback((text, e) => {
+    if (!text || !e?.currentTarget) {
+      hideTip();
+      return;
+    }
+    activeTipTargetRef.current = e.currentTarget;
+    setTip({ text, x: e.clientX, y: e.clientY });
+  }, [hideTip]);
+
+  const moveTip = useCallback((e) => {
+    const target = activeTipTargetRef.current || e?.currentTarget;
+    if (!target || !e) return;
+    activeTipTargetRef.current = target;
+    const rect = target.getBoundingClientRect();
+    if (
+      e.clientX < rect.left ||
+      e.clientX > rect.right ||
+      e.clientY < rect.top ||
+      e.clientY > rect.bottom
+    ) {
+      hideTip();
+      return;
+    }
+    setTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+  }, [hideTip]);
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e) => {
+      const target = activeTipTargetRef.current;
+      if (!target) return;
+      const rect = target.getBoundingClientRect();
+      if (
+        e.clientX < rect.left ||
+        e.clientX > rect.right ||
+        e.clientY < rect.top ||
+        e.clientY > rect.bottom
+      ) {
+        hideTip();
+      }
+    };
+
+    const handleWindowBlur = () => {
+      if (activeTipTargetRef.current) hideTip();
+    };
+    const handleWindowScroll = () => {
+      if (activeTipTargetRef.current) hideTip();
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove, true);
+    window.addEventListener('blur', handleWindowBlur);
+    window.addEventListener('scroll', handleWindowScroll, true);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove, true);
+      window.removeEventListener('blur', handleWindowBlur);
+      window.removeEventListener('scroll', handleWindowScroll, true);
+    };
+  }, [hideTip]);
 
   // ── Load stats (optionally filtered by search) ─────────────────────────────
   const loadStats = useCallback((forFilterId) => {
@@ -785,8 +852,8 @@ export default function HistoryTab() {
           <img
             src={hoveredImage}
             alt="Preview"
-            className="rounded shadow-lg object-cover bg-gray-700"
-            style={{ width: 360, height: 270 }}
+            className="rounded shadow-lg object-cover"
+            style={{ width: 360, height: 270, background: 'var(--bg-primary)' }}
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
           />
         </div>

@@ -8,6 +8,28 @@ import ActivityFeed from '../components/ActivityFeed';
 import { userErrorText } from '../shared/userErrors';
 import { normalizeStats } from '../shared/normalizeStats.js';
 
+// StatBadge at module scope — stable component identity prevents React
+// from unmounting/remounting DOM on every render (which kills tooltips).
+const StatBadge = React.memo(function StatBadge({ label, value, color, tooltip, showTip, moveTip, hideTip }) {
+  const hasTooltip = !!(tooltip && showTip);
+  return (
+    <div
+      className="card px-4 py-3 flex items-center gap-3 min-w-0"
+      style={{ minWidth: 110 }}
+      onMouseEnter={hasTooltip ? (e) => showTip(tooltip, e) : undefined}
+      onMouseMove={hasTooltip ? moveTip : undefined}
+      onMouseLeave={hasTooltip ? hideTip : undefined}
+    >
+      <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+        {label}
+      </span>
+      <span className="text-lg font-semibold" style={{ color: color || 'var(--text-primary)' }}>
+        {value ?? 0}
+      </span>
+    </div>
+  );
+});
+
 export default function SearchTab() {
   const { t } = useLocale();
   // ── Store ──────────────────────────────────────────────────────
@@ -59,8 +81,6 @@ export default function SearchTab() {
   }, [hideTip]);
 
   useEffect(() => {
-    if (!tip) return;
-
     const handleWindowMouseMove = (e) => {
       const target = activeTipTargetRef.current;
       if (!target) return;
@@ -75,8 +95,12 @@ export default function SearchTab() {
       }
     };
 
-    const handleWindowBlur = () => hideTip();
-    const handleWindowScroll = () => hideTip();
+    const handleWindowBlur = () => {
+      if (activeTipTargetRef.current) hideTip();
+    };
+    const handleWindowScroll = () => {
+      if (activeTipTargetRef.current) hideTip();
+    };
 
     window.addEventListener('mousemove', handleWindowMouseMove, true);
     window.addEventListener('blur', handleWindowBlur);
@@ -87,7 +111,7 @@ export default function SearchTab() {
       window.removeEventListener('blur', handleWindowBlur);
       window.removeEventListener('scroll', handleWindowScroll, true);
     };
-  }, [tip, hideTip]);
+  }, [hideTip]);
 
 
 
@@ -245,37 +269,18 @@ export default function SearchTab() {
     return () => clearInterval(id);
   }, [stats.nextPollAt, daemonStatus]);
 
-  // ── Stat badge helper ──────────────────────────────────────────
-  const StatBadge = ({ label, value, color, tooltip }) => (
-    <div
-      className="card px-4 py-3 flex items-center gap-3 min-w-0"
-      style={{ minWidth: 110 }}
-      onMouseEnter={tooltip ? (e) => showTip(tooltip, e) : undefined}
-      onMouseMove={tooltip ? moveTip : undefined}
-      onMouseLeave={tooltip ? hideTip : undefined}
-      onPointerLeave={tooltip ? hideTip : undefined}
-    >
-      <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-        {label}
-      </span>
-      <span className="text-lg font-semibold" style={{ color: color || 'var(--text-primary)' }}>
-        {value ?? 0}
-      </span>
-    </div>
-  );
-
   // ── Render ─────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-6">
       {/* ── Stats row ──────────────────────────────────────────── */}
       <div className="flex items-center gap-3 flex-wrap mt-2">
         <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>{t('search.today', 'Today')}</span>
-        <StatBadge label={t('search.processed', 'Processed')} value={`${(stats.sent + stats.failed + (stats.deactivated || 0) + (stats.premium || 0))}/${stats.seen}`} color="var(--accent)" />
-        <StatBadge label={t('search.sent', 'Sent')} value={stats.sent} color="var(--success)" />
-        <StatBadge label={t('search.failed', 'Failed')} value={stats.failed} color="var(--danger)" />
-        <StatBadge label={t('livefeed.deactivated', 'Deactivated')} value={stats.deactivated || 0} color="var(--text-muted)" tooltip={t('livefeed.deactivatedTip')} />
-        <StatBadge label={t('livefeed.premium', 'Premium')} value={stats.premium || 0} color="#a855f7" tooltip={t('livefeed.premiumTip')} />
-        <StatBadge label={t('livefeed.captcha', 'Captcha')} value={stats.captcha || 0} color="#f59e0b" tooltip={t('livefeed.captchaTip')} />
+        <StatBadge label={t('search.processed', 'Processed')} value={`${(stats.sent + stats.failed + (stats.deactivated || 0) + (stats.premium || 0))}/${stats.seen}`} color="var(--accent)" showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
+        <StatBadge label={t('search.sent', 'Sent')} value={stats.sent} color="var(--success)" showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
+        <StatBadge label={t('search.failed', 'Failed')} value={stats.failed} color="var(--danger)" showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
+        <StatBadge label={t('livefeed.deactivated', 'Deactivated')} value={stats.deactivated || 0} color="var(--text-muted)" tooltip={t('livefeed.deactivatedTip')} showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
+        <StatBadge label={t('livefeed.premium', 'Premium')} value={stats.premium || 0} color="#a855f7" tooltip={t('livefeed.premiumTip')} showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
+        <StatBadge label={t('livefeed.captcha', 'Captcha')} value={stats.captcha || 0} color="#f59e0b" tooltip={t('livefeed.captchaTip')} showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
 
         </div>
 
