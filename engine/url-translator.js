@@ -264,15 +264,21 @@ const HEATING_LABELS = {
 const EQUIPMENT_MAP = {
   handicappedaccessible: 'HANDICAPPED_ACCESSIBLE',
   barrierfree: 'HANDICAPPED_ACCESSIBLE',
+  onlywithbarrierfree: 'HANDICAPPED_ACCESSIBLE',
   balcony: 'BALCONY',
+  onlywithbalcony: 'BALCONY',
   garden: 'GARDEN',
+  onlywithgarden: 'GARDEN',
   builtinKitchen: 'BUILT_IN_KITCHEN',
   builtinkitchen: 'BUILT_IN_KITCHEN',
   'built-in-kitchen': 'BUILT_IN_KITCHEN',
   kitchen: 'BUILT_IN_KITCHEN',
+  onlywithkitchen: 'BUILT_IN_KITCHEN',
   elevator: 'LIFT',
   lift: 'LIFT',
+  onlywithelevator: 'LIFT',
   parking: 'PARKING_SPACE',
+  onlywithparking: 'PARKING_SPACE',
   guesttoilet: 'GUEST_TOILET',
   'guest-toilet': 'GUEST_TOILET',
   cellar: 'CELLAR',
@@ -300,6 +306,8 @@ EQUIPMENT_MOBILE_VALUE.FRIDGE = 'fridge';
 EQUIPMENT_MOBILE_VALUE.COOKER = 'cooker';
 EQUIPMENT_MOBILE_VALUE.PETS_ALLOWED = 'petsallowed';
 EQUIPMENT_MOBILE_VALUE.INTERNET = 'internet';
+EQUIPMENT_MOBILE_VALUE.BALCONY = 'balcony';   // prevent onlywithbalcony→BALCONY overwrite
+EQUIPMENT_MOBILE_VALUE.GARDEN = 'garden';     // prevent onlywithgarden→GARDEN overwrite
 
 const EQUIPMENT_LABELS = {
   HANDICAPPED_ACCESSIBLE: 'barrier-free',

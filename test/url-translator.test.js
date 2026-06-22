@@ -357,6 +357,342 @@ describe('translateUrl — parameter mappings', () => {
     );
     assert.ok(fullUrl.includes('equipment=1'));
   });
+
+  // ── Remaining DIRECT_PARAM_MAP entries ──────────────────────────────────
+
+  it('maps constructionyear → constructionyear', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?constructionyear=2000-'
+    );
+    assert.ok(fullUrl.includes('constructionyear=2000-'));
+  });
+
+  it('maps osmtags → osmtags', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?osmtags=park'
+    );
+    assert.ok(fullUrl.includes('osmtags=park'));
+  });
+
+  it('maps minimuminternetspeed → minimuminternetspeed', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?minimuminternetspeed=100000'
+    );
+    assert.ok(fullUrl.includes('minimuminternetspeed=100000'));
+  });
+
+  it('maps exclusiveonis24 → exclusiveonis24', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?exclusiveonis24=true'
+    );
+    assert.ok(fullUrl.includes('exclusiveonis24=true'));
+  });
+
+  it('maps comingsoon → comingsoon', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?comingsoon=true'
+    );
+    assert.ok(fullUrl.includes('comingsoon=true'));
+  });
+
+  it('maps paywall → paywall', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?paywall=true'
+    );
+    assert.ok(fullUrl.includes('paywall=true'));
+  });
+
+  it('maps buildingtypes → buildingtypes (houserent)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/haus-mieten?buildingtypes=singlefamilyhouse'
+    );
+    assert.ok(fullUrl.includes('buildingtypes=singlefamilyhouse'));
+  });
+
+  it('maps ground → ground (houserent)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/haus-mieten?ground=100-'
+    );
+    assert.ok(fullUrl.includes('ground=100-'));
+  });
+});
+
+// ── Equipment checkboxes (every single one) ─────────────────────────────
+
+describe('translateUrl — equipment checkboxes (all 17)', () => {
+  // Direct equipment checkboxes (route into equipment= param)
+  it('routes balcony=1 → equipment=balcony', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?balcony=1'
+    );
+    assert.ok(fullUrl.includes('equipment=balcony'));
+  });
+
+  it('routes garden=1 → equipment=garden', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?garden=1'
+    );
+    assert.ok(fullUrl.includes('equipment=garden'));
+  });
+
+  it('routes parking=1 → equipment=parking', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?parking=1'
+    );
+    assert.ok(fullUrl.includes('equipment=parking'));
+  });
+
+  it('routes cellar=1 → equipment=cellar', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?cellar=1'
+    );
+    assert.ok(fullUrl.includes('equipment=cellar'));
+  });
+
+  it('routes elevator=1 → equipment=lift', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?elevator=1'
+    );
+    assert.ok(fullUrl.includes('equipment=lift'));
+  });
+
+  // "onlywith" prefixed checkboxes
+  it('routes onlywithbalcony=1 → equipment=balcony', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithbalcony=1'
+    );
+    assert.ok(fullUrl.includes('equipment=balcony'));
+  });
+
+  it('routes onlywithgarden=1 → equipment=garden', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithgarden=1'
+    );
+    assert.ok(fullUrl.includes('equipment=garden'));
+  });
+
+  it('routes onlywithparking=1 → equipment=parking', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithparking=1'
+    );
+    assert.ok(fullUrl.includes('equipment=parking'));
+  });
+
+  it('routes onlywithkitchen=1 → equipment=builtinKitchen', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithkitchen=1'
+    );
+    assert.ok(fullUrl.includes('equipment=builtinKitchen'));
+  });
+
+  it('routes onlywithelevator=1 → equipment=lift', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithelevator=1'
+    );
+    assert.ok(fullUrl.includes('equipment=lift'));
+  });
+
+  it('routes onlywithguesttoilet=1 → equipment=guesttoilet', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithguesttoilet=1'
+    );
+    assert.ok(fullUrl.includes('equipment=guesttoilet'));
+  });
+
+  it('routes onlywithbasement=1 → equipment=cellar', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithbasement=1'
+    );
+    assert.ok(fullUrl.includes('equipment=cellar'));
+  });
+
+  it('routes onlywithbarrierfree=1 → equipment=handicappedaccessible', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithbarrierfree=1'
+    );
+    assert.ok(fullUrl.includes('equipment=handicappedaccessible'));
+  });
+
+  it('routes onlywithinternet=1 → equipment=internet (filtered: mobile-ignored)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithinternet=1'
+    );
+    assert.ok(!fullUrl.includes('equipment=internet'));  // filtered: mobile-ignored
+  });
+
+  it('routes onlywithfridge=1 → equipment=fridge (filtered: mobile-ignored)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithfridge=1'
+    );
+    assert.ok(!fullUrl.includes('equipment=fridge'));  // filtered: mobile-ignored
+  });
+
+  it('routes onlywithcooker=1 → equipment=cooker (filtered: mobile-ignored)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?onlywithcooker=1'
+    );
+    assert.ok(!fullUrl.includes('equipment=cooker'));  // filtered: mobile-ignored
+  });
+
+  it('combines multiple equipment checkboxes into single equipment param', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?balcony=1&parking=1&cellar=1'
+    );
+    const params = new URL(fullUrl).searchParams;
+    const eq = params.get('equipment') || '';
+    const vals = eq.split(',');
+    assert.ok(vals.includes('balcony'));
+    assert.ok(vals.includes('parking'));
+    assert.ok(vals.includes('cellar'));
+    // Single equipment param, not multiple
+    assert.equal(params.getAll('equipment').length, 1);
+  });
+});
+
+// ── Mobile-unsupported web filters (all flagged, none in mobile URL) ─────
+
+describe('translateUrl — mobile-unsupported web filters', () => {
+  const UNSUPPORTED = [
+    ['gender', 'male'],
+    ['smokingallowed', 'allowed'],
+    ['startrentaldate', '2027-01-01'],
+    ['furniture', 'true'],
+    ['rentalduration', '3'],
+    ['wohnberechtigungsscheinneeded', 'true'],
+    ['onlyshorttermbuildable', 'true'],
+    ['onlywithplanningpermission', 'true'],
+    ['onlywithoutcourtage', 'true'],
+    ['sitedevelopmenttypes', 'fullydeveloped'],
+    ['siteconstructibletypes', 'residential'],
+    ['rentalperiodvalue', '12'],
+    ['rentalperiodtype', 'months'],
+    ['beginrent', '2027-01-01'],
+    ['shorttermaccommodationtype', 'apartment'],
+    ['numberofpersons', '2'],
+    ['withfurniture', 'true'],
+    ['smokingpermitted', 'true'],
+    ['flatsharesize', '3'],
+    ['rentdurationinmonths', '6'],
+    ['furnishing', 'full'],
+    ['flatmategender', 'any'],
+    ['garagetypes', 'singlegarage'],
+    ['onlywithcookingpossibility', 'true'],
+    ['onlywithambulantnursingservice', 'true'],
+    ['assistedlivingcommercializationtype', 'rent'],
+    ['onlywithcareofdementiapatients', 'true'],
+    ['onlywithcareofartificalrespirationpatients', 'true'],
+    ['onlywithcareofvegetativestatepatients', 'true'],
+    ['caretypes', 'fulltime'],
+    ['seniorcarelevels', '1'],
+    ['roomtypes', 'single'],
+  ];
+
+  for (const [key, value] of UNSUPPORTED) {
+    it(`flags ${key} as mobile-rejected (safeIgnored, not in mobile URL)`, () => {
+      const { fullUrl, error } = translateUrl(
+        `https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?${key}=${encodeURIComponent(value)}`
+      );
+      assert.equal(error, null);
+      assert.ok(!fullUrl.includes(`${key}=`) && !fullUrl.includes(`${encodeURIComponent(key)}=`),
+        `mobile URL should not contain ${key}`);
+    });
+  }
+
+  // Removed DIRECT_PARAM_MAP entries — also mobile-unsupported
+  it('flags has-pictures as mobile-unsupported', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?has-pictures=1'
+    );
+    assert.ok(!fullUrl.includes('hasPictures'));
+  });
+
+  it('flags ageofconstruction as mobile-unsupported', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?ageofconstruction=3'
+    );
+    assert.ok(!fullUrl.includes('ageOfConstruction'));
+  });
+
+  it('flags barrier-free as mobile-unsupported', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?barrier-free=1'
+    );
+    assert.ok(!fullUrl.includes('barrierFree'));
+  });
+
+  it('flags pets-allowed as mobile-unsupported', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?pets-allowed=1'
+    );
+    assert.ok(!fullUrl.includes('petsAllowed'));
+  });
+
+  it('flags energy-efficiency as mobile-unsupported', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?energy-efficiency=A%2B'
+    );
+    assert.ok(!fullUrl.includes('energyEfficiency'));
+  });
+});
+
+// ── Safe-ignored tracking/sorting params ────────────────────────────────
+
+describe('translateUrl — safe-ignored tracking params', () => {
+  it('strips enteredFrom', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?enteredFrom=result_list'
+    );
+    assert.ok(!fullUrl.includes('enteredFrom'));
+  });
+
+  it('strips utm_source', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?utm_source=google'
+    );
+    assert.ok(!fullUrl.includes('utm_source'));
+  });
+
+  it('strips utm_medium', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?utm_medium=cpc'
+    );
+    assert.ok(!fullUrl.includes('utm_medium'));
+  });
+
+  it('strips sorting param', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?sorting=price_asc'
+    );
+    assert.ok(!fullUrl.includes('sorting=price_asc'));
+  });
+
+  it('strips pagenumber param', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?pagenumber=5'
+    );
+    assert.ok(!fullUrl.includes('pagenumber=5'));
+  });
+
+  it('strips pagesize param', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?pagesize=50'
+    );
+    assert.ok(!fullUrl.includes('pagesize=50'));
+  });
+
+  it('strips viewmode param', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?viewmode=list'
+    );
+    assert.ok(!fullUrl.includes('viewmode'));
+  });
+
+  it('strips from param (tracking referrer)', () => {
+    const { fullUrl } = translateUrl(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?from=homepage'
+    );
+    assert.ok(!fullUrl.includes('from=homepage'));
+  });
 });
 
 // ---------------------------------------------------------------------------
