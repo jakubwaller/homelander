@@ -108,7 +108,7 @@ homelander/
 │       ├── searchUrlUi.js      # URL parsing helpers
 │       └── userErrors.js       # Error formatting + support ID generation
 ├── config/
-│   └── autoapply.config.example.yaml  # OLD v2 format (Fredy-based) — DO NOT USE
+│   └── autoapply.config.example.yaml  # OLD v2 format — DO NOT USE
 ├── brand/                # Brand assets (gold key icon, #D9A441)
 ├── resources/            # App icon files (icon.icns, icon.ico, icon.png)
 ├── scripts/              # Debug scripts, autoapply.sh, i18n checker
@@ -141,7 +141,7 @@ Runtime config at `~/.homelander/config.json` — read/written by Electron main 
 }
 ```
 
-Config is **NOT** the old `autoapply.config.yaml` (Fredy-based v2) — that file in `config/` is obsolete.
+Config is **NOT** the old `autoapply.config.yaml` — that file in `config/` is obsolete.
 
 ## Data
 
