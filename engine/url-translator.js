@@ -342,6 +342,7 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   rentdurationinmonths: 'rental duration (months)',
   furnishing: 'furnishing',
   flatmategender: 'flatmate gender',
+  garagetypes: 'garage type',
 };
 
 const EQUIPMENT_CHECKBOX_PARAMS = new Set([
