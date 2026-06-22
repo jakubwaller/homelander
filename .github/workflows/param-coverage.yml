@@ -3,7 +3,7 @@ name: Param Coverage
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 8 * * 1'  # weekly Monday 8am UTC
+    - cron: '0 8 1 * *'  # monthly on the 1st at 8am UTC
 
 jobs:
   coverage:

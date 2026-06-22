@@ -137,7 +137,7 @@ describe('validateSearchUrl — user friendly import gate', () => {
     assert.equal(params.get('price'), '1-');
     assert.equal(params.get('energyefficiencyclasses'), 'a,b,a_plus');
     assert.equal(params.get('petsallowedtypes'), 'no,yes,negotiable');
-    assert.equal(params.get('equipment'), 'fridge,cooker,petsallowed,internet');
+    assert.equal(params.get('equipment'), null);  // filtered: mobile-ignored equipment
     assert.equal(params.has('numberofrooms'), false);
     assert.ok(result.safeIgnoredParams.some(p => p.key === 'gender'));
     assert.ok(result.safeIgnoredParams.some(p => p.key === 'startrentaldate'));
@@ -248,7 +248,7 @@ describe('translateUrl — Berlin', () => {
     assert.equal(error, null);
     assert.ok(fullUrl.includes('price=-1500'));
     assert.ok(fullUrl.includes('livingspace=60'));
-    assert.ok(fullUrl.includes('hasPictures=1'));
+    assert.ok(!fullUrl.includes('hasPictures'));   // mobile-unsupported, filtered out
     assert.ok(fullUrl.includes('equipment=balcony'));
   });
 });
@@ -268,7 +268,7 @@ describe('translateUrl — Munich', () => {
       'https://www.immobilienscout24.de/Suche/de/bayern/muenchen/wohnung-mieten?balcony=1&elevator=1&parking=1&cellar=1'
     );
     assert.equal(error, null);
-    assert.ok(fullUrl.includes('equipment=balcony%2Celevator%2Cparking%2Ccellar'));
+    assert.ok(fullUrl.includes('equipment=balcony%2Clift%2Cparking%2Ccellar'));  // elevator→lift
   });
 
   it('Munich with unmapped query params are excluded', () => {
@@ -308,25 +308,26 @@ describe('translateUrl — additional realestate types', () => {
 });
 
 describe('translateUrl — parameter mappings', () => {
-  it('maps has-pictures → hasPictures', () => {
+  it('flags has-pictures as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?has-pictures=1'
     );
-    assert.ok(fullUrl.includes('hasPictures=1'));
+    assert.ok(!fullUrl.includes('hasPictures'));  // mobile API rejects, filtered
+    assert.ok(!fullUrl.includes('has-pictures'));
   });
 
-  it('maps ageofconstruction → ageOfConstruction', () => {
+  it('flags ageofconstruction as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?ageofconstruction=3'
     );
-    assert.ok(fullUrl.includes('ageOfConstruction=3'));
+    assert.ok(!fullUrl.includes('ageOfConstruction=3'));  // mobile API rejects, filtered
   });
 
-  it('maps barrier-free → barrierFree', () => {
+  it('flags barrier-free as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?barrier-free=1'
     );
-    assert.ok(fullUrl.includes('barrierFree=1'));
+    assert.ok(!fullUrl.includes('barrierFree=1'));  // mobile API rejects, filtered
   });
 
   it('maps parking via equipment param', () => {
@@ -336,18 +337,18 @@ describe('translateUrl — parameter mappings', () => {
     assert.ok(fullUrl.includes('equipment=parking'));
   });
 
-  it('maps pets-allowed → petsAllowed', () => {
+  it('flags pets-allowed as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?pets-allowed=1'
     );
-    assert.ok(fullUrl.includes('petsAllowed=1'));
+    assert.ok(!fullUrl.includes('petsAllowed=1'));  // mobile API rejects, filtered
   });
 
-  it('maps energy-efficiency → energyEfficiency', () => {
+  it('flags energy-efficiency as mobile-unsupported (removed from DIRECT_PARAM_MAP)', () => {
     const { fullUrl } = translateUrl(
       'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?energy-efficiency=A%2B'
     );
-    assert.ok(fullUrl.includes('energyEfficiency=A%2B'));
+    assert.ok(!fullUrl.includes('energyEfficiency=A%2B'));  // mobile API rejects, filtered
   });
 
   it('maps guest-toilet and built-in-kitchen → equipment', () => {

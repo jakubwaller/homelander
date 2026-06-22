@@ -208,16 +208,13 @@ const SAFE_IGNORED_PARAM_PATTERNS = [
 ];
 
 // Direct query passthroughs kept for legacy coverage and known mobile API params.
+// Entries removed (2026-06-22) after live mobile API conformance test confirmed 412:
+//   has-pictures, ageofconstruction, barrier-free, pets-allowed, energy-efficiency
 const DIRECT_PARAM_MAP = {
   'exclusioncriteria': 'exclusioncriteria',
-  'has-pictures': 'hasPictures',
-  'ageofconstruction': 'ageOfConstruction',
   'energyefficiencyclasses': 'energyefficiencyclasses',
   'petsallowedtypes': 'petsallowedtypes',
   'floor': 'floor',
-  'barrier-free': 'barrierFree',
-  'pets-allowed': 'petsAllowed',
-  'energy-efficiency': 'energyEfficiency',
   'apartmenttypes': 'apartmenttypes',
   'haspromotion': 'haspromotion',
   'constructionyear': 'constructionyear',
@@ -297,7 +294,7 @@ EQUIPMENT_MOBILE_VALUE.HANDICAPPED_ACCESSIBLE = 'handicappedaccessible';
 EQUIPMENT_MOBILE_VALUE.BUILT_IN_KITCHEN = 'builtinKitchen';
 EQUIPMENT_MOBILE_VALUE.GUEST_TOILET = 'guesttoilet';
 EQUIPMENT_MOBILE_VALUE.PARKING_SPACE = 'parking';
-EQUIPMENT_MOBILE_VALUE.LIFT = 'elevator';
+EQUIPMENT_MOBILE_VALUE.LIFT = 'lift';         // mobile API accepts 'lift', not 'elevator'
 EQUIPMENT_MOBILE_VALUE.CELLAR = 'cellar';
 EQUIPMENT_MOBILE_VALUE.FRIDGE = 'fridge';
 EQUIPMENT_MOBILE_VALUE.COOKER = 'cooker';
@@ -319,7 +316,25 @@ const EQUIPMENT_LABELS = {
   INTERNET: 'internet',
 };
 
+// Mobile API silently ignores these equipment values — accepted but no filtering.
+const MOBILE_IGNORED_EQUIPMENT_CANONICAL = new Set([
+  'FRIDGE', 'COOKER', 'PETS_ALLOWED', 'INTERNET',
+]);
+
+// Mobile API rejects these heating types with 412 — removed from IS24's mobile API.
+const MOBILE_UNSUPPORTED_HEATING_CANONICAL = new Set([
+  'FLOOR_HEATING', 'GAS_HEATING', 'OIL_HEATING', 'DISTRICT_HEATING',
+  'NIGHT_STORAGE_HEATER', 'WOOD_PELLET_HEATING', 'HEAT_PUMP', 'SOLAR_HEATING',
+]);
+
 const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
+  // Removed DIRECT_PARAM_MAP entries (2026-06-22) — confirmed 412 by live conformance test
+  'has-pictures': 'listing pictures filter',
+  'ageofconstruction': 'age of construction',
+  'barrier-free': 'barrier-free filter',
+  'pets-allowed': 'pets allowed filter',
+  'energy-efficiency': 'energy rating filter',
+  // Original entries
   gender: 'flatmate gender',
   smokingallowed: 'smoking allowed',
   startrentaldate: 'rental start date',
@@ -635,10 +650,16 @@ export function buildMobileApiUrl(canonical, { page = 1, pageSize = 20, includeL
   if (canonical.construction?.newBuildingOnly) params.set('newbuilding', 'true');
   if (canonical.fullText) params.set('fulltext', canonical.fullText);
   if (canonical.heatingTypes?.length) {
-    params.set('heatingtypes', canonical.heatingTypes.map(v => HEATING_TYPE_MOBILE_VALUE[v] || v).join(','));
+    const supported = canonical.heatingTypes.filter(v => !MOBILE_UNSUPPORTED_HEATING_CANONICAL.has(v));
+    if (supported.length) {
+      params.set('heatingtypes', supported.map(v => HEATING_TYPE_MOBILE_VALUE[v] || v).join(','));
+    }
   }
   if (canonical.equipment?.length) {
-    params.set('equipment', canonical.equipment.map(v => EQUIPMENT_MOBILE_VALUE[v] || v).join(','));
+    const supported = canonical.equipment.filter(v => !MOBILE_IGNORED_EQUIPMENT_CANONICAL.has(v));
+    if (supported.length) {
+      params.set('equipment', supported.map(v => EQUIPMENT_MOBILE_VALUE[v] || v).join(','));
+    }
   }
   for (const { key, value } of canonical.directParams || []) {
     // Merge exclusioncriteria values into a single comma-separated param
