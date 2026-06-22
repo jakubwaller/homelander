@@ -228,6 +228,11 @@ const DIRECT_PARAM_MAP = {
   'constructionyear': 'constructionyear',
   'newbuilding': 'newbuilding',
   'fulltext': 'fulltext',
+  'osmtags': 'osmtags',
+  'minimuminternetspeed': 'minimuminternetspeed',
+  'exclusiveonis24': 'exclusiveonis24',
+  'comingsoon': 'comingsoon',
+  'paywall': 'paywall',
 };
 
 const HEATING_TYPE_MAP = {
@@ -317,11 +322,6 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   startrentaldate: 'rental start date',
   furniture: 'furnished',
   rentalduration: 'rental duration',
-  osmtags: 'proximity to POIs',
-  minimuminternetspeed: 'minimum internet speed',
-  exclusiveonis24: '"only on IS24" filter',
-  comingsoon: '"coming soon" filter',
-  paywall: 'paywall filter',
 };
 
 // IS24 search type slugs that the mobile API has no realestatetype for.
