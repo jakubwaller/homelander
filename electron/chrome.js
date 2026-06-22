@@ -180,8 +180,8 @@ export class ChromeManager {
   }
 
   async hideBrowser() {
-    // No-op: keep browser at default position — don't drag off-screen.
-    // macOS handles background windows fine without forced positioning.
+    // Intentional no-op — macOS handles background windows fine without
+    // forced off-screen positioning (which causes window-management issues).
   }
 
   async openUrl(url, email, options = {}) {

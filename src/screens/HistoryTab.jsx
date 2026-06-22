@@ -522,7 +522,12 @@ export default function HistoryTab() {
       const rowsToExport = exportRows || [];
       if (rowsToExport.length === 0) return;
 
-      const escapeCsv = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+      const escapeCsv = (value) => {
+        const s = String(value ?? '');
+        // Formula injection guard: prefix cells starting with = + - @
+        const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
+        return `"${safe.replace(/"/g, '""')}"`;
+      };
       const header = 'expose_id,title,address,outcome,badges,detail,sent_at,filter_id';
       const rows = rowsToExport
         .map((l) => {

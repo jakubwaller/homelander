@@ -74,5 +74,15 @@ contextBridge.exposeInMainWorld('homelander', {
   // ── App lifecycle ───────────────────────────────────────────
   quit: () => ipcRenderer.invoke('app:quit'),
   cleanData: (email) => ipcRenderer.invoke('data:clean', email),
-  openExternal: (url) => shell.openExternal(url),
+  openExternal: (url) => {
+    // Allowlist: only https and mailto URLs
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'mailto:') {
+        shell.openExternal(url);
+      }
+    } catch {
+      // Invalid URL — silently ignore
+    }
+  },
 });

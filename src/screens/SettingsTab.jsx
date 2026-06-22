@@ -17,12 +17,6 @@ import { useLocale } from '../locales/LocaleContext';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function maskApiKey(key) {
-  if (!key) return '';
-  if (key.length <= 8) return '*'.repeat(key.length);
-  return key.slice(0, 4) + '*'.repeat(key.length - 4);
-}
-
 function renderPreview(template, sample, t) {
   if (!template) return <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{t('settings.noTemplate', 'No template set.')}</span>;
   try {
