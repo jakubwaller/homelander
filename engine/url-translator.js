@@ -227,6 +227,7 @@ const DIRECT_PARAM_MAP = {
   'haspromotion': 'haspromotion',
   'constructionyear': 'constructionyear',
   'newbuilding': 'newbuilding',
+  'fulltext': 'fulltext',
 };
 
 const HEATING_TYPE_MAP = {
@@ -323,6 +324,24 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   paywall: 'paywall filter',
 };
 
+// IS24 search type slugs that the mobile API has no realestatetype for.
+// These categories are desktop-only; searching them via the mobile API would
+// return wrong listings (apartments instead of garages/WG/senior living).
+const MOBILE_UNSUPPORTED_TYPE_SLUGS = new Set([
+  'garage-mieten',
+  'garage-kaufen',
+  'stellplatz-mieten',
+  'stellplatz-kaufen',
+  'wg-zimmer',
+  'wg-zimmer-mieten',
+  'wg-zimmer-angebot',
+  'wg-zimmer-gesucht',
+  'wohnen-auf-zeit',
+  'seniorenwohnen',
+  'pflegeheim',
+  'sozialwohnung-mieten',
+]);
+
 function parseWgSlug(segment) {
   const match = String(segment || '').match(/^(\d+)er-wg$/i);
   if (!match) return null;
@@ -415,6 +434,13 @@ export function parseSearchUrl(webUrl) {
     // structurally-correct approach: last segment = type, everything between
     // /Suche/ and the type is geocode (plus optional radius/shape prefix).
     const typeSlug = afterSuche.at(-1) || '';
+
+    // Mobile API only supports 5 realEstateTypes. Desktop-only categories
+    // (garage, WG, senior living, etc.) would silently return wrong listings.
+    if (MOBILE_UNSUPPORTED_TYPE_SLUGS.has(typeSlug)) {
+      return emptyResult(`The IS24 mobile API does not support this search category: ${typeSlug}. This search type is desktop-only and would return incorrect listings.`);
+    }
+
     let realEstatePathType = null;
     let seoPathParams = null;
 
@@ -509,6 +535,10 @@ export function parseSearchUrl(webUrl) {
           ? splitValues(value).map(v => EXCLUSION_CRITERIA_CORRECTIONS[v.toLowerCase()] || v).join(',')
           : value;
         canonical.directParams.push({ key: mappedKey, value: correctedValue });
+        // Populate structured canonical fields from query params
+        if (mappedKey === 'newbuilding') canonical.construction.newBuildingOnly = true;
+        if (mappedKey === 'fulltext') canonical.fullText = String(value);
+        if (mappedKey === 'apartmenttypes') canonical.apartmentTypes = splitValues(value);
         seenKnownKeys.add(key);
       } else if (MOBILE_UNSUPPORTED_WEB_FILTER_LABELS[key]) {
         safeIgnoredParams.push({
