@@ -240,7 +240,7 @@ export class HomelanderDB {
     ).get(...params());
     const seenUnapplied = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'seen'${whereFilter}`).get(...params());
     const today = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE status = 'sent' AND date(sent_at) = date('now')${whereFilter}`
+      `SELECT COUNT(*) as count FROM listings WHERE status = 'sent' AND date(sent_at) = date('now', 'localtime')${whereFilter}`
     ).get(...params());
 
     return {
