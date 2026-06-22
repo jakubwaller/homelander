@@ -344,17 +344,19 @@ export class ChromeManager {
 
   async checkIs24Login() {
     let browser = null;
+    let checkPage = null;
     try {
       if (!(await this.isHealthy())) return { loggedIn: false, cookies: [] };
       browser = await this._connectExisting();
-      let pages = await browser.pages();
-      const is24Pages = pages.filter(p => {
-        const url = p.url();
-        return url.includes('immobilienscout24.de') && !url.includes('sso.immobilienscout24.de');
-      });
-      const is24Page = is24Pages[0] || pages.find(p => p.url().includes('immobilienscout24'));
 
-      const domLoggedIn = (await Promise.all(is24Pages.map(page => page.evaluate(() => {
+      // Always open a fresh tab to IS24 home — never rely on leftover tabs
+      // from a previous session, which may be stale expose pages whose
+      // execution context was destroyed (producing false logout negatives).
+      checkPage = await browser.newPage();
+      await checkPage.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 10000 });
+      await new Promise(r => setTimeout(r, 1000)); // let React render the header
+
+      const domLoggedIn = await checkPage.evaluate(() => {
         const visible = (el) => {
           const style = window.getComputedStyle(el);
           const rect = el.getBoundingClientRect();
@@ -367,15 +369,17 @@ export class ChromeManager {
         const interactive = Array.from(document.querySelectorAll('a, button, [role="link"], [role="button"]')).filter(visible);
         const hasLoggedInText = loggedInTextRe.test(text) || interactive.some(el => loggedInTextRe.test(el.textContent || ''));
         const hasLoginUi = interactive.some(el => loggedOutTextRe.test(el.textContent || ''));
-        const isLoginPage = /(\/login|\/anmelden|sso\.)/i.test(`${window.location.href} ${window.location.pathname}`);
+        const isLoginPage = /(\/login|\/anmelden|sso\.)/i.test(window.location.href + ' ' + window.location.pathname);
 
         if (/angemeldet\s+als/i.test(text) && emailRe.test(text) && !isLoginPage) return true;
         return hasLoggedInText && !hasLoginUi && !isLoginPage;
-      }).catch(() => false)))).some(Boolean);
+      }).catch(() => false);
 
       return { loggedIn: domLoggedIn, cookies: domLoggedIn ? ['session_present'] : [] };
     } catch (err) {
       return { loggedIn: false, cookies: [], error: err.message };
+    } finally {
+      if (checkPage) await checkPage.close().catch(() => {});
     }
   }
 
