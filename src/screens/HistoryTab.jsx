@@ -359,6 +359,8 @@ export default function HistoryTab() {
   const [supportBusyId, setSupportBusyId] = useState(null);
   const [allTimeStats, setAllTimeStats] = useState(null);
   const [retrying, setRetrying] = useState(new Set());
+  const [retryAllBusy, setRetryAllBusy] = useState(false);
+  const [retryAllDone, setRetryAllDone] = useState(false);
   const sentinelRef = useRef(null);
   const fetchListingsRef = useRef(null);
   const [hoveredImage, setHoveredImage] = useState(null);
@@ -575,6 +577,23 @@ export default function HistoryTab() {
     }), 2000);
   }, []);
 
+  const handleRetryAllFailed = useCallback(async () => {
+    if (!window.homelander) return;
+    setRetryAllBusy(true);
+    setRetryAllDone(false);
+    try {
+      await window.homelander.retryAllFailed(filterId || null);
+      setRetryAllDone(true);
+      // Refresh the list — failed should disappear
+      fetchListingsRef.current?.(false);
+      loadStats(filterId);
+      setTimeout(() => setRetryAllDone(false), 3000);
+    } catch (err) { swallow(err, 'renderer/retry-all-failed'); }
+    finally {
+      setRetryAllBusy(false);
+    }
+  }, [filterId, loadStats]);
+
   const handleSupportBundle = useCallback(async (listing) => {
     const exposeId = listing?.expose_id;
     if (!window.homelander?.createSupportBundle || !exposeId) return;
@@ -718,6 +737,20 @@ export default function HistoryTab() {
             ))}
           </select>
         </div>
+
+        {/* Retry All Failed button — visible only when Failed filter active */}
+        {outcomeFilter === 'FAIL' && (allTimeStats?.failed ?? 0) > 0 && (
+          <button
+            className="btn btn-secondary text-xs"
+            onClick={handleRetryAllFailed}
+            disabled={retryAllBusy}
+            style={retryAllDone ? { background: 'var(--success)', color: 'white' } : { color: 'var(--warning, #f59e0b)' }}
+          >
+            {retryAllBusy ? t('history.retryingAll', 'Retrying…')
+              : retryAllDone ? t('history.retriedAll', '✓ All re-queued!')
+              : t('history.retryAllFailed', '⟳ Retry All Failed')}
+          </button>
+        )}
 
         {/* Export button */}
         <button

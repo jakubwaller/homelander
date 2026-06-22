@@ -938,6 +938,21 @@ function registerIpcHandlers() {
     }
   });
 
+  // Retry ALL failed listings at once
+  ipcMain.handle('daemon:retry-all-failed', async (_event, filterId) => {
+    if (daemonProcess && daemonProcess.connected) {
+      daemonProcess.send({ type: 'retry_all_failed', filterId: filterId || null });
+      return { ok: true };
+    }
+    // Fallback: direct DB access
+    try {
+      const result = db().retryAllFailed(filterId || null);
+      return { ok: true, changed: result.changed, error: null };
+    } catch (err) {
+      return { ok: false, ...gracefulFailure('daemon:retry-all-failed', err, { code: 'LISTING_RETRY_FAILED' }) };
+    }
+  });
+
   // Filters
   ipcMain.handle('filters:list', async () => {
     try {

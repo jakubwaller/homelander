@@ -638,6 +638,15 @@ function setupIpc(db) {
       }
     }
 
+    // ── Retry ALL failed listings ─────────────────────────────
+    if (msg.type === 'retry_all_failed') {
+      const result = db.retryAllFailed(msg.filterId || null);
+      log(`Retry all: ${result.changed} listings reset to seen`);
+      emit({ type: 'retry_all_queued', changed: result.changed });
+      const nextPollAt = resetNextPollDue();
+      emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
+    }
+
     // ── Pause applying (polling continues) ───────────────────
     if (msg.type === 'pause_apply') {
       log('Apply paused by user');

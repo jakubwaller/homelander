@@ -200,6 +200,25 @@ export class HomelanderDB {
     return { hash: row.hash };
   }
 
+  /** Retry ALL failed listings that are genuinely retryable.
+   *  Skips: PREMIUM-only, DEACTIVATED, CAPTCHA-only failures.
+   *  Only resets listings with outcome FAIL / SUBMIT_FAILED /
+   *  SESSION_EXPIRED, excluding premium/deactivated reasons. */
+  retryAllFailed(filterId = null) {
+    let sql = `UPDATE listings SET status = 'seen', outcome = NULL, detail = NULL,
+      failure_reason = NULL, sent_at = NULL
+      WHERE outcome IN ('FAIL', 'SUBMIT_FAILED', 'SESSION_EXPIRED', 'CAPTCHA')
+      AND (detail IS NULL OR (detail NOT LIKE '%premium%' AND detail NOT LIKE '%deactivated%'))
+      AND (failure_reason IS NULL OR (failure_reason NOT LIKE '%premium%' AND failure_reason NOT LIKE '%deactivated%'))`;
+    const params = [];
+    if (filterId) {
+      sql += ' AND filter_id = ?';
+      params.push(filterId);
+    }
+    const info = this.db.prepare(sql).run(...params);
+    return { changed: info.changes };
+  }
+
   getHistory(limit = 100, offset = 0, filterId = null, outcome = null) {
     let sql = 'SELECT * FROM listings WHERE outcome IS NOT NULL';
     const params = [];

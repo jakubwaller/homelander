@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('homelander', {
   getDaemonStatus: () => ipcRenderer.invoke('daemon:status'),
   pollNow: (filterId) => ipcRenderer.invoke('daemon:poll-now', filterId),
   retryListing: (exposeId) => ipcRenderer.invoke('daemon:retry-listing', exposeId),
+  retryAllFailed: (filterId) => ipcRenderer.invoke('daemon:retry-all-failed', filterId),
 
   // ── Filters ───────────────────────────────────────────────
   getFilters: () => ipcRenderer.invoke('filters:list'),
