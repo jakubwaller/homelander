@@ -325,6 +325,11 @@ const MOBILE_UNSUPPORTED_WEB_FILTER_LABELS = {
   furniture: 'furnished',
   rentalduration: 'rental duration',
   wohnberechtigungsscheinneeded: 'WBS required',
+  onlyshorttermbuildable: 'short-term buildable',
+  onlywithplanningpermission: 'planning permission',
+  onlywithoutcourtage: 'commission-free',
+  sitedevelopmenttypes: 'site development type',
+  siteconstructibletypes: 'site constructible type',
 };
 
 // IS24 search type slugs that the mobile API has no realestatetype for.
