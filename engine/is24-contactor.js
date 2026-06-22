@@ -308,7 +308,7 @@ export class IS24Contactor {
       }
 
       const tFill = Date.now();
-      const fillResult = await this._fillForm(message);
+      let fillResult = await this._fillForm(message);
       timing.fill_ms = Date.now() - tFill;
       fieldCount = fillResult.filled;
       fieldRetries = fillResult.retries;
@@ -338,7 +338,41 @@ export class IS24Contactor {
       await this._clickAbschicken();
 
       const tVerify = Date.now();
-      const { verified, detail } = await this._verifySubmission(exposeId, captcha);
+      let verificationResult;
+      let submitRetries = 0;
+      const MAX_SUBMIT_RETRIES = 2;
+
+      while (submitRetries <= MAX_SUBMIT_RETRIES) {
+        verificationResult = await this._verifySubmission(exposeId, captcha);
+        const { verified, detail } = verificationResult;
+
+        if (verified) break;
+
+        // Only retry on validation-type errors — not premium, captcha, session, or deactivated
+        const isValidationError = detail.includes('validation')
+          || detail.includes('SUBMIT_UNCONFIRMED')
+          || detail === 'no confirmation after 5s';
+        const isTerminal = detail.includes('PREMIUM')
+          || detail.includes('SESSION_EXPIRED')
+          || detail.includes('DEACTIVATED')
+          || detail.includes('captcha');
+
+        if (isTerminal) break;
+        if (!isValidationError) break;
+
+        if (submitRetries < MAX_SUBMIT_RETRIES) {
+          submitRetries++;
+          // Re-fill fields that IS24's React validation may have cleared
+          fillResult = await this._fillForm(message);
+          fieldCount += fillResult.filled;
+          fieldRetries += fillResult.retries;
+          await this._clickAbschicken();
+        } else {
+          break;
+        }
+      }
+
+      const { verified, detail } = verificationResult;
       timing.verify_ms = Date.now() - tVerify;
 
       // Dump page HTML AFTER verification (strip form values for privacy)
