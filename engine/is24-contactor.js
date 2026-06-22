@@ -187,18 +187,6 @@ export class IS24Contactor {
     } catch (err) { swallow(err, 'CDP/restore-window'); }
   }
 
-  /** Minimize the persistent background page so navigations don't steal focus. */
-  async _minimizeWindow() {
-    if (!this.page || this.page.isClosed()) return;
-    const session = await this.page.target().createCDPSession();
-    try {
-      const { windowId } = await session.send('Browser.getWindowForTarget');
-      await session.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-    } finally {
-      await session.detach().catch(() => {});
-    }
-  }
-
   /**
    * Navigate to an IS24 expose contact form, fill it, and submit.
    * Returns rich metadata for logging.
@@ -214,10 +202,6 @@ export class IS24Contactor {
 
     this.page = await this._ensurePage();
     this._captchaAttempts = 0;
-
-    // Electron 42's Chromium activates the window on page navigation.
-    // Minimize it so the user keeps working undisturbed during automated applies.
-    await this._minimizeWindow().catch((err) => { swallow(err, 'apply/minimize-start'); });
 
     try {
       const tGoto = Date.now();
