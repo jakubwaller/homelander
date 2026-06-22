@@ -4,7 +4,7 @@
 // Debug outputs saved to debug/ (html/, screenshots/).
 
 import puppeteer from 'puppeteer';
-import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, writeFileSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,21 @@ function ensureDir(subdir) {
 export const DEBUG = {
   htmlDir: () => ensureDir('html'),
   screenshotDir: () => ensureDir('screenshots'),
+
+  /** Prune debug artifacts — keep only the N most recent files in each subdir. */
+  prune(maxFiles = 50) {
+    for (const getDir of [this.htmlDir, this.screenshotDir]) {
+      try {
+        const dir = getDir();
+        const files = readdirSync(dir)
+          .map(name => ({ name, mtimeMs: statSync(join(dir, name)).mtimeMs }))
+          .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        for (const f of files.slice(maxFiles)) {
+          try { unlinkSync(join(dir, f.name)); } catch {}
+        }
+      } catch {}
+    }
+  },
 };
 /** Logged-catch replacement for bare catch {} — never throws, always logs. */
 function swallow(err, context, logFn = console.error) {
@@ -306,15 +321,18 @@ export class IS24Contactor {
       timing.verify_ms = Date.now() - tVerify;
 
       // Dump page HTML AFTER verification (strip form values for privacy)
+      // Only when HOMELANDER_DEBUG_HTML=1 (off by default — 4 MB per apply)
       try {
-        let html = await this.page.content();
-        // Strip PII: remove input values and textarea contents
-        html = html.replace(/\svalue="[^"]*"/gi, ' value=""');
-        html = html.replace(/\svalue='[^']*'/gi, " value=''");
-        html = html.replace(/(<textarea[^>]*>)[\s\S]*?(<\/textarea>)/gi, '$1$2');
-        const htmlDir = DEBUG.htmlDir();
-        const outcomeTag = verified ? 'SENT' : (detail.includes('captcha') ? 'CAPTCHA_FAIL' : 'FAIL');
-        writeFileSync(join(htmlDir, `${exposeId}_${outcomeTag}.html`), html, 'utf8');
+        if (process.env.HOMELANDER_DEBUG_HTML === '1') {
+          let html = await this.page.content();
+          // Strip PII: remove input values and textarea contents
+          html = html.replace(/\svalue="[^"]*"/gi, ' value=""');
+          html = html.replace(/\svalue='[^']*'/gi, " value=''");
+          html = html.replace(/(<textarea[^>]*>)[\s\S]*?(<\/textarea>)/gi, '$1$2');
+          const htmlDir = DEBUG.htmlDir();
+          const outcomeTag = verified ? 'SENT' : (detail.includes('captcha') ? 'CAPTCHA_FAIL' : 'FAIL');
+          writeFileSync(join(htmlDir, `${exposeId}_${outcomeTag}.html`), html, 'utf8');
+        }
       } catch (err) { swallow(err, 'debug/write-html'); }
 
       formState = verified ? 'confirmed' : (detail.includes('captcha') ? 'captcha_fail' : detail.substring(0, 40));

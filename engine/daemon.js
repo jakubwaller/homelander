@@ -49,7 +49,7 @@ let nextPollDueAt = 0; // ms timestamp; reset by settings save and manual poll
 
 // Dynamic imports
 const { HomelanderDB } = await import('./db.js');
-const { IS24Contactor } = await import('./is24-contactor.js');
+const { IS24Contactor, DEBUG } = await import('./is24-contactor.js');
 const { fetchListings } = await import('./url-translator.js');
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -329,6 +329,9 @@ async function applyLoop(db) {
       }
     }
   } catch (err) { swallow(err, 'daemon/restore-captcha-pause'); }
+
+  // Prune debug artifacts on startup (keep 50 most recent per subdir)
+  DEBUG.prune(50);
 
   log('Apply loop started');
 

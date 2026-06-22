@@ -225,61 +225,54 @@ export class HomelanderDB {
   }
 
   getStats(filterId = null) {
-    const whereFilter = filterId ? ' AND filter_id = ?' : '';
-    const params = (sql) => filterId ? [filterId] : [];
-    
-    const total = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status IN ('sent', 'failed')${whereFilter}`).get(...params());
-    const sent = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'sent'${whereFilter}`).get(...params());
-    const failed = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%'${whereFilter}`).get(...params());
-    const deactivated = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE outcome = 'DEACTIVATED'${whereFilter}`).get(...params());
-    const premium = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%')${whereFilter}`
-    ).get(...params());
-    const captcha = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%')${whereFilter}`
-    ).get(...params());
-    const seenUnapplied = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'seen'${whereFilter}`).get(...params());
-    const today = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE status = 'sent' AND date(sent_at) = date('now', 'localtime')${whereFilter}`
-    ).get(...params());
+    const whereFilter = filterId ? ' WHERE filter_id = ?' : '';
+    const filterParam = filterId ? [filterId] : [];
+
+    const row = this.db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') THEN 1 ELSE 0 END), 0) as total,
+        COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as sent,
+        COALESCE(SUM(CASE WHEN status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%' THEN 1 ELSE 0 END), 0) as failed,
+        COALESCE(SUM(CASE WHEN outcome = 'DEACTIVATED' THEN 1 ELSE 0 END), 0) as deactivated,
+        COALESCE(SUM(CASE WHEN (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%') THEN 1 ELSE 0 END), 0) as premium,
+        COALESCE(SUM(CASE WHEN (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') THEN 1 ELSE 0 END), 0) as captcha,
+        COALESCE(SUM(CASE WHEN status = 'seen' THEN 1 ELSE 0 END), 0) as seen_unapplied,
+        COALESCE(SUM(CASE WHEN status = 'sent' AND date(sent_at) = date('now', 'localtime') THEN 1 ELSE 0 END), 0) as today
+      FROM listings${whereFilter}
+    `).get(...filterParam);
 
     return {
-      total: total.count,
-      sent: sent.count,
-      failed: failed.count,
-      deactivated: deactivated.count,
-      premium: premium.count,
-      captcha: captcha.count,
-      seen_unapplied: seenUnapplied.count,
-      today: today.count,
+      total: row.total, sent: row.sent, failed: row.failed,
+      deactivated: row.deactivated, premium: row.premium, captcha: row.captcha,
+      seen_unapplied: row.seen_unapplied, today: row.today,
     };
   }
 
   getTodayStats(filterId = null) {
     const whereFilter = filterId ? ' AND filter_id = ?' : '';
-    const params = (sql) => filterId ? [filterId] : [];
-    
-    const total = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status IN ('sent', 'failed') AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
-    const sent = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'sent' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
-    const failed = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
-    const deactivated = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE outcome = 'DEACTIVATED' AND date(sent_at) = date('now', 'localtime')${whereFilter}`).get(...params());
-    const premium = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%') AND date(sent_at) = date('now', 'localtime')${whereFilter}`
-    ).get(...params());
-    const captcha = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') AND date(sent_at) = date('now', 'localtime')${whereFilter}`
-    ).get(...params());
-    const seenUnapplied = this.db.prepare(`SELECT COUNT(*) as count FROM listings WHERE status = 'seen' AND date(discovered_at) = date('now', 'localtime')${whereFilter}`).get(...params());
+    const filterParam = filterId ? [filterId] : [];
+
+    const row = this.db.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') THEN 1 ELSE 0 END), 0) as total,
+        COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as sent,
+        COALESCE(SUM(CASE WHEN status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%' THEN 1 ELSE 0 END), 0) as failed,
+        COALESCE(SUM(CASE WHEN outcome = 'DEACTIVATED' THEN 1 ELSE 0 END), 0) as deactivated,
+        COALESCE(SUM(CASE WHEN (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%') THEN 1 ELSE 0 END), 0) as premium,
+        COALESCE(SUM(CASE WHEN (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') THEN 1 ELSE 0 END), 0) as captcha,
+        COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as today
+      FROM listings WHERE date(sent_at) = date('now', 'localtime')${whereFilter}
+    `).get(...filterParam);
+
+    // seen_unapplied uses discovered_at, not sent_at — query separately
+    const seenUnapplied = this.db.prepare(
+      `SELECT COUNT(*) as count FROM listings WHERE status = 'seen' AND date(discovered_at) = date('now', 'localtime')${whereFilter}`
+    ).get(...filterParam);
 
     return {
-      total: total.count,
-      sent: sent.count,
-      failed: failed.count,
-      deactivated: deactivated.count,
-      premium: premium.count,
-      captcha: captcha.count,
-      seen_unapplied: seenUnapplied.count,
-      today: sent.count,
+      total: row.total, sent: row.sent, failed: row.failed,
+      deactivated: row.deactivated, premium: row.premium, captcha: row.captcha,
+      seen_unapplied: seenUnapplied.count, today: row.today,
     };
   }
 
