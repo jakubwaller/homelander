@@ -352,7 +352,9 @@ export class ChromeManager {
       let page = (await browser.pages()).find(p => p.url().includes('immobilienscout24'));
       if (!page) {
         page = await browser.newPage();
-        await page.goto(IS24_HOME, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        const url = IS24_HOME;
+        await page.evaluate(u => { window.location.href = u; }, url);
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 });
         await new Promise(r => setTimeout(r, 2000));
       }
       const email = await page.evaluate(() => {

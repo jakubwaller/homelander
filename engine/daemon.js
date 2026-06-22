@@ -203,8 +203,12 @@ async function applyOne(listing, filterId, db) {
           applyPaused = true;
           pauseResumeTime = null;
           writePauseFlag('session_expired');
-          // Navigate the persistent page to IS24 homepage so the user can log in
-          try { await contactor.page.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 }); } catch (err) { swallow(err, 'apply/session-expiry-redirect'); }
+          // Navigate the persistent page to IS24 homepage so the user can log in.
+          // Use in-page navigation to avoid CDP Page.navigate window activation.
+          try {
+            await contactor.page.evaluate(() => { window.location.href = 'https://www.immobilienscout24.de/'; });
+            await contactor.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
+          } catch (err) { swallow(err, 'apply/session-expiry-redirect'); }
           return;
         }
       } catch (_) { /* best-effort; don't disrupt apply */ }
