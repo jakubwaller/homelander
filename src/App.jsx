@@ -10,38 +10,11 @@ import SetupWizard from './screens/SetupWizard';
 import StatusDot from './components/StatusDot';
 import { LocaleProvider, useLocale } from './locales/LocaleContext';
 import { userErrorText } from './shared/userErrors';
+import { normalizeStats } from './shared/normalizeStats.js';
 import { swallow } from './shared/logCatch.js';
 import homelanderKey from './assets/homelander-key.png';
 
 const TABS = ['searches', 'history', 'settings'];
-
-function normalizeStats(stats) {
-  if (!stats) return stats;
-  if (stats.total != null) {
-    return {
-      seen: (stats.total || 0) + (stats.seen_unapplied || 0),
-      sent: stats.sent || 0,
-      failed: stats.failed || 0,
-      deactivated: stats.deactivated || 0,
-      premium: stats.premium || 0,
-      captcha: stats.captcha || 0,
-      seen_unapplied: stats.seen_unapplied || 0,
-      today: stats.today || 0,
-      nextPollAt: stats.nextPollAt || stats.next_poll_at || null,
-    };
-  }
-  return {
-    seen: stats.seen || 0,
-    sent: stats.sent || 0,
-    failed: stats.failed || 0,
-    deactivated: stats.deactivated || 0,
-    premium: stats.premium || 0,
-    captcha: stats.captcha || 0,
-    seen_unapplied: stats.seen_unapplied || 0,
-    today: stats.today || 0,
-    nextPollAt: stats.nextPollAt || stats.next_poll_at || null,
-  };
-}
 
 export default function App() {
   return React.createElement(LocaleProvider, null, React.createElement(AppInner));
