@@ -458,7 +458,9 @@ export class IS24Contactor {
     try {
       const tempPage = await this.browser.newPage();
       try {
-        await tempPage.goto('https://www.immobilienscout24.de/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        const url = 'https://www.immobilienscout24.de/';
+        await tempPage.evaluate(u => { window.location.href = u; }, url);
+        await tempPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
         return await tempPage.evaluate(evaluateLogin);
       } finally {
         await tempPage.close().catch((err) => { swallow(err, 'CDP/tempPage-close'); });
