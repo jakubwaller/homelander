@@ -437,8 +437,8 @@ export class IS24Contactor {
     } catch { return false; }
   }
 
-  /** Check login status by opening a fresh IS24 homepage tab.
-   *  Existing tabs may have stale state — a fresh page is the only reliable way. */
+  /** Check login status across already-open IS24 tabs — no new pages, no focus steal.
+   *  The authoritative check runs inside apply() on the freshly loaded listing page. */
   async checkIS24LoginAnyTab() {
     const evaluateLogin = () => `(() => {
       const flag = (window.IS24 && window.IS24.expose && window.IS24.expose.userLoggedIn);
@@ -456,16 +456,20 @@ export class IS24Contactor {
     })()`;
 
     try {
-      const tempPage = await this.browser.newPage();
-      try {
-        const url = 'https://www.immobilienscout24.de/';
-        await tempPage.evaluate(u => { window.location.href = u; }, url);
-        await tempPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-        return await tempPage.evaluate(evaluateLogin);
-      } finally {
-        await tempPage.close().catch((err) => { swallow(err, 'CDP/tempPage-close'); });
+      const pages = await this.browser.pages();
+      const is24Pages = pages.filter(p => {
+        const url = p.url();
+        return url.includes('immobilienscout24.de') && !url.includes('sso.immobilienscout24.de');
+      });
+      if (is24Pages.length === 0) return true; // no IS24 tabs — assume OK, apply() will catch
+      for (const page of is24Pages) {
+        try {
+          const loggedIn = await page.evaluate(evaluateLogin);
+          if (!loggedIn) return false;
+        } catch { /* skip stale/closed pages */ }
       }
-    } catch { return false; }
+      return true;
+    } catch { return true; } // can't check — don't block
   }
 
   async _isBlocked() {
