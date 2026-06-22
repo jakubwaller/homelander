@@ -177,8 +177,7 @@ export class ChromeManager {
     const browser = await this._connectExisting();
     const page = (await browser.pages())[0];
     if (!page) return;
-    // Set windowState:'normal' to restore from minimized (automated applies minimize it).
-    await this._setWindowBounds(page, { ...DEFAULT_WINDOW_POSITION, windowState: 'normal' });
+    await this._setWindowBounds(page, DEFAULT_WINDOW_POSITION);
     await page.bringToFront().catch((err) => { swallow(err, 'chrome/bring-to-front'); });
   }
 
