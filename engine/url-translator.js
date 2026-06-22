@@ -6,16 +6,24 @@
 const MOBILE_API_BASE = 'https://api.mobile.immobilienscout24.de/search/list';
 
 const REALESTATE_TYPE_MAP = {
+  // Base types — Fredy + Homelander combined
   'wohnung-mieten': 'apartmentrent',
   'wohnung-kaufen': 'apartmentbuy',
   'haus-mieten': 'houserent',
   'haus-kaufen': 'housebuy',
   'grundstueck-kaufen': 'plotbuy',
+  // Swap / neubau variants (Homelander)
   'wohnung-mieten-tausch': 'apartmentrent',
   'neubauwohnung-mieten': 'apartmentrent',
   'neubauwohnung-kaufen': 'apartmentbuy',
   'neubauhaus-mieten': 'houserent',
   'neubauhaus-kaufen': 'housebuy',
+  // Fredy's SEO-inflected buy variants
+  'wohnung-kaufen-mit-balkon': 'apartmentbuy',
+  'eigentumswohnung-mit-garten': 'apartmentbuy',
+  'haus-mit-keller-kaufen': 'housebuy',
+  'luxushaus-kaufen': 'housebuy',
+  'villa-kaufen': 'housebuy',
 };
 
 const NEW_BUILD_TYPES = new Set([
@@ -24,6 +32,47 @@ const NEW_BUILD_TYPES = new Set([
   'neubauhaus-mieten',
   'neubauhaus-kaufen',
 ]);
+
+// SEO-inflected web paths that imply equipment/apartment-type filters.
+// When a URL ends with one of these slugs, the implied params are injected
+// into the canonical model. Adapted from Fredy's WEB_PATH_TO_APARTMENT_EQUIPMENT_MAP.
+const SEO_PATH_EQUIPMENT_MAP = {
+  // Category "Balkon/Terrasse"
+  'wohnung-mit-balkon-mieten': { equipment: ['BALCONY'] },
+  'wohnung-mit-garten-mieten': { equipment: ['GARDEN'] },
+  // Category "Wohnungstyp"
+  'souterrainwohnung-mieten': { apartmentTypes: ['halfbasement'] },
+  'erdgeschosswohnung-mieten': { apartmentTypes: ['groundfloor'] },
+  'hochparterrewohnung-mieten': { apartmentTypes: ['raisedgroundfloor'] },
+  'etagenwohnung-mieten': { apartmentTypes: ['apartment'] },
+  'loft-mieten': { apartmentTypes: ['loft'] },
+  'maisonette-mieten': { apartmentTypes: ['maisonette'] },
+  'terrassenwohnung-mieten': { apartmentTypes: ['terracedflat'] },
+  'penthouse-mieten': { apartmentTypes: ['penthouse'] },
+  'dachgeschosswohnung-mieten': { apartmentTypes: ['roofstorey'] },
+  // Category "Ausstattung"
+  'wohnung-mit-garage-mieten': { equipment: ['PARKING_SPACE'] },
+  'wohnung-mit-einbaukueche-mieten': { equipment: ['BUILT_IN_KITCHEN'] },
+  'wohnung-mit-keller-mieten': { equipment: ['CELLAR'] },
+  // Category "Merkmale"
+  'barrierefreie-wohnung-mieten': { equipment: ['HANDICAPPED_ACCESSIBLE'] },
+};
+
+// The web UI uses "swapflat", but the mobile API only understands "swap_flat".
+// An unknown value is not ignored: the API silently returns 0 results for the
+// whole search. Other values (e.g. "projectlisting") are identical on both APIs.
+// From Fredy's EXCLUSION_CRITERIA_MAP.
+const EXCLUSION_CRITERIA_CORRECTIONS = {
+  swapflat: 'swap_flat',
+};
+
+// SEO-optimized warmrent paths: "wohnung-bis-800-euro-warm" → implicit price + pricetype.
+// From Fredy's parseSeoMaxWarmrentPath.
+const SEO_RENT_TYPE_TO_REAL_ESTATE_TYPE = {
+  wohnung: 'apartmentrent',
+  haus: 'houserent',
+};
+const SEO_MAX_WARMRENT_PATH_PATTERN = /^(?<type>wohnung|haus)-bis-(?<price>\d+)-euro-warm$/;
 
 const PRICE_TYPE_MAP = {
   'wohnung-mieten': 'calculatedtotalrent',
@@ -174,6 +223,7 @@ const DIRECT_PARAM_MAP = {
   'parking': 'parkingSpace',
   'pets-allowed': 'petsAllowed',
   'energy-efficiency': 'energyEfficiency',
+  'apartmenttypes': 'apartmenttypes',
 };
 
 const HEATING_TYPE_MAP = {
@@ -270,12 +320,6 @@ function parseWgSlug(segment) {
   return { size: Number(match[1]), fullText: `${match[1]}er wg`, label: `${match[1]}er WG` };
 }
 
-const SEO_PRICE_PATTERNS = [
-  /wohnung-bis-(\d+)-euro-warm/,
-  /wohnung-bis-(\d+)-euro-kalt/,
-  /haus-bis-(\d+)-euro/,
-];
-
 function emptyResult(error) {
   return {
     canonical: null,
@@ -357,21 +401,55 @@ export function parseSearchUrl(webUrl) {
     }
 
     const afterSuche = pathParts.slice(sucheIdx + 1);
-    const realEstatePathType = afterSuche.find(p => REALESTATE_TYPE_MAP[p]);
-    const wgPathSegment = afterSuche.find(p => parseWgSlug(p));
-    const wgSearch = parseWgSlug(wgPathSegment);
-    const typeIdx = realEstatePathType
-      ? afterSuche.indexOf(realEstatePathType)
-      : wgPathSegment
-        ? afterSuche.indexOf(wgPathSegment)
-        : -1;
-    const geocodeParts = typeIdx >= 0 ? afterSuche.slice(0, typeIdx) : afterSuche.filter(p => !REALESTATE_TYPE_MAP[p]);
-    const searchType = geocodeParts[0] === 'radius' ? 'radius' : geocodeParts[0] === 'shape' ? 'shape' : 'region';
+
+    // IS24 always puts the type slug as the LAST path segment. Adopt Fredy's
+    // structurally-correct approach: last segment = type, everything between
+    // /Suche/ and the type is geocode (plus optional radius/shape prefix).
+    const typeSlug = afterSuche.at(-1) || '';
+    let realEstatePathType = null;
+    let seoPathParams = null;
+
+    // Tier 1: direct lookup in REALESTATE_TYPE_MAP
+    if (REALESTATE_TYPE_MAP[typeSlug]) {
+      realEstatePathType = typeSlug;
+    }
+    // Tier 2: SEO equipment path (e.g. wohnung-mit-balkon-mieten)
+    else if (SEO_PATH_EQUIPMENT_MAP[typeSlug]) {
+      seoPathParams = SEO_PATH_EQUIPMENT_MAP[typeSlug];
+      realEstatePathType = 'wohnung-mieten'; // fall back to base type
+    }
+    // Tier 3: SEO warmrent path (e.g. wohnung-bis-800-euro-warm)
+    else {
+      const warmrentMatch = typeSlug.match(SEO_MAX_WARMRENT_PATH_PATTERN);
+      if (warmrentMatch) {
+        const { type, price } = warmrentMatch.groups;
+        realEstatePathType = `${type}-mieten`;
+        seoPathParams = {
+          price: { min: null, max: Number(price), type: 'calculatedtotalrent' },
+        };
+      }
+    }
+
+    // WG size pattern (e.g. 4er-wg) as a sub-tier within the last segment
+    const wgSearch = parseWgSlug(typeSlug);
+    if (wgSearch && !realEstatePathType) {
+      realEstatePathType = 'wohnung-mieten';
+    }
+
+    // Geocode: everything between /Suche/ and the type slug (last segment).
+    // The first geocode part after /Suche/ may be 'radius' or 'shape'.
+    const rawGeocodeParts = afterSuche.slice(0, -1);
+    const searchType = rawGeocodeParts[0] === 'radius' ? 'radius'
+      : rawGeocodeParts[0] === 'shape' ? 'shape'
+      : 'region';
+    const geocodeParts = searchType !== 'region'
+      ? rawGeocodeParts.slice(1)
+      : rawGeocodeParts;
 
     const canonical = {
       originalUrl: url.toString(),
       realEstateType: REALESTATE_TYPE_MAP[realEstatePathType] || 'apartmentrent',
-      realEstatePathType: realEstatePathType || wgPathSegment || null,
+      realEstatePathType: realEstatePathType || typeSlug || null,
       searchType,
       location: {
         path: geocodeParts,
@@ -379,11 +457,12 @@ export function parseSearchUrl(webUrl) {
         label: geocodeParts.length ? geocodeParts.filter(p => p !== 'de').map(titleizeSlug).join(' / ') : 'All Germany',
       },
       construction: { newBuildingOnly: NEW_BUILD_TYPES.has(realEstatePathType) },
-      price: { min: null, max: null, type: PRICE_TYPE_MAP[realEstatePathType] || 'calculatedtotalrent' },
+      price: seoPathParams?.price || { min: null, max: null, type: PRICE_TYPE_MAP[realEstatePathType] || 'calculatedtotalrent' },
       rooms: { min: null, max: null },
       livingSpace: { min: null, max: null },
       heatingTypes: [],
-      equipment: [],
+      equipment: seoPathParams?.equipment || [],
+      apartmentTypes: seoPathParams?.apartmentTypes || [],
       fullText: wgSearch?.fullText || null,
       flatShare: wgSearch || null,
       directParams: [],
@@ -415,7 +494,12 @@ export function parseSearchUrl(webUrl) {
         canonical.equipment.push(...mapMultiValues(value, EQUIPMENT_MAP, rawKey, unsupportedParams));
         seenKnownKeys.add(key);
       } else if (DIRECT_PARAM_MAP[key]) {
-        canonical.directParams.push({ key: DIRECT_PARAM_MAP[key], value });
+        const mappedKey = DIRECT_PARAM_MAP[key];
+        // Apply value corrections (e.g. swapflat → swap_flat)
+        const correctedValue = mappedKey === 'exclusioncriteria'
+          ? splitValues(value).map(v => EXCLUSION_CRITERIA_CORRECTIONS[v.toLowerCase()] || v).join(',')
+          : value;
+        canonical.directParams.push({ key: mappedKey, value: correctedValue });
         seenKnownKeys.add(key);
       } else if (MOBILE_UNSUPPORTED_WEB_FILTER_LABELS[key]) {
         safeIgnoredParams.push({
@@ -437,17 +521,6 @@ export function parseSearchUrl(webUrl) {
         safeIgnoredParams.push({ key: rawKey, value });
       } else {
         unsupportedParams.push({ key: rawKey, value, risk: 'dangerous' });
-      }
-    }
-
-    // SEO-encoded price e.g. wohnung-bis-1000-euro-warm.
-    const lastPathSegment = afterSuche[afterSuche.length - 1] || '';
-    for (const pattern of SEO_PRICE_PATTERNS) {
-      const match = lastPathSegment.match(pattern);
-      if (match && !seenKnownKeys.has('price')) {
-        canonical.price.max = Number(match[1]);
-        if (lastPathSegment.includes('warm')) canonical.price.type = 'calculatedtotalrent';
-        break;
       }
     }
 
@@ -483,7 +556,10 @@ export function buildMobileApiUrl(canonical, { page = 1, pageSize = 20, includeL
     params.set('equipment', canonical.equipment.map(v => EQUIPMENT_MOBILE_VALUE[v] || v).join(','));
   }
   for (const { key, value } of canonical.directParams || []) params.append(key, value);
-  if (canonical.excludeSwapFlat) params.append('exclusioncriteria', 'swapFlat');
+  if (canonical.apartmentTypes?.length) {
+    params.append('apartmenttypes', canonical.apartmentTypes.join(','));
+  }
+  if (canonical.excludeSwapFlat) params.append('exclusioncriteria', 'swap_flat');
   if (includeListControls) {
     params.set('sorting', '-firstactivation');
     params.set('pagenumber', String(page));
