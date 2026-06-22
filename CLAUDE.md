@@ -10,11 +10,11 @@ Desktop app for automated IS24 apartment applications. Paste an IS24 search URL 
 
 | Layer | Technology |
 |-------|------------|
-| Desktop shell | Electron 34+, Node 22 |
+| Desktop shell | Electron 42, Node 24 |
 | Renderer | React 19, Vite 6, Tailwind CSS 4 |
 | State | Zustand 5 (single store, no Redux) |
 | Browser automation | Puppeteer 24 (bundled Chromium), Chrome CDP |
-| Database | better-sqlite3 11, WAL mode, single-file SQLite |
+| Database | better-sqlite3 12, WAL mode, single-file SQLite |
 | Auth / captcha | 2captcha, IS24 session cookies in Chromium profile |
 | Build / package | electron-builder, macOS `.dmg` + `.zip`, Windows `.exe` (NSIS), Linux `.deb` + `.AppImage` |
 | CI | GitHub Actions, `macos-latest`, Node 22 |
