@@ -993,7 +993,13 @@ export class IS24Contactor {
       const state = await this.page.evaluate(() => {
         const allText = document.body?.innerText || '';
         const msgTextarea = document.querySelector('textarea[name="message"]');
-        const submitBtn = Array.from(document.querySelectorAll('button')).find(b => /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || ''));
+        const contactContainer = (el) => el?.closest('[class*="contact"], [class*="modal"], [class*="overlay"], [class*="ReactModal"], form');
+        const submitBtn = Array.from(document.querySelectorAll('button')).find(b =>
+          /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || '') &&
+          // Only count submit buttons inside a modal/contact container unless the textarea
+          // is present (form is open — any matching button is relevant).
+          (msgTextarea || contactContainer(b))
+        );
         const confirmed = document.querySelector('[class*="StatusMessage_status-confirm"]') !== null;
         const visible = (el) => {
           if (!el) return false;
@@ -1108,7 +1114,13 @@ export class IS24Contactor {
     // Deadline fallback — form is gone only when both optional textarea AND submit button vanished.
     const fallbackState = await this.page.evaluate(() => {
       const hasTextarea = !!document.querySelector('textarea[name="message"]');
-      const hasSubmit = Array.from(document.querySelectorAll('button')).some(b => /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || ''));
+      const contactContainer = (el) => el?.closest('[class*="contact"], [class*="modal"], [class*="overlay"], [class*="ReactModal"], form');
+      const hasSubmit = Array.from(document.querySelectorAll('button')).some(b =>
+        /Abschicken|Senden|Kontaktanfrage senden/i.test(b.textContent || '') &&
+        // Only count submit buttons inside a modal/contact container unless the textarea
+        // is present (form is open — any matching button is relevant).
+        (hasTextarea || contactContainer(b))
+      );
       const visible = (el) => {
         if (!el) return false;
         const style = window.getComputedStyle(el);
@@ -1139,7 +1151,10 @@ export class IS24Contactor {
 
     if (fallbackState?.successText === true) return { verified: true, detail: 'confirmed (success text)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (formGone && fallbackState?.loggedOut === true) return { verified: false, detail: 'SESSION_EXPIRED (login required — form closed to expose page)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
-    if (formGone) return { verified: false, detail: 'SUBMIT_UNCONFIRMED (form closed without confirmation)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
+    // When the form closed itself AND we saw validation flashes, IS24 accepted the submission —
+    // transient React validation highlights are normal during async form submit.
+    // Real validation errors keep the form open with red borders.
+    if (formGone) return { verified: false, detail: sawValidation ? 'SUBMIT_UNCONFIRMED (form closed after transient validation)' : 'SUBMIT_UNCONFIRMED (form closed without confirmation)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (isServerError && !formGone) return { verified: false, detail: 'PREMIUM_ONLY (Es ist ein Fehler aufgetreten. — Plus/Suchen+ required)', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     if (sawValidation) return { verified: false, detail: 'validation errors persisted', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
     return { verified: false, detail: 'no confirmation after 5s', captcha_retries: captchaRetries, server_retries: serverRetries, deadline_extended: deadlineExtended };
