@@ -297,7 +297,9 @@
     "placeholderEmail": "your@email.com",
     "placeholderHaustiere": "Anzahl und Tierart",
     "placeholderCaptcha": "Leave empty to skip captcha solving",
-    "captchaApiKey": "API Key"
+    "captchaApiKey": "API Key",
+    "debugExport": "Export debug bundle",
+    "debugExported": "✓ Debug bundle exported"
   },
   "search": {
     "title": "Searches",
