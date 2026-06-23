@@ -1165,7 +1165,7 @@ function registerIpcHandlers() {
     const healthy = await chromeManager.isHealthy();
     const manualLogin = chromeManager.isManualLoginRunning?.() || false;
     const tabCount = healthy ? await chromeManager.getTabCount() : -1;
-    return { running: healthy || manualLogin, manualLogin, cdpHealthy: healthy, tabCount, maxTabs: browserOptions().maxTabs, visibility: browserOptions().visibility, download: _chromiumDownload };
+    return { running: healthy || manualLogin, manualLogin, cdpHealthy: healthy, tabCount, maxTabs: browserOptions().maxTabs, visibility: browserOptions().visibility, download: _chromiumDownload, manualLoginCrash: chromeManager._lastManualLoginCrash || null };
   });
 
   ipcMain.handle('chrome:download-status', async () => {

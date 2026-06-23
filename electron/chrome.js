@@ -123,6 +123,7 @@ export class ChromeManager {
     this._restartWindow = [];
     this._maxRestartsPerHour = 3;
     this._downloadPromise = null; // reuse in-flight download
+    this._lastManualLoginCrash = null; // crash diagnostics from openManualLoginPage
   }
 
   _options(options = {}) {
@@ -424,44 +425,40 @@ export class ChromeManager {
       IS24_HOME,
     ], {
       detached: false,
-      stdio: ['ignore', 'ignore', 'pipe'],  // capture stderr for diagnostics
+      stdio: ['ignore', 'pipe', 'pipe'],  // capture stdout+stderr for crash diagnostics
     });
 
-    // Collect stderr (Windows: missing-DLL messages, SmartScreen blocks, etc.)
-    let stderr = '';
-    this.manualLoginProcess.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+    // Collect output for error diagnostics (Windows: missing-DLL messages,
+    // SmartScreen blocks; macOS: code-signing / framework errors).
+    let _stdout = '', _stderr = '';
+    this.manualLoginProcess.stdout?.on('data', (chunk) => { _stdout += chunk.toString(); });
+    this.manualLoginProcess.stderr?.on('data', (chunk) => { _stderr += chunk.toString(); });
 
-    // Catch late/lazy spawn errors (e.g. ENOENT on Windows)
-    this.manualLoginProcess.on('error', (err) => { swallow(err, 'manual-login-spawn'); });
-
-    this.manualLoginProcess.once('exit', () => { this.manualLoginProcess = null; });
-    this.manualLoginProcess.unref();
-
-    // Wait briefly to detect immediate startup failures: missing DLLs,
-    // SmartScreen blocks, permission errors, etc.  On success the process
-    // stays alive and the promise resolves after the grace window.
-    const startupError = await new Promise((resolve) => {
-      const done = (err) => { clearTimeout(timer); resolve(err); };
-      const timer = setTimeout(() => done(null), 5000); // alive for 5 s → assume good
-      this.manualLoginProcess.once('error', (err) => {
-        done(new Error(`Chromium failed to start: ${err.message}`));
-      });
-      this.manualLoginProcess.once('exit', (code) => {
-        if (code !== null && code !== 0) {
-          const detail = stderr.trim();
-          const msg = detail
-            ? `Chromium crashed on startup (exit ${code}): ${detail}`
-            : `Chromium crashed on startup (exit ${code})`;
-          done(new Error(msg));
-        }
-      });
+    // Catch spawn errors (ENOENT / permission denied on Windows)
+    this.manualLoginProcess.on('error', (err) => {
+      swallow(err, `manual-login-spawn: ${err.message}`);
     });
 
-    if (startupError) {
+    // Detect immediate crash (< 3 s).  Fire-and-forget — does NOT block the
+    // return below.  The renderer picks up the failure via chrome:status IPC
+    // (which sees !isManualLoginRunning() and !isHealthy() → chrome_error).
+    let _startupClosed = false;
+    const _startupTimer = setTimeout(() => { _startupClosed = true; }, 3000);
+    this.manualLoginProcess.once('exit', (code) => {
+      clearTimeout(_startupTimer);
       this.manualLoginProcess = null;
-      throw startupError;
-    }
+      this._lastManualLoginCrash = null;
+      if (!_startupClosed && code !== null && code !== 0) {
+        const detail = _stderr.trim() || _stdout.trim();
+        const msg = detail
+          ? `Chromium crashed on startup (exit ${code}): ${detail}`
+          : `Chromium crashed on startup (exit ${code})`;
+        console.error(`[chrome] ${msg}`);
+        this._lastManualLoginCrash = { message: msg, code, detail, at: new Date().toISOString() };
+      }
+    });
 
+    this.manualLoginProcess.unref();
     return { manualLogin: true, profileDir: this.profileDir };
   }
 

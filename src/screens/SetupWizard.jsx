@@ -68,6 +68,24 @@ export default function SetupWizard({ onComplete }) {
     }, 2500);
   };
 
+  // After openLoginPage returns, Chromium may crash silently within seconds
+  // (missing DLLs, SmartScreen, code-signing).  Poll chrome:status once after
+  // a short delay and surface any crash diagnostics.
+  const pollForCrash = useCallback(() => {
+    setTimeout(async () => {
+      try {
+        const status = await window.homelander?.getChromeStatus?.();
+        if (!status) return;
+        if (status.manualLoginCrash) {
+          const msg = status.manualLoginCrash.message
+            || `Chromium crashed on startup (exit ${status.manualLoginCrash.code})`;
+          showFeedback({ type: 'error', msg });
+          setIs24Status('chrome_error');
+        }
+      } catch { /* polling is best-effort */ }
+    }, 4000);
+  }, [showFeedback, setIs24Status]);
+
   const setStoreConfig = useStore((s) => s.setConfig);
   const setStoreSetupComplete = useStore((s) => s.setSetupComplete);
 
@@ -196,6 +214,11 @@ export default function SetupWizard({ onComplete }) {
             setIs24Status('waiting_for_login');
             showFeedback({ type: 'success', msg: t('setup.is24WaitingStatus', 'Log in, then click Continue.') });
             setSaving(false);
+
+            // Poll for immediate startup crash (Windows: missing DLLs, SmartScreen).
+            // openLoginPage returns instantly after spawn — the process may die a
+            // moment later.  Check back after a few seconds and surface the crash.
+            pollForCrash();
             return;
           } catch (err) {
             showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }, t) });
@@ -553,6 +576,7 @@ export default function SetupWizard({ onComplete }) {
                     const result = await window.homelander.openLoginPage();
                     if (result.error) throw result;
                     setIs24Status('waiting_for_login');
+                    pollForCrash();
                   } catch (err) {
                     showFeedback({ type: 'error', msg: userErrorText(err.userError || err, { operation: 'chrome open' }, t) });
                     setIs24Status('chrome_error');
