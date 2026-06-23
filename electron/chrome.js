@@ -40,11 +40,13 @@ function getBundledChromiumPath() {
  * Thread-safe via _downloadPromise: only one download runs at a time,
  * all concurrent callers wait on the same promise.
  */
-async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, _downloadPromiseRef = { current: null }) {
+async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, chromeMgr = null) {
   const cacheDir = join(homedir(), '.cache', 'puppeteer');
 
-  // Reuse in-flight download or return existing installation
-  if (_downloadPromiseRef.current) return _downloadPromiseRef.current;
+  // Reuse in-flight download or return existing installation.
+  // chromeMgr._downloadPromise is the single source of truth —
+  // all callers share the same promise via the ChromeManager instance.
+  if (chromeMgr?._downloadPromise) return chromeMgr._downloadPromise;
 
   // Build ID from Puppeteer 24's bundled Chrome for Testing.
   // Update this when upgrading Puppeteer to a new major version.
@@ -59,7 +61,7 @@ async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, _d
 
   log('Chrome for Testing not found — downloading (~250 MB)…');
 
-  _downloadPromiseRef.current = (async () => {
+  const downloadPromise = (async () => {
     const doInstall = () => install({
       browser: Browser.CHROME,
       buildId,
@@ -82,23 +84,24 @@ async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, _d
         log('Retrying download…');
         await doInstall();
       } else {
-        _downloadPromiseRef.current = null;
+        if (chromeMgr) chromeMgr._downloadPromise = null;
         throw new Error(`Failed to download Chromium: ${msg}. Check your internet connection.`);
       }
     }
 
     exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
     if (!existsSync(exePath)) {
-      _downloadPromiseRef.current = null;
+      if (chromeMgr) chromeMgr._downloadPromise = null;
       throw new Error(`Chromium download completed but executable not found at ${exePath}`);
     }
 
     log('Chrome for Testing installed successfully');
-    _downloadPromiseRef.current = null;
+    if (chromeMgr) chromeMgr._downloadPromise = null;
     return exePath;
   })();
 
-  return _downloadPromiseRef.current;
+  if (chromeMgr) chromeMgr._downloadPromise = downloadPromise;
+  return downloadPromise;
 }
 
 function getProfileDir(email) {
@@ -154,7 +157,7 @@ export class ChromeManager {
       // Auto-download Chrome for Testing on fresh/Windows installs.
       const log = (msg) => console.log(`[chrome] ${msg}`);
       const onProgress = this._onDownloadProgress || (() => {});
-      executablePath = await ensureChromiumInstalled(log, onProgress, { current: this._downloadPromise });
+      executablePath = await ensureChromiumInstalled(log, onProgress, this);
     }
     mkdirSync(this.profileDir, { recursive: true });
 
@@ -402,7 +405,7 @@ export class ChromeManager {
     if (!executablePath) {
       const log = (msg) => console.log(`[chrome] ${msg}`);
       const onProgress = this._onDownloadProgress || (() => {});
-      executablePath = await ensureChromiumInstalled(log, onProgress, { current: this._downloadPromise });
+      executablePath = await ensureChromiumInstalled(log, onProgress, this);
     }
     if (!executablePath) {
       throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
@@ -421,10 +424,44 @@ export class ChromeManager {
       IS24_HOME,
     ], {
       detached: false,
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],  // capture stderr for diagnostics
     });
+
+    // Collect stderr (Windows: missing-DLL messages, SmartScreen blocks, etc.)
+    let stderr = '';
+    this.manualLoginProcess.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+
+    // Catch late/lazy spawn errors (e.g. ENOENT on Windows)
+    this.manualLoginProcess.on('error', (err) => { swallow(err, 'manual-login-spawn'); });
+
     this.manualLoginProcess.once('exit', () => { this.manualLoginProcess = null; });
     this.manualLoginProcess.unref();
+
+    // Wait briefly to detect immediate startup failures: missing DLLs,
+    // SmartScreen blocks, permission errors, etc.  On success the process
+    // stays alive and the promise resolves after the grace window.
+    const startupError = await new Promise((resolve) => {
+      const done = (err) => { clearTimeout(timer); resolve(err); };
+      const timer = setTimeout(() => done(null), 5000); // alive for 5 s → assume good
+      this.manualLoginProcess.once('error', (err) => {
+        done(new Error(`Chromium failed to start: ${err.message}`));
+      });
+      this.manualLoginProcess.once('exit', (code) => {
+        if (code !== null && code !== 0) {
+          const detail = stderr.trim();
+          const msg = detail
+            ? `Chromium crashed on startup (exit ${code}): ${detail}`
+            : `Chromium crashed on startup (exit ${code})`;
+          done(new Error(msg));
+        }
+      });
+    });
+
+    if (startupError) {
+      this.manualLoginProcess = null;
+      throw startupError;
+    }
+
     return { manualLogin: true, profileDir: this.profileDir };
   }
 
