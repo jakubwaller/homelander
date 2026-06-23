@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useStore } from '../stores/appStore';
 import { useLocale } from '../locales/LocaleContext';
 import { compactValidationError, deriveSearchName, visibleIgnoredParams } from '../shared/searchUrlUi';
+import homelanderKey from '../assets/homelander-key.png';
 import {
   IS24_SALUTATION,
   IS24_MOVE_IN,
@@ -351,7 +352,10 @@ export default function SetupWizard({ onComplete }) {
 
       {/* Header */}
       <header className="flex items-center justify-between px-5 pb-2">
-        <h1 className="text-lg font-semibold tracking-tight">{t('setup.header', 'Homelander Setup')}</h1>
+        <div className="flex items-center gap-3">
+          <img src={homelanderKey} alt="" className="w-5 h-5 object-contain opacity-90" draggable={false} />
+          <h1 className="text-lg font-semibold tracking-tight">{t('setup.header', 'Homelander Einrichtung')}</h1>
+        </div>
         <button
           className="btn btn-ghost flex-shrink-0"
           onClick={handleExportDebug}
