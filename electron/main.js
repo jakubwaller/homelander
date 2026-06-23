@@ -43,6 +43,7 @@ const DAEMON_LOG = join(DATA_DIR, 'daemon.log');
 const CDP_URL = 'http://localhost:9222';
 const PAUSE_FLAG = join(DATA_DIR, '.apply-paused');
 const SUPPORT_DIR = join(DATA_DIR, 'support-bundles');
+const CHROME_LOG = join(DATA_DIR, 'chrome.log');
 openSharedDb(DB_PATH);
 const DEBUG_DIR = join(DATA_DIR, 'debug');
 const APP_ICON_PNG = process.resourcesPath
@@ -69,6 +70,7 @@ chromeManager._onDownloadProgress = (downloaded, total) => {
     mainWindow.webContents.send('homelander:chromium-download', _chromiumDownload);
   }
 };
+chromeManager._chromeLogPath = CHROME_LOG;
 let config = null;
 let setupComplete = false;
 
@@ -311,6 +313,7 @@ async function createSupportBundle(payload = {}) {
       tabCount: healthy ? await chromeManager.getTabCount() : -1,
       maxTabs: browserOptions().maxTabs,
       visibility: browserOptions().visibility,
+      manualLoginCrash: chromeManager._lastManualLoginCrash || null,
     }))
     .catch((err) => ({ error: redactSupportText(err?.message || String(err)) }));
 
@@ -335,6 +338,9 @@ async function createSupportBundle(payload = {}) {
   if (existsSync(DAEMON_LOG)) {
     writeSupportFile(tempRoot, 'logs/daemon-tail.log', redactSupportText(tailTextFile(DAEMON_LOG)));
     if (exposeId) writeSupportFile(tempRoot, 'logs/entry-context.log', redactSupportText(matchingLogLines(exposeId) || `No daemon.log lines matched expose ${exposeId}.`));
+  }
+  if (existsSync(CHROME_LOG)) {
+    writeSupportFile(tempRoot, 'logs/chrome.log', redactSupportText(tailTextFile(CHROME_LOG)));
   }
 
   const allCandidates = listDebugArtifacts(scope === 'entry' ? exposeId : null, scope === 'entry' ? 40 : 60);

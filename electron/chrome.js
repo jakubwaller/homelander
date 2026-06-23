@@ -431,6 +431,7 @@ export class ChromeManager {
     // Catch spawn errors (ENOENT / permission denied)
     this.manualLoginProcess.on('error', (err) => {
       swallow(err, `manual-login-spawn: ${err.message}`);
+      this._logToFile(`Spawn error: ${err.message}`);
     });
 
     // Detect immediate crash. Fire-and-forget — does NOT block return.
@@ -445,11 +446,21 @@ export class ChromeManager {
         const msg = `Chromium crashed on startup (exit ${code})`;
         console.error(`[chrome] ${msg}`);
         this._lastManualLoginCrash = { message: msg, code, at: new Date().toISOString() };
+        this._logToFile(msg);
       }
     });
 
     this.manualLoginProcess.unref();
     return { manualLogin: true, profileDir: this.profileDir };
+  }
+
+  /** Append a line to chrome.log (if path configured by main.js). */
+  _logToFile(line) {
+    try {
+      if (!this._chromeLogPath) return;
+      const { appendFileSync } = require('node:fs');
+      appendFileSync(this._chromeLogPath, `[${new Date().toISOString()}] ${line}\n`, 'utf8');
+    } catch { /* best-effort */ }
   }
 
   async finalizeManualLogin(email, options = {}) {
