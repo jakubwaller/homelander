@@ -99,7 +99,7 @@ export default function SetupWizard({ onComplete }) {
     if (!target || !e) return;
     debugTipRef.current = target;
     const rect = target.getBoundingClientRect();
-    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) { hideDebugTip(); return; }
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) { hideDebugTip(); return; } // i18n-allow-hardcoded — JS comparison, not user-facing text
     setDebugTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
   }, [hideDebugTip]);
 
