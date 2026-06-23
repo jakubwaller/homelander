@@ -2,7 +2,7 @@
 // Owns one Puppeteer-managed Chromium profile, keeps CDP available for the daemon,
 // and controls browser visibility without touching user-owned tabs.
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, appendFileSync, statSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -379,6 +379,8 @@ export class ChromeManager {
   }
 
   async openManualLoginPage(email, options = {}) {
+    this._logToFile(`openManualLoginPage called: email=${email ? 'set' : 'empty'} profileDir=${this.profileDir || 'unset'}`);
+
     // When CDP is already running (e.g. session-expired re-login), don't
     // restart the browser — just open a fresh IS24 tab via CDP and show it.
     if (await this.isHealthy()) {
@@ -412,6 +414,8 @@ export class ChromeManager {
       throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
     }
 
+    this._logToFile(`Executable resolved: ${executablePath}`);
+
     // Start Chromium WITH CDP so the daemon can connect to the SAME browser
     // process — no kill + relaunch, no session loss.
     // Also disable AutomationControlled so IS24 doesn't flag the login page.
@@ -423,7 +427,6 @@ export class ChromeManager {
     // Log spawn diagnostics to chrome.log so support bundles capture them.
     this._logToFile(`Spawning Chrome: exe=${executablePath} profile=${this.profileDir} log=${chromeLogFile}`);
     try {
-      const { statSync } = require('node:fs');
       const st = statSync(executablePath);
       this._logToFile(`Chrome exe exists: size=${st.size} mode=${st.mode.toString(8)}`);
     } catch (e) {
@@ -477,7 +480,6 @@ export class ChromeManager {
   _logToFile(line) {
     try {
       if (!this._chromeLogPath) return;
-      const { appendFileSync } = require('node:fs');
       appendFileSync(this._chromeLogPath, `[${new Date().toISOString()}] ${line}\n`, 'utf8');
     } catch { /* best-effort */ }
   }
