@@ -397,12 +397,12 @@ export default function SetupWizard({ onComplete }) {
         </div>
       )}
 
-      {/* 🐞 tooltip */}
+      {/* 🐞 tooltip — anchored right-edge so it doesn't overflow screen */}
       {debugTip && (
         <div
           className="fixed pointer-events-none z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
           style={{
-            left: debugTip.x + 14,
+            right: `calc(100vw - ${debugTip.x}px + 14px)`,
             top: debugTip.y - 36,
             background: 'var(--bg-secondary)',
             color: 'var(--text-primary)',
