@@ -161,11 +161,34 @@ export class IS24Contactor {
     // Pre-create one persistent background page for all applies.
     // Reusing it avoids the OS-level app activation that newPage() triggers.
     await this._ensurePage();
+
+    // Level 3 of anti-throttling: force Chromium to treat this page as
+    // visible/active, bypassing occlusion-based JS timer throttling.
+    //   a) CDP lifecycle override — tells the renderer it's in the foreground.
+    //   b) Page Visibility API spoof — IS24's React won't self-throttle.
+    const cdpClient = await this.page.target().createCDPSession();
+    try {
+      await cdpClient.send('Page.setWebLifecycleState', { state: 'active' });
+    } catch (err) { swallow(err, 'contacter/cdp-lifecycle'); }
+    finally { await cdpClient.detach().catch(() => {}); }
+
     // Prevent IS24's JS from stealing focus via window.focus() / window.open().
+    // Also spoof Page Visibility API so React thinks the tab is always visible.
     // Runs on every document load while this page stays alive.
     await this.page.evaluateOnNewDocument(() => {
       window.focus = () => {};
       window.open = () => null;
+
+      // Spoof Page Visibility API — prevents React and IS24's own
+      // throttling hooks from slowing down renders for "hidden" tabs.
+      Object.defineProperty(document, 'visibilityState', {
+        get: () => 'visible',
+        configurable: true,
+      });
+      Object.defineProperty(document, 'hidden', {
+        get: () => false,
+        configurable: true,
+      });
     });
   }
 

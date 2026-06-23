@@ -177,7 +177,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
             >
               {outcomeLabel}
             </span>
-            {showBadges.includes('Deactivated') && (
+            {showBadges.includes('Deactivated') && listing.outcome !== 'DEACTIVATED' && (
               <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); onTipShow(t('history.deactivatedTip'), e); }} onMouseMove={(e) => { e.stopPropagation(); onTipMove(e); }} onMouseLeave={onTipHide}>{t('history.deactivatedBadge', '🪦 Deactivated')}</span>
             )}
             {showBadges.includes('Captcha') && (
@@ -197,12 +197,14 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
         {/* Open in controlled Chromium */}
         {listing.expose_id && (
           <button
-            className="flex-shrink-0"
-            style={{ color: 'var(--accent)', fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            className="btn btn-ghost flex-shrink-0"
+            style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
             onClick={(e) => { e.stopPropagation(); window.homelander?.openListingInChrome?.(listing.expose_id); }}
-            title={t('history.openInChrome', 'Open in Homelander Chromium')}
+            onMouseEnter={(e) => onTipShow(t('history.openInChrome', 'Open in Homelander Chromium'), e)}
+            onMouseMove={onTipMove}
+            onMouseLeave={onTipHide}
           >
-            ↗
+            <span style={{ fontSize: '16px' }}>↗</span>
           </button>
         )}
 
@@ -216,9 +218,11 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
               onClick={(e) => { e.stopPropagation(); onRetry(listing.expose_id); }}
               disabled={retrying?.has(listing.expose_id)}
               style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
-              title={t("history.retryThis", "Retry this listing")}
+              onMouseEnter={(e) => onTipShow(t('history.retryThis', 'Retry this listing'), e)}
+              onMouseMove={onTipMove}
+              onMouseLeave={onTipHide}
             >
-              <span style={{ fontSize: '20px' }}>⟳</span>
+              <span style={{ fontSize: '24px' }}>⟳</span>
             </button>
           )
         )}
@@ -690,7 +694,7 @@ export default function HistoryTab() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-3 flex-shrink-0">
+      <div className="flex items-center gap-2 mb-3 flex-shrink-0">
         {/* Outcome filter */}
         <div className="flex gap-1">
           {OUTCOME_KEYS.map((o) => {
@@ -700,7 +704,7 @@ export default function HistoryTab() {
             return (
               <button
                 key={o.value}
-                className="btn btn-ghost text-xs px-3 py-1.5 whitespace-nowrap"
+                className="btn btn-ghost text-xs px-2 py-1.5 whitespace-nowrap"
                 style={
                   isActive
                     ? {
@@ -724,8 +728,8 @@ export default function HistoryTab() {
         {/* Search filter dropdown */}
         <div className="relative">
           <select
-            className="select text-xs py-1.5 px-3"
-            style={{ width: 180 }}
+            className="select text-xs py-1.5 px-2"
+            style={{ minWidth: 55, maxWidth: 150 }}
             value={filterId}
             onChange={(e) => setFilterId(e.target.value)}
           >
@@ -741,14 +745,15 @@ export default function HistoryTab() {
         {/* Retry All Failed button — visible only when Failed filter active */}
         {outcomeFilter === 'FAIL' && (allTimeStats?.failed ?? 0) > 0 && (
           <button
-            className="btn btn-secondary text-xs"
+            className="btn btn-ghost flex-shrink-0"
             onClick={handleRetryAllFailed}
             disabled={retryAllBusy}
-            style={retryAllDone ? { background: 'var(--success)', color: 'white' } : { color: 'var(--warning, #f59e0b)' }}
+            onMouseEnter={(e) => showTip(t('history.retryAllTip', 'Retry all failed listings for this search'), e)}
+            onMouseMove={moveTip}
+            onMouseLeave={hideTip}
+            style={retryAllDone ? { background: 'var(--success)', color: 'white', padding: '2px 6px', fontSize: '16px' } : { color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
           >
-            {retryAllBusy ? t('history.retryingAll', 'Retrying…')
-              : retryAllDone ? t('history.retriedAll', '✓ All re-queued!')
-              : t('history.retryAllFailed', '⟳ Retry All Failed')}
+            <span style={{ fontSize: '24px' }}>{retryAllDone ? '✓' : '⟳'}</span>
           </button>
         )}
 

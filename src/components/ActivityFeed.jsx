@@ -252,7 +252,7 @@ export default function ActivityFeed() {
                   >
                     {outcomeLabel}
                   </span>
-                  {isDeactivated && (
+                  {isDeactivated && item.outcome !== 'DEACTIVATED' && (
                     <span className="badge badge-deactivated text-xs" onMouseEnter={(e) => { e.stopPropagation(); showTip(t('livefeed.deactivatedTip'), e); }} onMouseMove={moveTip} onMouseLeave={hideTip}>{t('livefeed.deactivatedBadge', '🪦 Deactivated')}</span>
                   )}
                   {isCaptcha && (
@@ -272,12 +272,14 @@ export default function ActivityFeed() {
               {/* Open in controlled Chromium */}
               {exposeId && (
                 <button
-                  className="flex-shrink-0"
-                  style={{ color: 'var(--accent)', fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  className="btn btn-ghost flex-shrink-0"
+                  style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
                   onClick={(e) => { e.stopPropagation(); window.homelander?.openListingInChrome?.(exposeId); }}
-                  title={t('livefeed.openInChrome', 'Open in Homelander Chromium')}
+                  onMouseEnter={(e) => showTip(t('livefeed.openInChrome', 'Open in Homelander Chromium'), e)}
+                  onMouseMove={moveTip}
+                  onMouseLeave={hideTip}
                 >
-                  ↗
+                  <span style={{ fontSize: '16px' }}>↗</span>
                 </button>
               )}
 
@@ -290,10 +292,12 @@ export default function ActivityFeed() {
                     className="btn btn-ghost flex-shrink-0"
                     onClick={(e) => { e.stopPropagation(); handleRetry(exposeId); }}
                     disabled={retrying.has(exposeId)}
-                    style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '20px' }}
-                    title={t("livefeed.retryThis", "Retry this listing")}
+                    style={{ color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
+                    onMouseEnter={(e) => showTip(t('livefeed.retryThis', 'Retry this listing'), e)}
+                    onMouseMove={moveTip}
+                    onMouseLeave={hideTip}
                   >
-                    {retrying.has(exposeId) ? '⟳' : '⟳'}
+                    <span style={{ fontSize: '24px' }}>⟳</span>
                   </button>
                 )
               )}

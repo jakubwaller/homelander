@@ -2,7 +2,7 @@
 // Manages app lifecycle, BrowserWindow, daemon child process,
 // Chrome lifecycle, config, and IPC bridge to renderer.
 
-import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, shell, clipboard, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, Tray, Menu, shell, clipboard, safeStorage, powerSaveBlocker } from 'electron';
 import { fork, spawnSync, spawn, execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, appendFileSync, readdirSync, statSync, cpSync, rmSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -55,6 +55,7 @@ let mainWindow = null;
 let daemonProcess = null;
 let daemonStatus = 'stopped'; // stopped | running | paused | restarting | session_expired
 let daemonStartedAt = 0;      // timestamp of last startDaemon() call
+let _powerSaveBlockerId = null; // macOS App Nap prevention
 let latestNextPollAt = null;  // last future next_poll_at emitted by daemon poll loop
 let daemonStopping = false;   // true only during an explicit user stop/SIGTERM window
 let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
@@ -463,6 +464,14 @@ function startDaemon() {
   daemonStatus = 'running';
   daemonStartedAt = Date.now();
   latestNextPollAt = new Date(Date.now() + pollIntervalMs()).toISOString();
+
+  // Prevent macOS App Nap from throttling the daemon's CPU usage.
+  // Without this, macOS can suspend the background Chromium process
+  // even with the anti-occlusion Chromium flags (Level 2 of the fix).
+  if (!_powerSaveBlockerId) {
+    try { _powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension'); } catch (err) { swallow(err, 'main/power-save-blocker'); }
+  }
+
   if (mainWindow) {
     mainWindow.webContents.send('homelander:event', { type: 'daemon_started' });
   }
@@ -500,6 +509,12 @@ function startDaemon() {
     const wasRunning = daemonStatus === 'running' || daemonStatus === 'paused';
     daemonStatus = 'stopped';
     latestNextPollAt = null;
+
+    if (_powerSaveBlockerId) {
+      try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) { swallow(err, 'main/power-save-blocker-stop-exit'); }
+      _powerSaveBlockerId = null;
+    }
+
     if (mainWindow) {
       mainWindow.webContents.send('homelander:event', {
         type: 'daemon_stopped',
@@ -555,6 +570,11 @@ function stopDaemon() {
   }, 5000);
   daemonStatus = 'stopped';
   latestNextPollAt = null;
+
+  if (_powerSaveBlockerId) {
+    try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) { swallow(err, 'main/power-save-blocker-stop'); }
+    _powerSaveBlockerId = null;
+  }
 }
 
 function pollIntervalMs() {

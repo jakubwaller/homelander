@@ -110,7 +110,17 @@ export class ChromeManager {
         '--disable-hang-monitor',
         '--disable-translate',
         '--no-pings',
-        '--disable-features=NetworkServiceSandbox',
+
+        // Anti-throttling: prevent Chromium from de-prioritising JS timers,
+        // requestAnimationFrame, and IPC for occluded/backgrounded windows.
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-ipc-flooding-protection',
+
+        // macOS-specific: tell Chromium to ignore native occlusion signals
+        // (WindowServer "hidden" flag) and intensive wake-up throttling.
+        '--disable-features=NetworkServiceSandbox,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,MacWindowOcclusion',
       ],
     });
 
