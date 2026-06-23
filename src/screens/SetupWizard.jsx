@@ -1,7 +1,7 @@
 // Setup Wizard — first-launch guided setup for Homelander.
 // 6 steps: Language → Persona → Message → IS24 Login → 2captcha → First Search → Done
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useStore } from '../stores/appStore';
 import { useLocale } from '../locales/LocaleContext';
 import { compactValidationError, deriveSearchName, visibleIgnoredParams } from '../shared/searchUrlUi';
@@ -83,6 +83,24 @@ export default function SetupWizard({ onComplete }) {
       setDebugBusy(false);
     }
   };
+
+  // Custom tooltip for 🐞 button (matches ActivityFeed/HistoryTab pattern)
+  const [debugTip, setDebugTip] = useState(null);
+  const debugTipRef = useRef(null);
+  const hideDebugTip = useCallback(() => { debugTipRef.current = null; setDebugTip(null); }, []);
+  const showDebugTip = useCallback((text, e) => {
+    if (!text || !e?.currentTarget) { hideDebugTip(); return; }
+    debugTipRef.current = e.currentTarget;
+    setDebugTip({ text, x: e.clientX, y: e.clientY });
+  }, [hideDebugTip]);
+  const moveDebugTip = useCallback((e) => {
+    const target = debugTipRef.current || e?.currentTarget;
+    if (!target || !e) return;
+    debugTipRef.current = target;
+    const rect = target.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) { hideDebugTip(); return; }
+    setDebugTip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+  }, [hideDebugTip]);
 
   // After openLoginPage returns, Chromium may crash silently within seconds
   // (missing DLLs, SmartScreen, code-signing).  Poll chrome:status once after
@@ -338,10 +356,10 @@ export default function SetupWizard({ onComplete }) {
           className="btn btn-ghost flex-shrink-0"
           onClick={handleExportDebug}
           disabled={debugBusy}
-          title={t('setup.debugExport', 'Debug bundle exportieren')}
+          onMouseMove={moveDebugTip}
           style={{ opacity: 0.35, fontSize: 15, padding: '2px 4px', lineHeight: 1 }}
-          onMouseEnter={(e) => { e.currentTarget.style.opacity = 1; }}
-          onMouseLeave={(e) => { e.currentTarget.style.opacity = 0.35; }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = 1; showDebugTip(t('setup.debugExport', 'Debug bundle exportieren'), e); }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = 0.35; hideDebugTip(); }}
         >
           🐞
         </button>
@@ -376,6 +394,24 @@ export default function SetupWizard({ onComplete }) {
           }}
         >
           {feedback.msg}
+        </div>
+      )}
+
+      {/* 🐞 tooltip */}
+      {debugTip && (
+        <div
+          className="fixed pointer-events-none z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
+          style={{
+            left: debugTip.x + 14,
+            top: debugTip.y - 36,
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            maxWidth: 320,
+            whiteSpace: 'normal',
+          }}
+        >
+          {debugTip.text}
         </div>
       )}
 
