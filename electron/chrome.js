@@ -419,6 +419,17 @@ export class ChromeManager {
     // --enable-logging writes Chrome's own startup diagnostics to a file.
     // No pipe needed — Chrome writes directly, avoiding Windows pipe deadlocks.
     const chromeLogFile = join(this.profileDir, 'chrome_debug.log');
+
+    // Log spawn diagnostics to chrome.log so support bundles capture them.
+    this._logToFile(`Spawning Chrome: exe=${executablePath} profile=${this.profileDir} log=${chromeLogFile}`);
+    try {
+      const { statSync } = require('node:fs');
+      const st = statSync(executablePath);
+      this._logToFile(`Chrome exe exists: size=${st.size} mode=${st.mode.toString(8)}`);
+    } catch (e) {
+      this._logToFile(`Chrome exe stat FAILED: ${e.message}`);
+    }
+
     this.manualLoginProcess = spawn(executablePath, [
       `--user-data-dir=${this.profileDir}`,
       `--remote-debugging-port=${CDP_PORT}`,
@@ -433,6 +444,8 @@ export class ChromeManager {
       detached: false,
       stdio: 'ignore',
     });
+
+    this._logToFile(`Chrome spawned: pid=${this.manualLoginProcess.pid}`);
 
     // Catch spawn errors (ENOENT / permission denied)
     this.manualLoginProcess.on('error', (err) => {
