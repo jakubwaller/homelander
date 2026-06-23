@@ -109,6 +109,12 @@
       "openChrome": "Homelander-Chromium öffnen"
     }
   },
+  "chromium": {
+    "downloading": "Browser wird heruntergeladen…",
+    "downloadProgress": "Browser herunterladen ({0} MB / {1} MB)",
+    "downloadDone": "Browser installiert ✓",
+    "downloadFailed": "Browser-Download fehlgeschlagen"
+  },
   "livefeed": {
     "title": "Live-Feed",
     "filterPlaceholder": "Nach Filtername filtern…",

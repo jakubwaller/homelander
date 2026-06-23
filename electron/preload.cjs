@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('homelander', {
   openListingInChrome: (exposeIdOrUrl) => ipcRenderer.invoke('chrome:openListing', exposeIdOrUrl),
   checkIs24Login: () => ipcRenderer.invoke('chrome:checkIs24Login'),
   getIs24Email: () => ipcRenderer.invoke('chrome:getIs24Email'),
+  getChromiumDownloadStatus: () => ipcRenderer.invoke('chrome:download-status'),
 
   // ── Setup ─────────────────────────────────────────────────
   getSetupComplete: () => ipcRenderer.invoke('setup:complete'),
@@ -70,6 +71,11 @@ contextBridge.exposeInMainWorld('homelander', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('homelander:error', handler);
     return () => ipcRenderer.removeListener('homelander:error', handler);
+  },
+  onChromiumDownload: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('homelander:chromium-download', handler);
+    return () => ipcRenderer.removeListener('homelander:chromium-download', handler);
   },
 
   // ── App lifecycle ───────────────────────────────────────────

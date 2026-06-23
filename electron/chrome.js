@@ -3,11 +3,13 @@
 // and controls browser visibility without touching user-owned tabs.
 
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import puppeteer from 'puppeteer';
+import { install, computeExecutablePath, detectBrowserPlatform, Browser, resolveBuildId } from '@puppeteer/browsers';
 
 const CDP_PORT = 9222;
 const DEFAULT_MAX_TABS = 5;
@@ -25,6 +27,78 @@ function getBundledChromiumPath() {
     if (executablePath && existsSync(executablePath)) return executablePath;
   } catch (err) { swallow(err, 'get-bundled-chromium'); }
   return null;
+}
+
+/**
+ * Download Chrome for Testing to the real filesystem (~/.cache/puppeteer).
+ * Needed on fresh installs (especially Windows) where the ASAR packaging
+ * prevents puppeteer from resolving its internal download manifest.
+ *
+ * Uses the same build ID that Puppeteer 24 expects — obtained from
+ * resolveBuildId(Browser.CHROME) against Chrome's update API.
+ *
+ * Thread-safe via _downloadPromise: only one download runs at a time,
+ * all concurrent callers wait on the same promise.
+ */
+async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, _downloadPromiseRef = { current: null }) {
+  const cacheDir = join(homedir(), '.cache', 'puppeteer');
+
+  // Reuse in-flight download or return existing installation
+  if (_downloadPromiseRef.current) return _downloadPromiseRef.current;
+
+  // Build ID from Puppeteer 24's bundled Chrome for Testing.
+  // Update this when upgrading Puppeteer to a new major version.
+  // Verify with: node -e "import('@puppeteer/browsers').then(m => m.resolveBuildId(m.Browser.CHROME).then(console.log))"
+  const buildId = '148.0.7778.97';
+
+  let exePath;
+  try {
+    exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
+    if (existsSync(exePath)) return exePath; // fast path — already installed
+  } catch { /* not found — download needed */ }
+
+  log('Chrome for Testing not found — downloading (~250 MB)…');
+
+  _downloadPromiseRef.current = (async () => {
+    const doInstall = () => install({
+      browser: Browser.CHROME,
+      buildId,
+      cacheDir,
+      platform: detectBrowserPlatform(),
+      unpack: true,
+      onProgress: (downloaded, total) => {
+        try { onProgress(downloaded, total); } catch {}
+      },
+    });
+
+    try {
+      await doInstall();
+    } catch (err) {
+      const msg = err?.message || '';
+      if (msg.includes('exists but the executable') && exePath) {
+        const installRoot = dirname(dirname(exePath));
+        log('Cleaning stale download…');
+        await rm(installRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
+        log('Retrying download…');
+        await doInstall();
+      } else {
+        _downloadPromiseRef.current = null;
+        throw new Error(`Failed to download Chromium: ${msg}. Check your internet connection.`);
+      }
+    }
+
+    exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
+    if (!existsSync(exePath)) {
+      _downloadPromiseRef.current = null;
+      throw new Error(`Chromium download completed but executable not found at ${exePath}`);
+    }
+
+    log('Chrome for Testing installed successfully');
+    _downloadPromiseRef.current = null;
+    return exePath;
+  })();
+
+  return _downloadPromiseRef.current;
 }
 
 function getProfileDir(email) {
@@ -45,6 +119,7 @@ export class ChromeManager {
     this.manualLoginProcess = null;
     this._restartWindow = [];
     this._maxRestartsPerHour = 3;
+    this._downloadPromise = null; // reuse in-flight download
   }
 
   _options(options = {}) {
@@ -74,9 +149,12 @@ export class ChromeManager {
       return this._versionInfo();
     }
 
-    const executablePath = getBundledChromiumPath();
+    let executablePath = getBundledChromiumPath();
     if (!executablePath) {
-      throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
+      // Auto-download Chrome for Testing on fresh/Windows installs.
+      const log = (msg) => console.log(`[chrome] ${msg}`);
+      const onProgress = this._onDownloadProgress || (() => {});
+      executablePath = await ensureChromiumInstalled(log, onProgress, { current: this._downloadPromise });
     }
     mkdirSync(this.profileDir, { recursive: true });
 
@@ -320,7 +398,12 @@ export class ChromeManager {
     if (await this.isHealthy()) await this.shutdown();
     if (this.isManualLoginRunning()) return { manualLogin: true, profileDir: this.profileDir };
 
-    const executablePath = getBundledChromiumPath();
+    let executablePath = getBundledChromiumPath();
+    if (!executablePath) {
+      const log = (msg) => console.log(`[chrome] ${msg}`);
+      const onProgress = this._onDownloadProgress || (() => {});
+      executablePath = await ensureChromiumInstalled(log, onProgress, { current: this._downloadPromise });
+    }
     if (!executablePath) {
       throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
     }
