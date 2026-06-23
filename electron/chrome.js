@@ -43,69 +43,111 @@ function getBundledChromiumPath() {
 async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, chromeMgr = null) {
   const cacheDir = join(homedir(), '.cache', 'puppeteer');
 
-  // Reuse in-flight download or return existing installation.
-  // chromeMgr._downloadPromise is the single source of truth —
-  // all callers share the same promise via the ChromeManager instance.
   if (chromeMgr?._downloadPromise) {
     log('Reusing in-flight download promise');
     return chromeMgr._downloadPromise;
   }
 
-  // Build ID from Puppeteer 24's bundled Chrome for Testing.
   const buildId = '148.0.7778.97';
   const platform = detectBrowserPlatform();
   log(`Platform: ${platform}, buildId: ${buildId}`);
 
+  // Fast path: already installed
   let exePath;
   try {
     exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
     log(`Computed path: ${exePath}, exists: ${existsSync(exePath)}`);
-    if (existsSync(exePath)) return exePath; // fast path — already installed
+    if (existsSync(exePath)) return exePath;
   } catch (e) { log(`computeExecutablePath failed: ${e?.message || e}`); }
+
+  // Also search for any chrome.exe in the cache dir (install may use
+  // a different directory layout than computeExecutablePath expects).
+  if (exePath) {
+    const found = await findChromeExe(dirname(dirname(exePath)), log);
+    if (found) { log(`Found Chrome at: ${found}`); return found; }
+  }
 
   log('Chrome for Testing not found — downloading (~250 MB)…');
 
   const downloadPromise = (async () => {
-    const doInstall = () => install({
-      browser: Browser.CHROME,
-      buildId,
-      cacheDir,
-      platform: detectBrowserPlatform(),
-      unpack: true,
-      onProgress: (downloaded, total) => {
-        try { onProgress(downloaded, total); } catch {}
-      },
-    });
+    let attempt = 0;
+    const maxAttempts = 3;
 
-    try {
-      await doInstall();
-    } catch (err) {
-      const msg = err?.message || '';
-      if (msg.includes('exists but the executable') && exePath) {
-        const installRoot = dirname(dirname(exePath));
-        log('Cleaning stale download…');
-        await rm(installRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
-        log('Retrying download…');
-        await doInstall();
-      } else {
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        log(`Download attempt ${attempt}/${maxAttempts}`);
+        await install({
+          browser: Browser.CHROME,
+          buildId,
+          cacheDir,
+          platform: detectBrowserPlatform(),
+          unpack: true,
+          onProgress: (downloaded, total) => {
+            try { onProgress(downloaded, total); } catch {}
+          },
+        });
+        log('Install completed, searching for executable…');
+      } catch (err) {
+        const msg = err?.message || '';
+        log(`Install failed: ${msg}`);
+        if (msg.includes('exists but the executable') && exePath) {
+          const installRoot = dirname(dirname(exePath));
+          log(`Cleaning ${installRoot}…`);
+          await rm(installRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
+          continue; // retry
+        }
         if (chromeMgr) chromeMgr._downloadPromise = null;
-        throw new Error(`Failed to download Chromium: ${msg}. Check your internet connection.`);
+        throw new Error(`Failed to download Chromium: ${msg}`);
       }
+
+      // Search for the actual exe — don't trust computeExecutablePath layout
+      const installRoot = dirname(dirname(exePath || computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir })));
+      const found = await findChromeExe(installRoot, log);
+      if (found) {
+        log(`Chrome for Testing installed: ${found}`);
+        if (chromeMgr) chromeMgr._downloadPromise = null;
+        return found;
+      }
+      log(`Attempt ${attempt}: exe not found, retrying…`);
     }
 
-    exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
-    if (!existsSync(exePath)) {
-      if (chromeMgr) chromeMgr._downloadPromise = null;
-      throw new Error(`Chromium download completed but executable not found at ${exePath}`);
-    }
-
-    log('Chrome for Testing installed successfully');
     if (chromeMgr) chromeMgr._downloadPromise = null;
-    return exePath;
+    throw new Error(`Chromium download failed after ${maxAttempts} attempts. Check disk space and antivirus.`);
   })();
 
   if (chromeMgr) chromeMgr._downloadPromise = downloadPromise;
   return downloadPromise;
+}
+
+/** Walk a directory tree and find the Chrome executable. */
+async function findChromeExe(root, log) {
+  try {
+    const { readdir, stat } = await import('node:fs/promises');
+    const isWin = process.platform === 'win32';
+    const target = isWin ? 'chrome.exe' : 'chrome';
+    const walk = async (dir) => {
+      let entries;
+      try { entries = await readdir(dir); } catch { return null; }
+      for (const name of entries) {
+        const full = join(dir, name);
+        let st;
+        try { st = await stat(full); } catch { continue; }
+        if (st.isFile() && name.toLowerCase() === target.toLowerCase()) {
+          return full;
+        }
+        if (st.isDirectory()) {
+          const found = await walk(full);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    return await walk(root);
+  } catch (e) {
+    log(`findChromeExe error: ${e?.message || e}`);
+    return null;
+  }
 }
 
 function getProfileDir(email) {
