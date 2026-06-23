@@ -2,14 +2,12 @@
 // Owns one Puppeteer-managed Chromium profile, keeps CDP available for the daemon,
 // and controls browser visibility without touching user-owned tabs.
 
-import { existsSync, mkdirSync, appendFileSync, statSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { existsSync, mkdirSync, appendFileSync, statSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import puppeteer from 'puppeteer';
-import { install, computeExecutablePath, detectBrowserPlatform, Browser, resolveBuildId } from '@puppeteer/browsers';
 
 const CDP_PORT = 9222;
 const DEFAULT_MAX_TABS = 5;
@@ -22,130 +20,67 @@ function swallow(err, context) {
 
 
 function getBundledChromiumPath() {
+  // Tier 1: Puppeteer's bundled Chromium (dev mode / npm install)
   try {
-    const executablePath = puppeteer.executablePath();
-    if (executablePath && existsSync(executablePath)) return executablePath;
-  } catch (err) { swallow(err, 'get-bundled-chromium'); }
+    const p = puppeteer.executablePath();
+    if (p && existsSync(p)) return p;
+  } catch {}
+
+  // Tier 2: Our bundled extraResource (production build)
+  try {
+    if (process.resourcesPath) {
+      const bundledDir = join(process.resourcesPath, 'chrome-bin');
+      if (existsSync(bundledDir)) {
+        const found = findChromeExeSync(bundledDir);
+        if (found) return found;
+      }
+    }
+  } catch {}
+
+  // Tier 3: System-installed Chrome/Edge (trusted by AV, no download needed)
+  const systemPaths = process.platform === 'win32'
+    ? [
+        join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Google\\Chrome\\Application\\chrome.exe'),
+        join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google\\Chrome\\Application\\chrome.exe'),
+        join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+        join(process.env.PROGRAMFILES || 'C:\\Program Files', 'Microsoft\\Edge\\Application\\msedge.exe'),
+      ]
+    : [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+      ];
+  for (const p of systemPaths) {
+    try { if (p && existsSync(p)) return p; } catch {}
+  }
+
   return null;
 }
 
-/**
- * Download Chrome for Testing to the real filesystem (~/.cache/puppeteer).
- * Needed on fresh installs (especially Windows) where the ASAR packaging
- * prevents puppeteer from resolving its internal download manifest.
- *
- * Uses the same build ID that Puppeteer 24 expects — obtained from
- * resolveBuildId(Browser.CHROME) against Chrome's update API.
- *
- * Thread-safe via _downloadPromise: only one download runs at a time,
- * all concurrent callers wait on the same promise.
- */
-async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, chromeMgr = null) {
-  const cacheDir = join(homedir(), '.cache', 'puppeteer');
-
-  if (chromeMgr?._downloadPromise) {
-    log('Reusing in-flight download promise');
-    return chromeMgr._downloadPromise;
-  }
-
-  const buildId = '148.0.7778.97';
-  const platform = detectBrowserPlatform();
-  log(`Platform: ${platform}, buildId: ${buildId}`);
-
-  // Fast path: already installed
-  let exePath;
+/** Walk a directory tree and find the Chrome executable (synchronous). */
+function findChromeExeSync(root) {
   try {
-    exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
-    log(`Computed path: ${exePath}, exists: ${existsSync(exePath)}`);
-    if (existsSync(exePath)) return exePath;
-  } catch (e) { log(`computeExecutablePath failed: ${e?.message || e}`); }
-
-  // Also search for any chrome.exe in the cache dir (install may use
-  // a different directory layout than computeExecutablePath expects).
-  if (exePath) {
-    const found = await findChromeExe(dirname(dirname(exePath)), log);
-    if (found) { log(`Found Chrome at: ${found}`); return found; }
-  }
-
-  log('Chrome for Testing not found — downloading (~250 MB)…');
-
-  const downloadPromise = (async () => {
-    let attempt = 0;
-    const maxAttempts = 3;
-
-    while (attempt < maxAttempts) {
-      attempt++;
-      try {
-        log(`Download attempt ${attempt}/${maxAttempts}`);
-        await install({
-          browser: Browser.CHROME,
-          buildId,
-          cacheDir,
-          platform: detectBrowserPlatform(),
-          unpack: true,
-          onProgress: (downloaded, total) => {
-            try { onProgress(downloaded, total); } catch {}
-          },
-        });
-        log('Install completed, searching for executable…');
-      } catch (err) {
-        const msg = err?.message || '';
-        log(`Install failed: ${msg}`);
-        if (msg.includes('exists but the executable') && exePath) {
-          const installRoot = dirname(dirname(exePath));
-          log(`Cleaning ${installRoot}…`);
-          await rm(installRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
-          continue; // retry
-        }
-        if (chromeMgr) chromeMgr._downloadPromise = null;
-        throw new Error(`Failed to download Chromium: ${msg}`);
-      }
-
-      // Search for the actual exe — don't trust computeExecutablePath layout
-      const installRoot = dirname(dirname(exePath || computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir })));
-      const found = await findChromeExe(installRoot, log);
-      if (found) {
-        log(`Chrome for Testing installed: ${found}`);
-        if (chromeMgr) chromeMgr._downloadPromise = null;
-        return found;
-      }
-      log(`Attempt ${attempt}: exe not found, retrying…`);
-    }
-
-    if (chromeMgr) chromeMgr._downloadPromise = null;
-    throw new Error(`Chromium download failed after ${maxAttempts} attempts. Check disk space and antivirus.`);
-  })();
-
-  if (chromeMgr) chromeMgr._downloadPromise = downloadPromise;
-  return downloadPromise;
-}
-
-/** Walk a directory tree and find the Chrome executable. */
-async function findChromeExe(root, log) {
-  try {
-    const { readdir, stat } = await import('node:fs/promises');
     const isWin = process.platform === 'win32';
     const target = isWin ? 'chrome.exe' : 'chrome';
-    const walk = async (dir) => {
+    const walk = (dir) => {
       let entries;
-      try { entries = await readdir(dir); } catch { return null; }
+      try { entries = readdirSync(dir); } catch { return null; }
       for (const name of entries) {
         const full = join(dir, name);
         let st;
-        try { st = await stat(full); } catch { continue; }
-        if (st.isFile() && name.toLowerCase() === target.toLowerCase()) {
-          return full;
-        }
+        try { st = statSync(full); } catch { continue; }
+        if (st.isFile() && name.toLowerCase() === target.toLowerCase()) return full;
         if (st.isDirectory()) {
-          const found = await walk(full);
+          const found = walk(full);
           if (found) return found;
         }
       }
       return null;
     };
-    return await walk(root);
-  } catch (e) {
-    log(`findChromeExe error: ${e?.message || e}`);
+    return walk(root);
+  } catch {
     return null;
   }
 }
@@ -168,7 +103,6 @@ export class ChromeManager {
     this.manualLoginProcess = null;
     this._restartWindow = [];
     this._maxRestartsPerHour = 3;
-    this._downloadPromise = null; // reuse in-flight download
     this._lastManualLoginCrash = null; // crash diagnostics from openManualLoginPage
   }
 
@@ -201,10 +135,12 @@ export class ChromeManager {
 
     let executablePath = getBundledChromiumPath();
     if (!executablePath) {
-      // Auto-download Chrome for Testing on fresh/Windows installs.
-      const log = (msg) => console.log(`[chrome] ${msg}`);
-      const onProgress = this._onDownloadProgress || (() => {});
-      executablePath = await ensureChromiumInstalled(log, onProgress, this);
+      throw new Error(
+        'Chromium not found. ' +
+        (process.platform === 'win32'
+          ? 'Please install Google Chrome or Microsoft Edge.'
+          : 'Please install Google Chrome or Chromium.')
+      );
     }
     mkdirSync(this.profileDir, { recursive: true });
 
@@ -385,12 +321,25 @@ export class ChromeManager {
   }
 
   isManualLoginRunning() {
-    return !!this.manualLoginProcess && this.manualLoginProcess.exitCode === null && !this.manualLoginProcess.killed;
+    if (!this.manualLoginProcess) return false;
+    // macOS open -a: the helper exits immediately — Chrome itself may
+    // still be running.  Check CDP health instead of process state.
+    if (process.platform === 'darwin' && this.manualLoginProcess.exitCode !== null) {
+      return false; // open helper exited — launch() falls through to isHealthy()
+    }
+    return this.manualLoginProcess.exitCode === null && !this.manualLoginProcess.killed;
   }
 
   async stopManualLoginProcess(timeoutMs = 20000) {
     const proc = this.manualLoginProcess;
-    if (!proc) return;
+    if (!proc) {
+      // macOS: launched via open -a — the open helper already exited.
+      // Kill Chrome by its user-data-dir so it doesn't linger.
+      if (process.platform === 'darwin' && this.profileDir) {
+        try { spawn('pkill', ['-f', `Google Chrome for Testing.*${this.profileDir}`]); } catch {}
+      }
+      return;
+    }
     if (proc.exitCode !== null || proc.killed) {
       this.manualLoginProcess = null;
       return;
@@ -453,14 +402,12 @@ export class ChromeManager {
     let executablePath = getBundledChromiumPath();
     this._logToFile(`getBundledChromiumPath returned: ${executablePath || 'null'}`);
     if (!executablePath) {
-      executablePath = await ensureChromiumInstalled(
-        (msg) => this._logToFile(`ensureChromium: ${msg}`),
-        this._onDownloadProgress || (() => {}),
-        this
+      throw new Error(
+        'Chromium not found. ' +
+        (process.platform === 'win32'
+          ? 'Please install Google Chrome or Microsoft Edge.'
+          : 'Please install Google Chrome or Chromium.')
       );
-    }
-    if (!executablePath) {
-      throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
     }
 
     this._logToFile(`Executable resolved: ${executablePath}`);
@@ -482,7 +429,7 @@ export class ChromeManager {
       this._logToFile(`Chrome exe stat FAILED: ${e.message}`);
     }
 
-    this.manualLoginProcess = spawn(executablePath, [
+    const chromeArgs = [
       `--user-data-dir=${this.profileDir}`,
       `--remote-debugging-port=${CDP_PORT}`,
       '--disable-blink-features=AutomationControlled',
@@ -492,36 +439,69 @@ export class ChromeManager {
       '--enable-logging',
       `--log-file=${chromeLogFile}`,
       IS24_HOME,
-    ], {
-      detached: false,
-      stdio: 'ignore',
-    });
+    ];
 
-    this._logToFile(`Chrome spawned: pid=${this.manualLoginProcess.pid}`);
+    const isMac = process.platform === 'darwin';
 
-    // Catch spawn errors (ENOENT / permission denied)
-    this.manualLoginProcess.on('error', (err) => {
-      swallow(err, `manual-login-spawn: ${err.message}`);
-      this._logToFile(`Spawn error: ${err.message}`);
-    });
+    if (isMac) {
+      // macOS: spawn() of the raw binary inside a .app bundle causes the
+      // window to land on a random Space.  Use open -a to launch the app
+      // bundle properly — macOS treats it as a full application and opens
+      // it in the current Space with a Dock icon.
+      const appPath = executablePath.replace(/\/Contents\/MacOS\/[^/]+$/, '');
+      this._logToFile(`Launching via open -a: ${appPath}`);
+      this.manualLoginProcess = spawn('open', [
+        '-a', appPath,
+        '--args', ...chromeArgs,
+      ], { stdio: 'ignore' });
+      this._logToFile(`open -a spawned: pid=${this.manualLoginProcess.pid}`);
+      // The 'open' process exits immediately after launching the app;
+      // the Chrome process is adopted by launchd.  Crash detection
+      // isn't possible without the PID, but macOS Chrome is stable.
+      this.manualLoginProcess.on('error', (err) => {
+        swallow(err, `manual-login-open: ${err.message}`);
+        this._logToFile(`open -a error: ${err.message}`);
+      });
+      // open exits quickly — no crash window to detect
+      this.manualLoginProcess.once('exit', () => {
+        // The open helper exited; Chrome itself may still be running.
+        // Do NOT null manualLoginProcess here — CDP health check handles it.
+      });
+      this.manualLoginProcess.unref();
+    } else {
+      // Windows/Linux: spawn the raw binary with process tracking.
+      this.manualLoginProcess = spawn(executablePath, chromeArgs, {
+        detached: false,
+        stdio: 'ignore',
+      });
 
-    // Detect immediate crash. Fire-and-forget — does NOT block return.
-    // Renderer picks up the failure via chrome:status IPC.
-    let _startupClosed = false;
-    const _startupTimer = setTimeout(() => { _startupClosed = true; }, 3000);
-    this.manualLoginProcess.once('exit', (code) => {
-      clearTimeout(_startupTimer);
-      this.manualLoginProcess = null;
-      this._lastManualLoginCrash = null;
-      if (!_startupClosed && code !== null && code !== 0) {
-        const msg = `Chromium crashed on startup (exit ${code})`;
-        console.error(`[chrome] ${msg}`);
-        this._lastManualLoginCrash = { message: msg, code, at: new Date().toISOString() };
-        this._logToFile(msg);
-      }
-    });
+      this._logToFile(`Chrome spawned: pid=${this.manualLoginProcess.pid}`);
 
-    this.manualLoginProcess.unref();
+      // Catch spawn errors (ENOENT / permission denied)
+      this.manualLoginProcess.on('error', (err) => {
+        swallow(err, `manual-login-spawn: ${err.message}`);
+        this._logToFile(`Spawn error: ${err.message}`);
+      });
+
+      // Detect immediate crash. Fire-and-forget — does NOT block return.
+      // Renderer picks up the failure via chrome:status IPC.
+      let _startupClosed = false;
+      const _startupTimer = setTimeout(() => { _startupClosed = true; }, 3000);
+      this.manualLoginProcess.once('exit', (code) => {
+        clearTimeout(_startupTimer);
+        this.manualLoginProcess = null;
+        this._lastManualLoginCrash = null;
+        if (!_startupClosed && code !== null && code !== 0) {
+          const msg = `Chromium crashed on startup (exit ${code})`;
+          console.error(`[chrome] ${msg}`);
+          this._lastManualLoginCrash = { message: msg, code, at: new Date().toISOString() };
+          this._logToFile(msg);
+        }
+      });
+
+      this.manualLoginProcess.unref();
+    }
+
     return { manualLogin: true, profileDir: this.profileDir };
   }
 

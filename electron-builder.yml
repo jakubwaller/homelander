@@ -21,6 +21,8 @@ extraResources:
     to: icon.png
   - from: engine
     to: engine
+  - from: chrome-bundled
+    to: chrome-bin
 
 mac:
   category: public.app-category.productivity

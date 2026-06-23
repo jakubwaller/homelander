@@ -247,6 +247,32 @@ export class IS24Contactor {
     this.page = await this._ensurePage();
     this._captchaAttempts = 0;
 
+    // Spoof sec-ch-ua headers: Chrome for Testing sends "Google Chrome
+    // for Testing" which IS24's WAF can detect server-side.  Override
+    // User-Agent Client Hints to match a standard consumer Chrome build.
+    const platform = process.platform === 'win32' ? 'Windows' : 'macOS';
+    const platformVersion = process.platform === 'win32' ? '10.0' : '14.0';
+    await this.page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+      {
+        brands: [
+          { brand: 'Chromium', version: '148' },
+          { brand: 'Google Chrome', version: '148' },
+          { brand: 'Not?A_Brand', version: '24' },
+        ],
+        fullVersionList: [
+          { brand: 'Chromium', version: '148.0.7778.97' },
+          { brand: 'Google Chrome', version: '148.0.7778.97' },
+          { brand: 'Not?A_Brand', version: '24.0.0.0' },
+        ],
+        architecture: 'x86',
+        mobile: false,
+        model: '',
+        platform,
+        platformVersion,
+      }
+    );
+
     try {
       const tGoto = Date.now();
       await this._navigate(url);

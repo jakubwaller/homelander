@@ -49,7 +49,6 @@ export default function SetupWizard({ onComplete }) {
   const [config, setConfig] = useState(null);
   const [saving, setSaving] = useState(false);
   const [is24Status, setIs24Status] = useState('pending');
-  const [is24Download, setIs24Download] = useState(null); // { status, downloaded, total } from chrome:download-status
   const [captchaValidating, setCaptchaValidating] = useState(false);
   const [searchUrl, setSearchUrl] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -107,15 +106,10 @@ export default function SetupWizard({ onComplete }) {
   // After openLoginPage returns, Chromium may crash silently within seconds
   // (missing DLLs, SmartScreen, code-signing).  Poll chrome:status once after
   // a short delay and surface any crash diagnostics.
-  // Also polls chrome:download-status to show progress during first-launch download (~250 MB).
   const pollForCrash = useCallback(() => {
     setTimeout(async () => {
       try {
-        const [status, download] = await Promise.all([
-          window.homelander?.getChromeStatus?.(),
-          window.homelander?.getChromiumDownloadStatus?.(),
-        ]);
-        if (download) setIs24Download(download);
+        const status = await window.homelander?.getChromeStatus?.();
         if (!status) return;
         if (status.manualLoginCrash) {
           const msg = status.manualLoginCrash.message
@@ -123,7 +117,6 @@ export default function SetupWizard({ onComplete }) {
           showFeedback({ type: 'error', msg });
           setIs24Status('chrome_error');
         } else if (status.manualLogin && !status.cdpHealthy) {
-          setIs24Download(null);
           setIs24Status('waiting_for_login');
         }
       } catch { /* polling is best-effort */ }
@@ -640,31 +633,6 @@ export default function SetupWizard({ onComplete }) {
                 </div>
               </div>
             </div>
-
-            {/* ── Download progress (first-launch Chromium download ~250 MB) ── */}
-            {is24Download?.status === 'downloading' && (
-              <div className="card p-3 space-y-2">
-                <p className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
-                  {t('chromium.downloading', 'Downloading browser…')}
-                </p>
-                <div className="w-full rounded-full h-1.5" style={{ backgroundColor: 'var(--border)' }}>
-                  <div
-                    className="rounded-full h-1.5 transition-all duration-300"
-                    style={{
-                      width: `${is24Download.total > 0 ? Math.min(100, Math.round((is24Download.downloaded / is24Download.total) * 100)) : 0}%`,
-                      backgroundColor: 'var(--accent)',
-                    }}
-                  />
-                </div>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {is24Download.total > 0
-                    ? t('chromium.downloadProgress', `Downloading browser ({0} MB / {1} MB)`)
-                        .replace('{0}', Math.round(is24Download.downloaded / 1048576))
-                        .replace('{1}', Math.round(is24Download.total / 1048576))
-                    : t('chromium.downloading', 'Downloading browser…')}
-                </p>
-              </div>
-            )}
 
             {(is24Status === 'pending' || is24Status === 'chrome_closed' || is24Status === 'chrome_error') && (
               <button

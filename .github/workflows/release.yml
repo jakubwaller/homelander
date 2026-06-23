@@ -60,6 +60,10 @@ jobs:
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: npm run rebuild:electron
 
+      - name: Bundle Chrome for Testing
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
+        run: node scripts/bundle-chrome.mjs
+
       - name: Test
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: npm test
