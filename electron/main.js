@@ -557,17 +557,37 @@ function stopDaemon() {
 
   daemonStopping = true;
   const proc = daemonProcess; // capture reference — never cross-fire on a newer daemon
-  proc.kill('SIGTERM');
-  _stopKillTimer = setTimeout(() => {
-    _stopKillTimer = null;
-    // Only SIGKILL if this is still the SAME process AND still alive
-    if (daemonProcess === proc) {
-      try { proc.kill('SIGKILL'); } catch (err) { swallow(err, 'main/sigkill-fallback'); }
-      daemonProcess = null;
-      daemonStopping = false;
-      latestNextPollAt = null;
+
+  const isWin = platform() === 'win32';
+
+  if (isWin) {
+    // Windows: POSIX signals don't exist. Send IPC shutdown message for graceful
+    // cleanup, then force-kill after a short grace period.
+    if (proc.connected) {
+      try { proc.send({ type: 'shutdown' }); } catch (err) { swallow(err, 'main/daemon-shutdown-ipc'); }
     }
-  }, 5000);
+    _stopKillTimer = setTimeout(() => {
+      _stopKillTimer = null;
+      if (daemonProcess === proc) {
+        try { proc.kill(); } catch (err) { swallow(err, 'main/daemon-force-kill'); }
+        daemonProcess = null;
+        daemonStopping = false;
+        latestNextPollAt = null;
+      }
+    }, 3000);
+  } else {
+    proc.kill('SIGTERM');
+    _stopKillTimer = setTimeout(() => {
+      _stopKillTimer = null;
+      // Only SIGKILL if this is still the SAME process AND still alive
+      if (daemonProcess === proc) {
+        try { proc.kill('SIGKILL'); } catch (err) { swallow(err, 'main/sigkill-fallback'); }
+        daemonProcess = null;
+        daemonStopping = false;
+        latestNextPollAt = null;
+      }
+    }, 5000);
+  }
   daemonStatus = 'stopped';
   latestNextPollAt = null;
 

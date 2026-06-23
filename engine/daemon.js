@@ -797,3 +797,10 @@ process.on('SIGINT', () => {
   log('SIGINT received — shutting down');
   process.exit(0);
 });
+// Windows: POSIX signals don't exist — Electron sends IPC shutdown message instead.
+process.on('message', (msg) => {
+  if (msg?.type === 'shutdown') {
+    log('IPC shutdown received — shutting down');
+    process.exit(0);
+  }
+});

@@ -268,6 +268,15 @@ export class ChromeManager {
       return;
     }
 
+    const isWin = process.platform === 'win32';
+    // Windows: POSIX signals don't exist; proc.kill() always calls TerminateProcess.
+    // Skip the graceful SIGTERM step and just force-kill.
+    if (isWin) {
+      try { proc.kill(); } catch { this.manualLoginProcess = null; return; }
+      this.manualLoginProcess = null;
+      return;
+    }
+
     try { proc.kill('SIGTERM'); } catch { this.manualLoginProcess = null; return; }
 
     await new Promise((resolve) => {

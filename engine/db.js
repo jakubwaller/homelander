@@ -3,7 +3,8 @@
 
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { mkdirSync } from 'node:fs';
 
 const SCHEMA_VERSION = 1;
 
@@ -58,6 +59,9 @@ CREATE INDEX IF NOT EXISTS idx_results_timestamp ON results(timestamp);
 
 export class HomelanderDB {
   constructor(dbPath) {
+    // better-sqlite3 requires the parent directory to exist — it does NOT auto-create it.
+    // On fresh Windows installs (and first macOS runs), ~/.homelander/ may not exist yet.
+    mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
