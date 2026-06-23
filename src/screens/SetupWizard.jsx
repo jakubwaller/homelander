@@ -68,6 +68,22 @@ export default function SetupWizard({ onComplete }) {
     }, 2500);
   };
 
+  // Debug bundle export
+  const [debugBusy, setDebugBusy] = useState(false);
+  const handleExportDebug = async () => {
+    if (!window.homelander?.createSupportBundle) return;
+    setDebugBusy(true);
+    try {
+      const res = await window.homelander.createSupportBundle({ scope: 'global' });
+      if (res?.ok) showFeedback({ type: 'success', msg: t('setup.debugExported', 'Debug bundle exported') });
+      else showFeedback({ type: 'error', msg: userErrorText(res?.userError || res || 'Bundle export failed', { operation: 'support bundle' }, t) });
+    } catch (err) {
+      showFeedback({ type: 'error', msg: userErrorText(err, { operation: 'support bundle' }, t) });
+    } finally {
+      setDebugBusy(false);
+    }
+  };
+
   // After openLoginPage returns, Chromium may crash silently within seconds
   // (missing DLLs, SmartScreen, code-signing).  Poll chrome:status once after
   // a short delay and surface any crash diagnostics.
@@ -318,6 +334,17 @@ export default function SetupWizard({ onComplete }) {
       {/* Header */}
       <header className="flex items-center justify-between px-5 pb-2">
         <h1 className="text-lg font-semibold tracking-tight">{t('setup.header', 'Homelander Setup')}</h1>
+        <button
+          className="btn btn-ghost flex-shrink-0"
+          onClick={handleExportDebug}
+          disabled={debugBusy}
+          title={t('setup.debugExport', 'Debug bundle exportieren')}
+          style={{ opacity: 0.35, fontSize: 15, padding: '2px 4px', lineHeight: 1 }}
+          onMouseEnter={(e) => { e.currentTarget.style.opacity = 1; }}
+          onMouseLeave={(e) => { e.currentTarget.style.opacity = 0.35; }}
+        >
+          🐞
+        </button>
       </header>
 
       {/* Step indicator */}
@@ -720,6 +747,21 @@ export default function SetupWizard({ onComplete }) {
           </button>
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="px-5 pb-4 text-center flex-shrink-0">
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          <a
+            href="#"
+            onClick={(e) => { e.preventDefault(); window.homelander?.openExternal('https://github.com/B1Z0N/'); }}
+            style={{ color: 'var(--accent)', textDecoration: 'none', cursor: 'pointer' }}
+            className="hover:underline"
+          >
+            Mykola Fedurko
+          </a>
+          {' '}© 2026
+        </p>
+      </footer>
     </div>
   );
 }
