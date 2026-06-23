@@ -415,6 +415,10 @@ export class ChromeManager {
     // Start Chromium WITH CDP so the daemon can connect to the SAME browser
     // process — no kill + relaunch, no session loss.
     // Also disable AutomationControlled so IS24 doesn't flag the login page.
+    //
+    // --enable-logging writes Chrome's own startup diagnostics to a file.
+    // No pipe needed — Chrome writes directly, avoiding Windows pipe deadlocks.
+    const chromeLogFile = join(this.profileDir, 'chrome_debug.log');
     this.manualLoginProcess = spawn(executablePath, [
       `--user-data-dir=${this.profileDir}`,
       `--remote-debugging-port=${CDP_PORT}`,
@@ -422,6 +426,8 @@ export class ChromeManager {
       '--no-first-run',
       '--no-default-browser-check',
       '--window-size=1200,850',
+      '--enable-logging',
+      `--log-file=${chromeLogFile}`,
       IS24_HOME,
     ], {
       detached: false,

@@ -342,6 +342,19 @@ async function createSupportBundle(payload = {}) {
   if (existsSync(CHROME_LOG)) {
     writeSupportFile(tempRoot, 'logs/chrome.log', redactSupportText(tailTextFile(CHROME_LOG)));
   }
+  // Include Chrome's own --enable-logging output from the profile dir
+  try {
+    const profilesDir = join(DATA_DIR, 'chrome-profiles');
+    if (existsSync(profilesDir)) {
+      for (const dir of readdirSync(profilesDir)) {
+        const logPath = join(profilesDir, dir, 'chrome_debug.log');
+        if (existsSync(logPath)) {
+          writeSupportFile(tempRoot, 'logs/chrome-debug.log', redactSupportText(tailTextFile(logPath)));
+          break; // one is enough
+        }
+      }
+    }
+  } catch { /* best-effort */ }
 
   const allCandidates = listDebugArtifacts(scope === 'entry' ? exposeId : null, scope === 'entry' ? 40 : 60);
 
