@@ -46,18 +46,22 @@ async function ensureChromiumInstalled(log = () => {}, onProgress = () => {}, ch
   // Reuse in-flight download or return existing installation.
   // chromeMgr._downloadPromise is the single source of truth —
   // all callers share the same promise via the ChromeManager instance.
-  if (chromeMgr?._downloadPromise) return chromeMgr._downloadPromise;
+  if (chromeMgr?._downloadPromise) {
+    log('Reusing in-flight download promise');
+    return chromeMgr._downloadPromise;
+  }
 
   // Build ID from Puppeteer 24's bundled Chrome for Testing.
-  // Update this when upgrading Puppeteer to a new major version.
-  // Verify with: node -e "import('@puppeteer/browsers').then(m => m.resolveBuildId(m.Browser.CHROME).then(console.log))"
   const buildId = '148.0.7778.97';
+  const platform = detectBrowserPlatform();
+  log(`Platform: ${platform}, buildId: ${buildId}`);
 
   let exePath;
   try {
     exePath = computeExecutablePath({ browser: Browser.CHROME, buildId, cacheDir });
+    log(`Computed path: ${exePath}, exists: ${existsSync(exePath)}`);
     if (existsSync(exePath)) return exePath; // fast path — already installed
-  } catch { /* not found — download needed */ }
+  } catch (e) { log(`computeExecutablePath failed: ${e?.message || e}`); }
 
   log('Chrome for Testing not found — downloading (~250 MB)…');
 
@@ -405,10 +409,13 @@ export class ChromeManager {
     if (this.isManualLoginRunning()) return { manualLogin: true, profileDir: this.profileDir };
 
     let executablePath = getBundledChromiumPath();
+    this._logToFile(`getBundledChromiumPath returned: ${executablePath || 'null'}`);
     if (!executablePath) {
-      const log = (msg) => console.log(`[chrome] ${msg}`);
-      const onProgress = this._onDownloadProgress || (() => {});
-      executablePath = await ensureChromiumInstalled(log, onProgress, this);
+      executablePath = await ensureChromiumInstalled(
+        (msg) => this._logToFile(`ensureChromium: ${msg}`),
+        this._onDownloadProgress || (() => {}),
+        this
+      );
     }
     if (!executablePath) {
       throw new Error('Bundled Chromium not found. Run npm install so Puppeteer can install its browser.');
