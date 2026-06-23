@@ -425,23 +425,16 @@ export class ChromeManager {
       IS24_HOME,
     ], {
       detached: false,
-      stdio: ['ignore', 'pipe', 'pipe'],  // capture stdout+stderr for crash diagnostics
+      stdio: 'ignore',
     });
 
-    // Collect output for error diagnostics (Windows: missing-DLL messages,
-    // SmartScreen blocks; macOS: code-signing / framework errors).
-    let _stdout = '', _stderr = '';
-    this.manualLoginProcess.stdout?.on('data', (chunk) => { _stdout += chunk.toString(); });
-    this.manualLoginProcess.stderr?.on('data', (chunk) => { _stderr += chunk.toString(); });
-
-    // Catch spawn errors (ENOENT / permission denied on Windows)
+    // Catch spawn errors (ENOENT / permission denied)
     this.manualLoginProcess.on('error', (err) => {
       swallow(err, `manual-login-spawn: ${err.message}`);
     });
 
-    // Detect immediate crash (< 3 s).  Fire-and-forget — does NOT block the
-    // return below.  The renderer picks up the failure via chrome:status IPC
-    // (which sees !isManualLoginRunning() and !isHealthy() → chrome_error).
+    // Detect immediate crash. Fire-and-forget — does NOT block return.
+    // Renderer picks up the failure via chrome:status IPC.
     let _startupClosed = false;
     const _startupTimer = setTimeout(() => { _startupClosed = true; }, 3000);
     this.manualLoginProcess.once('exit', (code) => {
@@ -449,12 +442,9 @@ export class ChromeManager {
       this.manualLoginProcess = null;
       this._lastManualLoginCrash = null;
       if (!_startupClosed && code !== null && code !== 0) {
-        const detail = _stderr.trim() || _stdout.trim();
-        const msg = detail
-          ? `Chromium crashed on startup (exit ${code}): ${detail}`
-          : `Chromium crashed on startup (exit ${code})`;
+        const msg = `Chromium crashed on startup (exit ${code})`;
         console.error(`[chrome] ${msg}`);
-        this._lastManualLoginCrash = { message: msg, code, detail, at: new Date().toISOString() };
+        this._lastManualLoginCrash = { message: msg, code, at: new Date().toISOString() };
       }
     });
 
