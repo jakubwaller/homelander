@@ -1317,6 +1317,9 @@ function registerIpcHandlers() {
     // Small grace period for OS to release file handles (Windows especially)
     await new Promise(r => setTimeout(r, 500));
 
+    // Close main-process DB handle before unlinking (Windows can't delete open files)
+    closeSharedDb();
+
     // Delete data files
     try { unlinkSync(DB_PATH); } catch (err) { logRawError('data:clean db delete', err, { code: 'DATABASE_ERROR' }); }
     try { unlinkSync(CONFIG_PATH); } catch (err) { logRawError('data:clean config delete', err, { code: 'CONFIG_SAVE_FAILED' }); }
