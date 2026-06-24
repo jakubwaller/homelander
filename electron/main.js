@@ -570,7 +570,7 @@ function startDaemon() {
 }
 
 function stopDaemon() {
-  if (!daemonProcess) return;
+  if (!daemonProcess) return Promise.resolve();
 
   // Clear any previous stop timer
   if (_stopKillTimer) { clearTimeout(_stopKillTimer); _stopKillTimer = null; }
@@ -579,6 +579,26 @@ function stopDaemon() {
   const proc = daemonProcess; // capture reference — never cross-fire on a newer daemon
 
   const isWin = platform() === 'win32';
+
+  // Return a Promise that resolves when daemon actually exits
+  const exitPromise = new Promise((resolve) => {
+    const onExit = () => {
+      proc.removeListener('exit', onExit);
+      resolve();
+    };
+    proc.on('exit', onExit);
+  });
+
+  const timeoutMs = isWin ? 3000 : 5000;
+  // Safety: resolve after timeout even if exit handler never fires
+  const safetyTimer = setTimeout(() => {
+    try { proc.removeListener('exit', resolve); } catch (_) {}
+    resolve();
+  }, timeoutMs + 1000);
+
+  // Clean up safety timer on real exit
+  const onRealExit = () => { clearTimeout(safetyTimer); };
+  proc.once('exit', onRealExit);
 
   if (isWin) {
     // Windows: POSIX signals don't exist. Send IPC shutdown message for graceful
@@ -594,7 +614,7 @@ function stopDaemon() {
         daemonStopping = false;
         latestNextPollAt = null;
       }
-    }, 3000);
+    }, timeoutMs);
   } else {
     proc.kill('SIGTERM');
     _stopKillTimer = setTimeout(() => {
@@ -606,7 +626,7 @@ function stopDaemon() {
         daemonStopping = false;
         latestNextPollAt = null;
       }
-    }, 5000);
+    }, timeoutMs);
   }
   daemonStatus = 'stopped';
   latestNextPollAt = null;
@@ -615,6 +635,8 @@ function stopDaemon() {
     try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) { swallow(err, 'main/power-save-blocker-stop'); }
     _powerSaveBlockerId = null;
   }
+
+  return exitPromise;
 }
 
 function pollIntervalMs() {
@@ -1287,7 +1309,7 @@ function registerIpcHandlers() {
     return { ok: true };
   });
 
-  ipcMain.handle('data:clean', (_event, confirmEmail) => {
+  ipcMain.handle('data:clean', async (_event, confirmEmail) => {
     // Verify email matches configured email
     const configuredEmail = config?.persona?.email || config?.is24?.email || '';
     if (!configuredEmail || confirmEmail !== configuredEmail) {
@@ -1298,10 +1320,13 @@ function registerIpcHandlers() {
     daemonStatus = 'stopped';
     latestNextPollAt = null;
     try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
-    stopDaemon();
+    await stopDaemon();
 
-    // Shutdown Chrome
-    chromeManager.shutdown().catch((err) => { swallow(err, 'main/chrome-shutdown-quit'); });
+    // Shutdown Chrome and wait for it
+    await chromeManager.shutdown().catch((err) => { swallow(err, 'main/chrome-shutdown-clean'); });
+
+    // Small grace period for OS to release file handles (Windows especially)
+    await new Promise(r => setTimeout(r, 500));
 
     // Delete data files
     try { unlinkSync(DB_PATH); } catch (err) { logRawError('data:clean db delete', err, { code: 'DATABASE_ERROR' }); }

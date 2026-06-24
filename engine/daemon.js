@@ -25,6 +25,8 @@ import { parseArgs } from 'node:util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+let _db = null; // module-level ref for exit cleanup
+
 // Parse CLI args
 const { values: args } = parseArgs({
   options: {
@@ -713,6 +715,8 @@ async function main() {
 
   // Open database
   const db = new HomelanderDB(DB_PATH);
+  // Store reference for exit handler (clean close prevents EBUSY on Windows)
+  _db = db;
   log('Database opened');
 
   // Connect to Chrome
@@ -782,4 +786,9 @@ process.on('message', (msg) => {
     log('IPC shutdown received — shutting down');
     process.exit(0);
   }
+});
+
+// Ensure DB handles are closed before the process exits (prevents EBUSY on Windows)
+process.on('exit', () => {
+  try { _db?.close?.(); } catch (_) {}
 });

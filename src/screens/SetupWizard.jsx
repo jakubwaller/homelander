@@ -16,6 +16,7 @@ import {
   IS24_DOCUMENTS,
 } from '../shared/is24FormOptions';
 import { userErrorText } from '../shared/userErrors';
+import { FlagDE, FlagGB } from '../shared/Icons';
 
 const STEPS = [
   { id: 'language', label: 'Language' },
@@ -440,15 +441,8 @@ export default function SetupWizard({ onComplete }) {
                   }}
                   onClick={() => setLocale(lang)}
                 >
-                  <div style={{ 
-                    width: 48, height: 48, borderRadius: '50%', 
-                    background: lang === 'en' ? '#1a3a5c' : '#1a1a1a',
-                    border: '2px solid ' + (lang === 'en' ? '#3b82f6' : '#f59e0b'),
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18, fontWeight: 700, color: '#fff',
-                    margin: '0 auto 8px auto'
-                  }}>
-                    {lang === 'en' ? 'EN' : 'DE'}
+                  <div style={{ margin: '0 auto 8px auto', display: 'flex', justifyContent: 'center' }}>
+                    {lang === 'en' ? <FlagGB size={48} /> : <FlagDE size={48} />}
                   </div>
                   <div className="text-sm font-medium">{lang === 'en' ? t('setup.english', 'English') : t('setup.german', 'Deutsch')}</div>
                 </button>

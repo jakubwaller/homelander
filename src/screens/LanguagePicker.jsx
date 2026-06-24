@@ -1,9 +1,9 @@
 // LanguagePicker — full-screen language selection shown before any other UI.
-// Two large side-by-side cards: 🇬🇧 English / 🇩🇪 Deutsch.
-// Used as the first step of the Setup Wizard.
+// Two large side-by-side cards with SVG flags.
 
 import React, { useState } from 'react';
 import { useLocale } from '../locales/LocaleContext';
+import { FlagDE, FlagGB } from '../shared/Icons';
 
 export default function LanguagePicker() {
   const { setLocale, t } = useLocale();
@@ -60,12 +60,7 @@ export default function LanguagePicker() {
           aria-label="Deutsch"
           style={cardStyle('de')}
         >
-          <span style={{ 
-            width: 48, height: 48, borderRadius: '50%', 
-            background: '#1a1a1a', border: '2px solid #f59e0b',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16
-          }}>DE</span>
+          <FlagDE size={56} />
           <span style={{
             fontSize: 20,
             fontWeight: 500,
@@ -83,12 +78,7 @@ export default function LanguagePicker() {
           aria-label="English"
           style={cardStyle('en')}
         >
-          <span style={{ 
-            width: 48, height: 48, borderRadius: '50%', 
-            background: '#1a3a5c', border: '2px solid #3b82f6',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16
-          }}>EN</span>
+          <FlagGB size={56} />
           <span style={{
             fontSize: 20,
             fontWeight: 500,
