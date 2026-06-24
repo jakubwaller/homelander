@@ -22,15 +22,20 @@ const isDev = !app.isPackaged;
 // (the renderer hosting the React UI).  Without them, Electron's
 // renderer accepts macOS native occlusion signals and throttles,
 // which cascades to delayed IPC and stalled daemon communications.
-// CalculateNativeWinOcclusion is intentionally OMITTED — it is
-// Windows-only (DWM virtual-desktop suspension).  On Darwin the
-// effective flag is MacWindowOcclusion.
+// Anti-throttling for background Spaces / virtual desktops.
+// CalculateNativeWinOcclusion — Windows DWM suspends compositing for
+//   windows on inactive virtual desktops.  Must disable so the renderer
+//   keeps producing frames even when the user switches desktops.
+// NativeWindowOcclusion — cross-platform; both macOS WindowServer and
+//   Windows DWM mark windows as occluded.  Disable so Chromium ignores it.
+// MacWindowOcclusion — macOS-specific WindowServer occlusion signal.
+// IntensiveWakeUpThrottling — macOS-specific timer coalescing.
 app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch(
   'disable-features',
-  'NativeWindowOcclusion,MacWindowOcclusion,IntensiveWakeUpThrottling',
+  'CalculateNativeWinOcclusion,NativeWindowOcclusion,MacWindowOcclusion,IntensiveWakeUpThrottling',
 );
 
 // Single-instance lock — prevents duplicate Electron processes
