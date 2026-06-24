@@ -508,6 +508,7 @@ function startDaemon() {
     `--poll-interval=${config.polling?.interval_seconds || 120}`,
   ], {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    detached: true,  // Break out of parent Job Object (Windows) / process group (macOS)
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1',

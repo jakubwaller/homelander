@@ -22,6 +22,7 @@ import { readFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync, appendF
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { setPriority, constants as osConstants } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -48,6 +49,12 @@ const DAEMON_LOG = join(dirname(DB_PATH), 'daemon.log');
 // Mutable poll interval — updated via IPC when user changes it in Settings
 let pollIntervalSec = parseInt(args['poll-interval'], 10);
 let nextPollDueAt = 0; // ms timestamp; reset by settings save and manual poll
+
+// Elevate OS scheduling priority so the daemon's event loop stays responsive
+// even when the parent Electron window is occluded or on another desktop.
+// Windows: SetPriorityClass(ABOVE_NORMAL) — prevents EcoQoS starvation.
+// macOS: setpriority(PRIO_PROCESS, nice=-7) — harmless scheduling hint.
+try { setPriority(osConstants.priority.PRIORITY_ABOVE_NORMAL); } catch (err) { /* non-fatal */ }
 
 // Dynamic imports
 const { HomelanderDB } = await import('./db.js');
