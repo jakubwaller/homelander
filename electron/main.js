@@ -1218,13 +1218,13 @@ function registerIpcHandlers() {
 
   ipcMain.handle('chrome:focus', async () => {
     try {
-      // Bring the Chromium browser window to front via AppleScript
-      execSync(`osascript -e 'tell application "Google Chrome for Testing" to activate'`, { timeout: 3000 });
-      return { focused: true, error: null };
-    } catch {
-      // Fallback: try regular Chrome
-      try { execSync(`osascript -e 'tell application "Google Chrome" to activate'`, { timeout: 3000 }); } catch (err) { swallow(err, 'main/osascript-activate'); }
-      return { focused: true, error: null };
+      // Cross-platform: use CDP Page.bringToFront which works on all OSes.
+      // If the daemon is running and has a contactor page, use that.
+      // Otherwise fall back to platform-specific activation.
+      const result = await chromeManager.bringToFront();
+      return { focused: true, ...result, error: null };
+    } catch (err) {
+      return { focused: false, error: err.message };
     }
   });
 

@@ -340,6 +340,17 @@ export class ChromeManager {
     await page.bringToFront().catch((err) => { swallow(err, 'bring-to-front'); });
   }
 
+  async bringToFront() {
+    // Lightweight version of showBrowser — just bring the existing
+    // Chromium window to front without repositioning or reconnecting.
+    const browser = await this._connectExisting();
+    const pages = await browser.pages();
+    const page = pages[pages.length - 1]; // most recently active tab
+    if (!page) return { pageCount: 0 };
+    await page.bringToFront().catch((err) => { swallow(err, 'bring-to-front'); });
+    return { pageCount: pages.length };
+  }
+
   async hideBrowser() {
     // Intentional no-op — macOS handles background windows fine without
     // forced off-screen positioning (which causes window-management issues).

@@ -277,11 +277,11 @@ async function applyOne(listing, filterId, db) {
         applyPaused = true;
         pauseResumeTime = null;
         writePauseFlag('perimeter_captcha');
-        // Navigate to IS24 so user can solve the captcha
+        // Show the Chromium window so the user can solve the captcha.
+        // Do NOT navigate away — the captcha page must stay visible.
         try {
-          await contactor.page?.evaluate(() => { window.location.href = 'https://www.immobilienscout24.de/'; });
-          await contactor.page?.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-        } catch (err) { swallow(err, 'apply/perimeter-captcha-redirect'); }
+          await contactor.page?.bringToFront();
+        } catch (err) { swallow(err, 'apply/perimeter-captcha-bring-to-front'); }
       }
 
       emit({

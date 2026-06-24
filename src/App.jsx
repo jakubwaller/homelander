@@ -148,6 +148,12 @@ function AppInner() {
         if (result?.error) throw result;
         setDaemonStatus(result.status || 'paused');
       } else if (daemonStatus === 'session_expired' || daemonStatus === 'perimeter_captcha') {
+        if (daemonStatus === 'perimeter_captcha') {
+          // Captcha page is already loaded in the Chromium tab —
+          // just bring it to front so the user can solve it.
+          await window.homelander.focusChrome();
+          return;
+        }
         const chromeStatus = await window.homelander.getChromeStatus();
         if (chromeStatus?.manualLogin && !chromeStatus?.cdpHealthy) {
           const finalize = await window.homelander.finalizeManualLogin();
