@@ -280,7 +280,7 @@ export default function ActivityFeed() {
                   onMouseMove={moveTip}
                   onMouseLeave={hideTip}
                 >
-                  <ExternalLinkIcon size={14} />
+                  <ExternalLinkIcon size={16} />
                 </button>
               )}
 
@@ -298,7 +298,7 @@ export default function ActivityFeed() {
                     onMouseMove={moveTip}
                     onMouseLeave={hideTip}
                   >
-                    <RetryIcon size={20} />
+                    <RetryIcon size={14} />
                   </button>
                 )
               )}

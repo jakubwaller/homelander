@@ -205,7 +205,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
             onMouseMove={onTipMove}
             onMouseLeave={onTipHide}
           >
-            <ExternalLinkIcon size={14} />
+            <ExternalLinkIcon size={16} />
           </button>
         )}
 
@@ -223,7 +223,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
               onMouseMove={onTipMove}
               onMouseLeave={onTipHide}
             >
-              <RetryIcon size={16} />
+              <RetryIcon size={14} />
             </button>
           )
         )}
@@ -754,7 +754,7 @@ export default function HistoryTab() {
             onMouseLeave={hideTip}
             style={retryAllDone ? { background: 'var(--success)', color: 'white', padding: '2px 6px', fontSize: '16px' } : { color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
           >
-            <span style={{ fontSize: '24px' }}>{retryAllDone ? '✓' : <RetryIcon size={16} />}</span>
+            <span style={{ fontSize: '24px' }}>{retryAllDone ? '✓' : <RetryIcon size={14} />}</span>
           </button>
         )}
 
