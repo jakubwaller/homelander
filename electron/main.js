@@ -1359,13 +1359,11 @@ app.whenReady().then(async () => {
   // powerSaveBlocker prevents system sleep but NOT App Nap.
   // NSAppSleepDisabled tells base::mac::IsAppNapEnabled() to skip
   // process throttling at the Darwin kernel level.
-  // Must target BOTH the dev binary AND the packaged app.
-  if (process.platform === 'darwin') {
+  // ONLY set in production — in dev, the Electron binary is shared
+  // (com.github.Electron) and we don't contaminate other projects.
+  if (process.platform === 'darwin' && app.isPackaged) {
     try {
-      const bundleId = app.isPackaged
-        ? 'com.homelander.app'
-        : 'com.github.Electron';
-      execSync(`defaults write ${bundleId} NSAppSleepDisabled -bool YES`, { timeout: 2000 });
+      execSync('defaults write com.homelander.app NSAppSleepDisabled -bool YES', { timeout: 2000 });
     } catch (err) { swallow(err, 'main/app-nap-defaults'); }
   }
 
