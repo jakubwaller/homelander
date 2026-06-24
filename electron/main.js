@@ -878,12 +878,9 @@ async function createWindow() {
     mainWindow.show();
   });
 
-  // Close = hide to background (not quit)
-  mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
+  // Close = quit the app
+  mainWindow.on('close', () => {
+    app.quit();
   });
 
   mainWindow.on('closed', () => {
