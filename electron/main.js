@@ -1342,6 +1342,9 @@ function registerIpcHandlers() {
     // Delete support bundles
     try { rmSync(SUPPORT_DIR, { recursive: true, force: true }); } catch (err) { swallow(err, 'main/clean-support-bundles'); }
 
+    // Delete debug directory
+    try { rmSync(DEBUG_DIR, { recursive: true, force: true }); } catch (err) { swallow(err, 'main/clean-debug-dir'); }
+
     // Relaunch fresh — config will be recreated with defaults
     app.relaunch();
     app.exit(0);
