@@ -56,6 +56,40 @@ let nextPollDueAt = 0; // ms timestamp; reset by settings save and manual poll
 // macOS: setpriority(PRIO_PROCESS, nice=-7) — harmless scheduling hint.
 try { setPriority(osConstants.priority.PRIORITY_ABOVE_NORMAL); } catch (err) { /* non-fatal */ }
 
+// ── Windows: disable OS-level power throttling + force 1ms timer resolution ──
+// Chromium flags prevent app-level throttling but the Windows NT kernel scheduler
+// applies EcoQoS (Efficiency Mode) and drops timer resolution to 15.6ms when DWM
+// marks the process group as invisible (occluded / virtual desktop switch).
+// These Win32 API calls opt the daemon out of BOTH mechanisms.
+if (process.platform === 'win32') {
+  try {
+    const koffi = (await import('koffi')).default;
+    const kernel32 = koffi.load('kernel32.dll');
+
+    // Fix C: Disable Efficiency Mode / Power Throttling
+    // PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 1, StateMask = 0 = disabled
+    const PT = koffi.struct('PROCESS_POWER_THROTTLING_STATE', {
+      Version: 'uint32', ControlMask: 'uint32', StateMask: 'uint32',
+    });
+    const SetProcessInformation = kernel32.func(
+      'SetProcessInformation', 'bool',
+      ['void *', 'int', 'PROCESS_POWER_THROTTLING_STATE *', 'uint32'],
+    );
+    const GetCurrentProcess = kernel32.func('GetCurrentProcess', 'void *', []);
+    SetProcessInformation(GetCurrentProcess(), 4, // ProcessPowerThrottling = 4
+      { Version: 1, ControlMask: 1, StateMask: 0 }, koffi.sizeof(PT));
+
+    // Fix D: Force 1ms OS timer resolution (default is 15.6ms)
+    const winmm = koffi.load('winmm.dll');
+    const timeBeginPeriod = winmm.func('timeBeginPeriod', 'uint32', ['uint32']);
+    timeBeginPeriod(1);
+    const timeEndPeriod = winmm.func('timeEndPeriod', 'uint32', ['uint32']);
+    process.on('exit', () => { try { timeEndPeriod(1); } catch {} });
+  } catch (err) {
+    process.stderr.write(`[daemon] win-power-throttle: ${err.message}\n`);
+  }
+}
+
 // Dynamic imports
 const { HomelanderDB } = await import('./db.js');
 const { IS24Contactor, DEBUG } = await import('./is24-contactor.js');

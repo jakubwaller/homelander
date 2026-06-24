@@ -32,8 +32,9 @@
     "test:i18n": "node scripts/i18n-hardcoded-check.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
     "@puppeteer/browsers": "^2.13.2",
+    "better-sqlite3": "^12.11.1",
+    "koffi": "^3.0.2",
     "puppeteer": "^24.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
