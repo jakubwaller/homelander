@@ -151,7 +151,7 @@ function AppInner() {
         if (daemonStatus === 'perimeter_captcha') {
           // Captcha page is already loaded in the Chromium tab —
           // just bring it to front so the user can solve it.
-          await window.homelander.focusChrome();
+          await window.homelander.focusBrowser();
           return;
         }
         const chromeStatus = await window.homelander.getChromeStatus();

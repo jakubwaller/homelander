@@ -269,6 +269,7 @@ export class IS24Contactor {
     let formState = 'unknown';
     let fieldCount = 0;
     let fieldRetries = 0;
+    let perimeterCaptcha = false; // flag for finally-block cleanup skip
 
     this.page = await this._ensurePage();
     this._captchaAttempts = 0;
@@ -315,6 +316,7 @@ export class IS24Contactor {
           return false;
         });
         if (isCaptcha) {
+          perimeterCaptcha = true;
           const ssDir = DEBUG.screenshotDir();
           try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_perimeter_captcha.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/perimeter_captcha'); }
           return {
@@ -514,6 +516,9 @@ export class IS24Contactor {
     } finally {
       // Keep the persistent page alive — blank it for the next apply.
       // Closing it would force a newPage() which activates Chromium.
+      // EXCEPTION: perimeter captcha — the captcha page must stay visible
+      // for the user to solve it.  Navigating away defeats the purpose.
+      if (perimeterCaptcha) return;
       try {
         if (this.page && !this.page.isClosed() && this.browser?.isConnected()) {
           await this._navigate('about:blank', { timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
