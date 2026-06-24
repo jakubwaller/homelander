@@ -716,7 +716,10 @@ export default function HistoryTab() {
                       ? { color: o.color }
                       : { color: 'var(--accent)' }
                 }
-                onClick={() => { setListings([]); setOutcomeFilter(o.value); }}
+                onClick={() => {
+                  if (outcomeFilter !== o.value) setListings([]);
+                  setOutcomeFilter(o.value);
+                }}
               >
                 {label}
               </button>
