@@ -1,23 +1,36 @@
+import { useRef } from 'react';
+
 // Platform-consistent SVG icons — replace Unicode glyphs that render at different sizes per OS.
 
 export function FlagDE({ size = 48 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" style={{ flexShrink: 0, borderRadius: 6 }}>
-      <rect width="48" height="16" fill="#000"/>
-      <rect y="16" width="48" height="16" fill="#DD0000"/>
-      <rect y="32" width="48" height="16" fill="#FFCC00"/>
+    <svg width={size} height={size} viewBox="0 0 48 32" style={{ flexShrink: 0, borderRadius: 4 }}>
+      <rect width="48" height="10.67" fill="#000"/>
+      <rect y="10.67" width="48" height="10.67" fill="#DD0000"/>
+      <rect y="21.33" width="48" height="10.67" fill="#FFCC00"/>
     </svg>
   );
 }
 
+let _gbId = 0;
+
 export function FlagGB({ size = 48 }) {
+  const id = useRef(`gb-${++_gbId}`).current;
   return (
-    <svg width={size} height={size} viewBox="0 0 60 30" style={{ flexShrink: 0, borderRadius: 3 }}>
-      <rect width="60" height="30" fill="#012169"/>
-      <path d="M0 0l60 30M60 0L0 30" stroke="#FFF" strokeWidth="6"/>
-      <path d="M0 0l60 30M60 0L0 30" stroke="#C8102E" strokeWidth="3"/>
-      <path d="M30 0v30M0 15h60" stroke="#FFF" strokeWidth="10"/>
-      <path d="M30 0v30M0 15h60" stroke="#C8102E" strokeWidth="5"/>
+    <svg width={size} height={size} viewBox="0 0 48 32" style={{ flexShrink: 0, borderRadius: 4 }}>
+      <clipPath id={`${id}-s`}>
+        <path d="M0,0 v32 h48 v-32 z"/>
+      </clipPath>
+      <clipPath id={`${id}-t`}>
+        <path d="M24,16 h24 v16 z v16 h-24 z h-24 v-16 z v-16 h24 z"/>
+      </clipPath>
+      <g clipPath={`url(#${id}-s)`}>
+        <path d="M0,0 v32 h48 v-32 z" fill="#012169"/>
+        <path d="M0,0 L48,32 M48,0 L0,32" stroke="#fff" strokeWidth="6"/>
+        <path d="M0,0 L48,32 M48,0 L0,32" clipPath={`url(#${id}-t)`} stroke="#C8102E" strokeWidth="4"/>
+        <path d="M24,0 v32 M0,16 h48" stroke="#fff" strokeWidth="10"/>
+        <path d="M24,0 v32 M0,16 h48" stroke="#C8102E" strokeWidth="6"/>
+      </g>
     </svg>
   );
 }
