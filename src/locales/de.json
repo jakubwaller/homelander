@@ -17,6 +17,7 @@
     "active": "Aktiv",
     "paused": "Pausiert",
     "loginNeeded": "Anmeldung nötig",
+    "captchaNeeded": "Captcha lösen",
     "restarting": "Startet neu…",
     "stopped": "Gestoppt"
   },

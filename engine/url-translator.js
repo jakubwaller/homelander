@@ -834,6 +834,12 @@ export async function fetchListings(webUrl, page = 1) {
 
     if (!resp.ok) return { listings: [], error: `HTTP ${resp.status}`, validation };
 
+    // Detect AWS WAF perimeter captcha (returns HTML instead of JSON)
+    const contentType = resp.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      return { listings: [], error: 'PERIMETER_CAPTCHA (AWS WAF — solve in browser to continue)', validation };
+    }
+
     const data = await resp.json();
     const items = data.resultListItems || [];
     const listings = items.map((item) => {

@@ -299,6 +299,25 @@ export class IS24Contactor {
 
       await jitter(...this.t.spaRenderWait);
 
+      // Detect AWS WAF perimeter captcha (Ich bin kein Roboter)
+      try {
+        const isCaptcha = await this.page.evaluate(() => {
+          if (document.title.includes('Ich bin kein Roboter')) return true;
+          if (document.querySelector('#captcha-container')) return true;
+          if (typeof window.awsWafCaptcha !== 'undefined') return true;
+          return false;
+        });
+        if (isCaptcha) {
+          const ssDir = DEBUG.screenshotDir();
+          try { await this.page.screenshot({ path: join(ssDir, `${exposeId}_perimeter_captcha.png`), fullPage: true }); } catch (err) { swallow(err, 'screenshot/perimeter_captcha'); }
+          return {
+            success: false, reason: 'PERIMETER_CAPTCHA (AWS WAF — solve in browser to continue)',
+            timing_ms: Date.now() - tStart, timing, captcha: { ...captcha, perimeter: true }, form_state: 'perimeter_captcha',
+            fields_typed: 0, field_retries: 0,
+          };
+        }
+      } catch (err) { swallow(err, 'apply/perimeter-captcha-check'); }
+
       // Check IS24.expose.userLoggedIn on the freshly loaded page
       try {
         const loggedIn = await this.page.evaluate(() => {

@@ -225,8 +225,10 @@ async function applyOne(listing, filterId, db) {
       const isDeactivated = reasonLower.includes('deactivated');
       const isPremium = reasonLower.includes('premium') || reasonLower.includes('suchen+');
       const isSessionExpired = reasonLower.includes('session_expired');
+      const isPerimeterCaptcha = reasonLower.includes('perimeter_captcha');
       const isError = reason.startsWith('ERROR:');
-      const failureReason = isSessionExpired ? 'session_expired'
+      const failureReason = isPerimeterCaptcha ? 'perimeter_captcha'
+        : isSessionExpired ? 'session_expired'
         : isDeactivated ? 'deactivated'
         : isPremium ? 'premium'
         : reasonLower.includes('captcha') ? 'captcha'
@@ -257,6 +259,19 @@ async function applyOne(listing, filterId, db) {
           await contactor.page?.evaluate(() => { window.location.href = 'https://www.immobilienscout24.de/'; });
           await contactor.page?.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
         } catch (err) { swallow(err, 'apply/session-expiry-redirect2'); }
+      }
+
+      if (isPerimeterCaptcha) {
+        log('*** AWS WAF PERIMETER CAPTCHA — pausing apply + poll ***');
+        emit({ type: 'perimeter_captcha', reason });
+        applyPaused = true;
+        pauseResumeTime = null;
+        writePauseFlag('perimeter_captcha');
+        // Navigate to IS24 so user can solve the captcha
+        try {
+          await contactor.page?.evaluate(() => { window.location.href = 'https://www.immobilienscout24.de/'; });
+          await contactor.page?.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
+        } catch (err) { swallow(err, 'apply/perimeter-captcha-redirect'); }
       }
 
       emit({
@@ -477,6 +492,12 @@ async function pollLoop(db) {
   emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
 
   while (true) {
+    // ── Honour pause flag (perimeter_captcha, session_expired, manual) ──
+    if (checkPauseFlag()) {
+      await sleep(5000);
+      continue;
+    }
+
     // ── Detect wake from sleep ────────────────────────────────
     if (Date.now() - lastTick > (pollIntervalSec * 3000)) {
       log(`Time jump detected (${Math.round((Date.now() - lastTick) / 1000)}s) — poll cycle resuming after suspend`);
@@ -507,6 +528,14 @@ async function pollLoop(db) {
             if (page === 1) {
               log(`Poll error [${filter.id}]: ${error}`);
               emit({ type: 'poll_error', filter_id: filter.id, error });
+            }
+            // Perimeter captcha affects all filters — pause everything
+            if (error.toLowerCase().includes('perimeter_captcha')) {
+              log('*** AWS WAF PERIMETER CAPTCHA (poll) — pausing apply + poll ***');
+              emit({ type: 'perimeter_captcha', reason: error });
+              applyPaused = true;
+              pauseResumeTime = null;
+              writePauseFlag('perimeter_captcha');
             }
             break;
           }

@@ -255,7 +255,7 @@ export default function SearchTab() {
   }, []);
 
   useEffect(() => {
-    const pollingActive = daemonStatus === 'running' || daemonStatus === 'paused' || daemonStatus === 'session_expired';
+    const pollingActive = daemonStatus === 'running' || daemonStatus === 'paused' || daemonStatus === 'session_expired' || daemonStatus === 'perimeter_captcha';
     if (!pollingActive || !stats.nextPollAt) { setNextPollCountdown(''); return; }
     function tick() {
       const diff = new Date(stats.nextPollAt) - Date.now();

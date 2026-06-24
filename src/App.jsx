@@ -111,6 +111,7 @@ function AppInner() {
       if (data.type === 'resumed') setDaemonStatus('running');
       if (data.type === 'daemon_stopped') setDaemonStatus('stopped');
       if (data.type === 'session_expired') setDaemonStatus('session_expired');
+      if (data.type === 'perimeter_captcha') setDaemonStatus('perimeter_captcha');
       if (data.type === 'config_applied') {
         if (data.daemonStatus) setDaemonStatus(data.daemonStatus);
         // Brief flash — clears after animation
@@ -146,7 +147,7 @@ function AppInner() {
         const result = await window.homelander.pauseDaemon();
         if (result?.error) throw result;
         setDaemonStatus(result.status || 'paused');
-      } else if (daemonStatus === 'session_expired') {
+      } else if (daemonStatus === 'session_expired' || daemonStatus === 'perimeter_captcha') {
         const chromeStatus = await window.homelander.getChromeStatus();
         if (chromeStatus?.manualLogin && !chromeStatus?.cdpHealthy) {
           const finalize = await window.homelander.finalizeManualLogin();
@@ -226,6 +227,7 @@ function AppInner() {
             {daemonStatus === 'running' ? t('status.active', 'Active')
               : daemonStatus === 'paused' ? t('status.paused', 'Paused')
               : daemonStatus === 'session_expired' ? t('status.loginNeeded', 'Login needed')
+              : daemonStatus === 'perimeter_captcha' ? t('status.captchaNeeded', 'Captcha lösen')
               : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…')
               : t('status.stopped', 'Stopped')}
           </span>
@@ -233,17 +235,17 @@ function AppInner() {
             className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
             onClick={handleToggleDaemon}
             disabled={daemonControlDisabled}
-            title={daemonStatus === 'stopped' ? t('daemon.start', 'Start') : daemonStatus === 'running' ? t('daemon.pause', 'Pause') : daemonStatus === 'session_expired' ? t('daemon.openChromium', 'Open Chromium to log in') : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…') : t('daemon.resume', 'Resume')}
+            title={daemonStatus === 'stopped' ? t('daemon.start', 'Start') : daemonStatus === 'running' ? t('daemon.pause', 'Pause') : daemonStatus === 'session_expired' ? t('daemon.openChromium', 'Open Chromium to log in') : daemonStatus === 'perimeter_captcha' ? t('daemon.openChromium', 'Open Chromium to solve captcha') : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…') : t('daemon.resume', 'Resume')}
             style={{
               fontSize: '13px',
-              background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'session_expired' ? 'rgba(239,68,68,0.14)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
-              color: daemonStatus === 'stopped' ? 'var(--accent)' : daemonStatus === 'running' ? 'var(--warning)' : daemonStatus === 'session_expired' ? 'var(--danger)' : daemonStatus === 'restarting' ? 'var(--text-muted)' : 'var(--accent)',
+              background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'session_expired' ? 'rgba(239,68,68,0.14)' : daemonStatus === 'perimeter_captcha' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
+              color: daemonStatus === 'stopped' ? 'var(--accent)' : daemonStatus === 'running' ? 'var(--warning)' : daemonStatus === 'session_expired' ? 'var(--danger)' : daemonStatus === 'perimeter_captcha' ? 'var(--warning)' : daemonStatus === 'restarting' ? 'var(--text-muted)' : 'var(--accent)',
               opacity: daemonControlDisabled ? 0.4 : 1,
             }}
           >
-            {daemonStatus === 'stopped' ? '▶' : daemonStatus === 'running' ? '⏸' : daemonStatus === 'session_expired' ? '↗' : daemonStatus === 'restarting' ? '⏳' : '▶'}
+            {daemonStatus === 'stopped' ? '▶' : daemonStatus === 'running' ? '⏸' : daemonStatus === 'session_expired' ? '↗' : daemonStatus === 'perimeter_captcha' ? '↗' : daemonStatus === 'restarting' ? '⏳' : '▶'}
           </button>
-          {daemonStatus !== 'stopped' && daemonStatus !== 'restarting' && daemonStatus !== 'session_expired' && (
+          {daemonStatus !== 'stopped' && daemonStatus !== 'restarting' && daemonStatus !== 'session_expired' && daemonStatus !== 'perimeter_captcha' && (
             <button
               className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
               onClick={handleStopDaemon}
@@ -258,6 +260,16 @@ function AppInner() {
               className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
               onClick={handleResumeAfterExpired}
               title={t('daemon.continue', 'Continue')}
+              style={{ fontSize: '13px', background: 'rgba(59,130,246,0.15)', color: 'var(--accent)' }}
+            >
+              ▶
+            </button>
+          )}
+          {daemonStatus === 'perimeter_captcha' && (
+            <button
+              className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
+              onClick={handleResumeAfterExpired}
+              title={t('daemon.continue', 'Continue (after solving captcha)')}
               style={{ fontSize: '13px', background: 'rgba(59,130,246,0.15)', color: 'var(--accent)' }}
             >
               ▶
