@@ -1085,6 +1085,40 @@ export class IS24Contactor {
       }
     }
 
+    // Final verify: re-check the move-in date.
+    // IS24's React date picker can reformat or discard the date after
+    // other fields are filled (auto-fill hooks, SPA re-renders).
+    if (this.contact.einzug === 'genaues Datum' && this.contact.einzug_datum) {
+      const parts = this.contact.einzug_datum.split('-');
+      const germanDate = parts.length === 3 ? `${parts[2]}.${parts[1]}.${parts[0]}` : this.contact.einzug_datum;
+      const dateSel = 'input#moveInDate';
+      const currentDate = await this.page.evaluate((s) => {
+        const el = document.querySelector(s);
+        return el ? el.value : null;
+      }, dateSel);
+      if (currentDate !== germanDate) {
+        process.stderr.write(`[contactor] Date was modified (${currentDate}) — re-entering ${germanDate}\n`);
+        await this.page.evaluate(({ sel, date }) => {
+          const el = document.querySelector(sel);
+          if (!el) return;
+          const ns = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+          ns.call(el, date);
+          el.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+          el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: date }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          // Re-open + confirm calendar so IS24's React picks it up
+          el.focus();
+        }, { sel: dateSel, date: germanDate });
+        await jitter(300, 500);
+        // Click OK on the calendar
+        await this.page.evaluate(() => {
+          document.querySelector('.DatePicker_datepicker-okay-button__JxpMI')?.click();
+        });
+        await jitter(300, 500);
+        retries++;
+      }
+    }
+
     return { filled, retries };
   }
 
