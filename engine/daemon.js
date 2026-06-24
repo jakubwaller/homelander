@@ -62,6 +62,9 @@ function emit(obj) {
   // through this channel.  Fallback to stdout for standalone runs.
   if (process.send) {
     process.send(obj);
+    // Debug echo to stderr so CLI dev runs still show daemon output.
+    // The parent already captures stderr → console + daemon.log.
+    process.stderr.write(`[daemon] ${JSON.stringify(obj)}\n`);
     return;
   }
   process.stdout.write(JSON.stringify(obj) + '\n');
