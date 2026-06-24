@@ -56,7 +56,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
 
           {/* Stats row */}
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.total_seen || 0}</strong></span>
+            <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_seen ?? filter.total_seen || 0}</strong></span>
             {filter.new_count > 0 && (
               <span className="badge badge-accent">+{filter.new_count} {t('search.pending', 'pending')}</span>
             )}

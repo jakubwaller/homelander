@@ -102,7 +102,8 @@ export class HomelanderDB {
       SELECT f.*,
         (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'seen') as new_count,
         (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'sent') as sent_count,
-        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND date(sent_at) = date('now', 'localtime')) as processed_count
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND date(sent_at) = date('now', 'localtime')) as processed_count,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND date(discovered_at) = date('now', 'localtime')) as today_seen
       FROM filters f
       ORDER BY f.created_at DESC, f.rowid DESC
     `).all();
