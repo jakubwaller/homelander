@@ -209,21 +209,22 @@ export class ChromeManager {
         // and intensive wake-up throttling.
         '--disable-features=NetworkServiceSandbox,CalculateNativeWinOcclusion,NativeWindowOcclusion,IntensiveWakeUpThrottling,MacWindowOcclusion',
 
-        // Force CPU software rendering (SwiftShader).  Drops the
-        // CoreAnimation / GPU process entirely — no CVDisplayLink,
-        // no VSync dependency, no GPU process to suspend when the
-        // macOS WindowServer stops sending frame callbacks to an
-        // occluded window.  Page.captureScreenshot still works.
-        '--disable-gpu',
+        // Force CPU software rendering (SwiftShader) on non-macOS platforms.
+        // On macOS the real GPU compositor handles space transitions natively;
+        // software rendering prevents that and triggers App Nap throttling.
+        ...(process.platform !== 'darwin' ? ['--disable-gpu'] : []),
 
         // Windows virtual-desktop resilience: decouple the renderer from
         // DWM's swap-buffer queue.  When DWM stops compositing the window
         // (inactive virtual desktop), these flags prevent the Blink main
         // thread from deadlocking on a full swap-buffer queue — frames are
         // generated and immediately discarded instead of blocking on DWM.
-        '--disable-gpu-compositing',
-        '--disable-gpu-vsync',
-        '--disable-frame-rate-limit',
+        // These flags hurt macOS occlusion handling; Windows-only.
+        ...(process.platform === 'win32' ? [
+          '--disable-gpu-compositing',
+          '--disable-gpu-vsync',
+          '--disable-frame-rate-limit',
+        ] : []),
       ],
     });
 
