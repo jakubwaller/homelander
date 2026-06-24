@@ -235,7 +235,7 @@ function AppInner() {
             className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
             onClick={handleToggleDaemon}
             disabled={daemonControlDisabled}
-            title={daemonStatus === 'stopped' ? t('daemon.start', 'Start') : daemonStatus === 'running' ? t('daemon.pause', 'Pause') : daemonStatus === 'session_expired' ? t('daemon.openChromium', 'Open Chromium to log in') : daemonStatus === 'perimeter_captcha' ? t('daemon.openChromium', 'Open Chromium to solve captcha') : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…') : t('daemon.resume', 'Resume')}
+            title={daemonStatus === 'stopped' ? t('daemon.start', 'Start') : daemonStatus === 'running' ? t('daemon.pause', 'Pause') : daemonStatus === 'session_expired' ? t('daemon.openChromium', 'Open Chromium to log in') : daemonStatus === 'perimeter_captcha' ? t('daemon.openChromiumCaptcha', 'Open Chromium to solve captcha') : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…') : t('daemon.resume', 'Resume')}
             style={{
               fontSize: '13px',
               background: daemonStatus === 'stopped' ? 'rgba(59,130,246,0.15)' : daemonStatus === 'running' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'session_expired' ? 'rgba(239,68,68,0.14)' : daemonStatus === 'perimeter_captcha' ? 'rgba(245,158,11,0.18)' : daemonStatus === 'restarting' ? 'rgba(156,163,175,0.12)' : 'rgba(59,130,246,0.15)',
@@ -269,7 +269,7 @@ function AppInner() {
             <button
               className="flex items-center justify-center w-6 h-6 rounded-full cursor-pointer select-none transition-all"
               onClick={handleResumeAfterExpired}
-              title={t('daemon.continue', 'Continue (after solving captcha)')}
+              title={t('daemon.continueCaptcha', 'Continue (after solving captcha)')}
               style={{ fontSize: '13px', background: 'rgba(59,130,246,0.15)', color: 'var(--accent)' }}
             >
               ▶

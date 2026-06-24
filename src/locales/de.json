@@ -27,7 +27,9 @@
     "resume": "Fortsetzen",
     "stop": "Stopp",
     "openChromium": "Chromium zum Anmelden öffnen",
-    "continue": "Weiter"
+    "openChromiumCaptcha": "Chromium öffnen um Captcha zu lösen",
+    "continue": "Weiter",
+    "continueCaptcha": "Weiter (nach Captcha-Lösung)"
   },
   "settings": {
     "persona": "Persona",
