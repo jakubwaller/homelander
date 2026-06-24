@@ -57,6 +57,13 @@ const { fetchListings } = await import('./url-translator.js');
 // ── Helpers ────────────────────────────────────────────────────
 
 function emit(obj) {
+  // IPC channel (FD 3) — non-blocking uv_pipe_t.
+  // App Nap on the parent cannot back up the daemon's event loop
+  // through this channel.  Fallback to stdout for standalone runs.
+  if (process.send) {
+    process.send(obj);
+    return;
+  }
   process.stdout.write(JSON.stringify(obj) + '\n');
 }
 

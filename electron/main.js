@@ -17,6 +17,22 @@ import { openSharedDb, closeSharedDb, db } from './db-service.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 
+// ── Chromium anti-throttling for background Spaces ──────────────
+// These flags target the Chromium engine embedded inside Electron
+// (the renderer hosting the React UI).  Without them, Electron's
+// renderer accepts macOS native occlusion signals and throttles,
+// which cascades to delayed IPC and stalled daemon communications.
+// CalculateNativeWinOcclusion is intentionally OMITTED — it is
+// Windows-only (DWM virtual-desktop suspension).  On Darwin the
+// effective flag is MacWindowOcclusion.
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch(
+  'disable-features',
+  'NativeWindowOcclusion,MacWindowOcclusion,IntensiveWakeUpThrottling',
+);
+
 // Single-instance lock — prevents duplicate Electron processes
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -60,6 +76,19 @@ let _powerSaveBlockerId = null; // macOS App Nap prevention
 let latestNextPollAt = null;  // last future next_poll_at emitted by daemon poll loop
 let daemonStopping = false;   // true only during an explicit user stop/SIGTERM window
 let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
+
+// ── Belt-and-suspenders: release the IOPMAssertion on ANY exit path ──
+// Electron's before-quit does NOT fire on Cmd+R (dev reload) or
+// autoUpdater.quitAndInstall() — the JS heap is dumped while the Darwin
+// kernel keeps the assertion open.  process.on('exit') fires on every
+// termination path (normal, crash, reload, OTA update, SIGTERM).
+// powerSaveBlocker.stop() is synchronous (IOPMAssertionRelease) so it
+// works in the exit callback's restricted context.
+process.on('exit', () => {
+  if (_powerSaveBlockerId != null) {
+    try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) {}
+  }
+});
 let chromeManager = new ChromeManager();
 chromeManager._chromeLogPath = CHROME_LOG;
 
@@ -485,32 +514,18 @@ function startDaemon() {
   daemonStartedAt = Date.now();
   latestNextPollAt = new Date(Date.now() + pollIntervalMs()).toISOString();
 
-  // Prevent macOS App Nap from throttling the daemon's CPU usage.
-  // Without this, macOS can suspend the background Chromium process
-  // even with the anti-occlusion Chromium flags (Level 2 of the fix).
-  if (!_powerSaveBlockerId) {
-    try { _powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension'); } catch (err) { swallow(err, 'main/power-save-blocker'); }
-  }
-
   if (mainWindow) {
     mainWindow.webContents.send('homelander:event', { type: 'daemon_started' });
   }
 
-  // Parse stdout JSON lines for events
-  let buffer = '';
-  daemonProcess.stdout.on('data', (data) => {
-    buffer += data.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete line
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        handleDaemonEvent(event);
-      } catch {
-        // Non-JSON line (log output) — ignore
-      }
+  // Receive daemon events via the dedicated IPC channel (FD 3).
+  // This uv_pipe_t is completely independent of stdout — App Nap
+  // on Electron Main cannot block the daemon through this channel.
+  daemonProcess.on('message', (event) => {
+    try {
+      handleDaemonEvent(event);
+    } catch (err) {
+      swallow(err, 'main/daemon-ipc-event');
     }
   });
 
@@ -529,11 +544,6 @@ function startDaemon() {
     const wasRunning = daemonStatus === 'running' || daemonStatus === 'paused';
     daemonStatus = 'stopped';
     latestNextPollAt = null;
-
-    if (_powerSaveBlockerId) {
-      try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) { swallow(err, 'main/power-save-blocker-stop-exit'); }
-      _powerSaveBlockerId = null;
-    }
 
     if (mainWindow) {
       mainWindow.webContents.send('homelander:event', {
@@ -630,11 +640,6 @@ function stopDaemon() {
   }
   daemonStatus = 'stopped';
   latestNextPollAt = null;
-
-  if (_powerSaveBlockerId) {
-    try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) { swallow(err, 'main/power-save-blocker-stop'); }
-    _powerSaveBlockerId = null;
-  }
 
   return exitPromise;
 }
@@ -832,6 +837,7 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      backgroundThrottling: false,
     },
   });
 
@@ -1349,6 +1355,24 @@ function deepMerge(target, patch) {
 // ── App Lifecycle ──────────────────────────────────────────────
 
 app.whenReady().then(async () => {
+  // ── Prevent macOS App Nap on the Electron process itself ──────
+  // powerSaveBlocker prevents system sleep but NOT App Nap.
+  // NSAppSleepDisabled tells base::mac::IsAppNapEnabled() to skip
+  // process throttling at the Darwin kernel level.
+  // Must target BOTH the dev binary AND the packaged app.
+  if (process.platform === 'darwin') {
+    try {
+      const bundleId = app.isPackaged
+        ? 'com.homelander.app'
+        : 'com.github.Electron';
+      execSync(`defaults write ${bundleId} NSAppSleepDisabled -bool YES`, { timeout: 2000 });
+    } catch (err) { swallow(err, 'main/app-nap-defaults'); }
+  }
+
+  // Prevent macOS system sleep from the moment the app launches.
+  // (App Nap is prevented separately via NSAppSleepDisabled above.)
+  try { _powerSaveBlockerId = powerSaveBlocker.start('prevent-app-suspension'); } catch (err) {}
+
   app.setName('Homelander');
 
   loadConfig();
@@ -1375,6 +1399,13 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   closeSharedDb();
   app.isQuitting = true;
+
+  // Explicitly release the IOPMAssertion before the JS heap dies.
+  if (_powerSaveBlockerId != null && powerSaveBlocker.isStarted(_powerSaveBlockerId)) {
+    try { powerSaveBlocker.stop(_powerSaveBlockerId); } catch (err) {}
+    _powerSaveBlockerId = null;
+  }
+
   stopDaemon();
   chromeManager.shutdown().catch((err) => { swallow(err, 'main/chrome-shutdown-close'); });
 });

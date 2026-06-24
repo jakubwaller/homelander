@@ -234,6 +234,13 @@ export class IS24Contactor {
     const nav = this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout });
     await this.page.evaluate((u) => { window.location.href = u; }, url);
     await nav;
+
+    // Reapply lifecycle state after navigation — Chromium resets it.
+    const cdpClient = await this.page.target().createCDPSession();
+    try {
+      await cdpClient.send('Page.setWebLifecycleState', { state: 'active' });
+    } catch (err) { swallow(err, 'contactor/cdp-lifecycle-navigate'); }
+    finally { await cdpClient.detach().catch(() => {}); }
   }
 
   /** Position a page's Chromium window at default coords via CDP. */
