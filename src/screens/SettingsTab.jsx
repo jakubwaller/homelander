@@ -14,6 +14,7 @@ import {
 } from '../shared/is24FormOptions';
 import { userErrorText } from '../shared/userErrors';
 import { useLocale } from '../locales/LocaleContext';
+import { FlagDE, FlagGB } from '../shared/Icons';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -522,9 +523,12 @@ export default function SettingsTab() {
                 border: locale === lang ? 'none' : '1px solid var(--border)',
                 padding: '4px 14px',
                 fontWeight: locale === lang ? 600 : 400,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
               }}
             >
-              {lang === 'en' ? 'EN English' : 'DE Deutsch'}
+              {lang === 'en' ? <><FlagGB size={16} /><span className="ml-1">English</span></> : <><FlagDE size={16} /><span className="ml-1">Deutsch</span></>}
             </button>
           ))}
         </div>
