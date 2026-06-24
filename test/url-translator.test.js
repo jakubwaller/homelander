@@ -45,6 +45,7 @@ function mockResponse(body, status = 200, ok = true) {
   return {
     ok,
     status,
+    headers: new Map(Object.entries({ 'content-type': 'application/json' })),
     json: async () => body,
   };
 }
