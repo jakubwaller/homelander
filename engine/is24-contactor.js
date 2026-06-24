@@ -518,12 +518,13 @@ export class IS24Contactor {
       // Closing it would force a newPage() which activates Chromium.
       // EXCEPTION: perimeter captcha — the captcha page must stay visible
       // for the user to solve it.  Navigating away defeats the purpose.
-      if (perimeterCaptcha) return;
-      try {
-        if (this.page && !this.page.isClosed() && this.browser?.isConnected()) {
-          await this._navigate('about:blank', { timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
-        }
-      } catch (err) { swallow(err, 'apply/about-blank-cleanup'); }
+      if (!perimeterCaptcha) {
+        try {
+          if (this.page && !this.page.isClosed() && this.browser?.isConnected()) {
+            await this._navigate('about:blank', { timeout: 5000 }).catch((err) => { swallow(err, 'page/navigate-about-blank'); });
+          }
+        } catch (err) { swallow(err, 'apply/about-blank-cleanup'); }
+      }
     }
   }
 
