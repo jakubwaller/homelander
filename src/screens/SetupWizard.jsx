@@ -440,7 +440,16 @@ export default function SetupWizard({ onComplete }) {
                   }}
                   onClick={() => setLocale(lang)}
                 >
-                  <div className="text-4xl mb-2">{lang === 'en' ? '🇬🇧' : '🇩🇪'}</div>
+                  <div style={{ 
+                    width: 48, height: 48, borderRadius: '50%', 
+                    background: lang === 'en' ? '#1a3a5c' : '#1a1a1a',
+                    border: '2px solid ' + (lang === 'en' ? '#3b82f6' : '#f59e0b'),
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 18, fontWeight: 700, color: '#fff',
+                    margin: '0 auto 8px auto'
+                  }}>
+                    {lang === 'en' ? 'EN' : 'DE'}
+                  </div>
                   <div className="text-sm font-medium">{lang === 'en' ? t('setup.english', 'English') : t('setup.german', 'Deutsch')}</div>
                 </button>
               ))}

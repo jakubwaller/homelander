@@ -102,8 +102,11 @@ export class HomelanderDB {
       SELECT f.*,
         (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'seen') as new_count,
         (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'sent') as sent_count,
-        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND date(sent_at) = date('now', 'localtime')) as processed_count,
-        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND date(discovered_at) = date('now', 'localtime')) as today_seen
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND date(sent_at, 'localtime') = date('now', 'localtime')) as processed_count,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND (
+          (status IN ('sent', 'failed') AND date(sent_at, 'localtime') = date('now', 'localtime'))
+          OR (status = 'seen' AND date(discovered_at, 'localtime') = date('now', 'localtime'))
+        )) as today_seen
       FROM filters f
       ORDER BY f.created_at DESC, f.rowid DESC
     `).all();
@@ -236,7 +239,11 @@ export class HomelanderDB {
         sql += ' AND (failure_reason LIKE ? OR detail LIKE ?)';
         params.push('%captcha%', '%captcha%');
       } else if (outcome === 'PREMIUM') {
-        sql += ' AND (failure_reason LIKE ? OR detail LIKE ? OR detail LIKE ?)';
+        sql += ' AND (outcome = \'PREMIUM\' OR failure_reason LIKE ? OR detail LIKE ? OR detail LIKE ?)';
+        params.push('%premium%', '%premium%', '%Suchen+%');
+      } else if (outcome === 'FAIL') {
+        // Match the same "pure failed" definition used in getStats/getTodayStats
+        sql += ' AND outcome = \'FAIL\' AND outcome NOT IN (\'DEACTIVATED\', \'PREMIUM\') AND failure_reason NOT LIKE ? AND detail NOT LIKE ? AND detail NOT LIKE ?';
         params.push('%premium%', '%premium%', '%Suchen+%');
       } else {
         sql += ' AND outcome = ?';
@@ -252,16 +259,27 @@ export class HomelanderDB {
     const whereFilter = filterId ? ' WHERE filter_id = ?' : '';
     const filterParam = filterId ? [filterId] : [];
 
+    // Waterfall partition: sent + failed + deactivated + premium = total.
+    // Each listing falls into exactly ONE bucket. Captcha is orthogonal.
     const row = this.db.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') THEN 1 ELSE 0 END), 0) as total,
-        COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as sent,
-        COALESCE(SUM(CASE WHEN status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%' THEN 1 ELSE 0 END), 0) as failed,
+        COALESCE(SUM(CASE WHEN status = 'sent' OR outcome = 'SENT' THEN 1 ELSE 0 END), 0) as sent,
         COALESCE(SUM(CASE WHEN outcome = 'DEACTIVATED' THEN 1 ELSE 0 END), 0) as deactivated,
-        COALESCE(SUM(CASE WHEN (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%') THEN 1 ELSE 0 END), 0) as premium,
+        COALESCE(SUM(CASE WHEN outcome = 'PREMIUM'
+                           OR failure_reason LIKE '%premium%'
+                           OR detail LIKE '%premium%'
+                           OR detail LIKE '%Suchen+%'
+                         THEN 1 ELSE 0 END), 0) as premium,
+        COALESCE(SUM(CASE WHEN (status = 'failed' OR outcome = 'FAIL')
+                           AND outcome NOT IN ('DEACTIVATED', 'PREMIUM')
+                           AND failure_reason NOT LIKE '%premium%'
+                           AND detail NOT LIKE '%premium%'
+                           AND detail NOT LIKE '%Suchen+%'
+                         THEN 1 ELSE 0 END), 0) as failed,
         COALESCE(SUM(CASE WHEN (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') THEN 1 ELSE 0 END), 0) as captcha,
         COALESCE(SUM(CASE WHEN status = 'seen' THEN 1 ELSE 0 END), 0) as seen_unapplied,
-        COALESCE(SUM(CASE WHEN status = 'sent' AND date(sent_at) = date('now', 'localtime') THEN 1 ELSE 0 END), 0) as today
+        COALESCE(SUM(CASE WHEN status = 'sent' AND date(sent_at, 'localtime') = date('now', 'localtime') THEN 1 ELSE 0 END), 0) as today
       FROM listings${whereFilter}
     `).get(...filterParam);
 
@@ -276,21 +294,31 @@ export class HomelanderDB {
     const whereFilter = filterId ? ' AND filter_id = ?' : '';
     const filterParam = filterId ? [filterId] : [];
 
+    // Same waterfall partition as getStats(), scoped to today by sent_at.
     const row = this.db.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') THEN 1 ELSE 0 END), 0) as total,
-        COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as sent,
-        COALESCE(SUM(CASE WHEN status = 'failed' AND outcome NOT IN ('DEACTIVATED', 'PREMIUM') AND failure_reason NOT LIKE '%premium%' AND detail NOT LIKE '%premium%' AND detail NOT LIKE '%Suchen+%' THEN 1 ELSE 0 END), 0) as failed,
+        COALESCE(SUM(CASE WHEN status = 'sent' OR outcome = 'SENT' THEN 1 ELSE 0 END), 0) as sent,
         COALESCE(SUM(CASE WHEN outcome = 'DEACTIVATED' THEN 1 ELSE 0 END), 0) as deactivated,
-        COALESCE(SUM(CASE WHEN (failure_reason LIKE '%premium%' OR detail LIKE '%premium%' OR detail LIKE '%Suchen+%') THEN 1 ELSE 0 END), 0) as premium,
+        COALESCE(SUM(CASE WHEN outcome = 'PREMIUM'
+                           OR failure_reason LIKE '%premium%'
+                           OR detail LIKE '%premium%'
+                           OR detail LIKE '%Suchen+%'
+                         THEN 1 ELSE 0 END), 0) as premium,
+        COALESCE(SUM(CASE WHEN (status = 'failed' OR outcome = 'FAIL')
+                           AND outcome NOT IN ('DEACTIVATED', 'PREMIUM')
+                           AND failure_reason NOT LIKE '%premium%'
+                           AND detail NOT LIKE '%premium%'
+                           AND detail NOT LIKE '%Suchen+%'
+                         THEN 1 ELSE 0 END), 0) as failed,
         COALESCE(SUM(CASE WHEN (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') THEN 1 ELSE 0 END), 0) as captcha,
         COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as today
-      FROM listings WHERE date(sent_at) = date('now', 'localtime')${whereFilter}
+      FROM listings WHERE date(sent_at, 'localtime') = date('now', 'localtime')${whereFilter}
     `).get(...filterParam);
 
     // seen_unapplied uses discovered_at, not sent_at — query separately
     const seenUnapplied = this.db.prepare(
-      `SELECT COUNT(*) as count FROM listings WHERE status = 'seen' AND date(discovered_at) = date('now', 'localtime')${whereFilter}`
+      `SELECT COUNT(*) as count FROM listings WHERE status = 'seen' AND date(discovered_at, 'localtime') = date('now', 'localtime')${whereFilter}`
     ).get(...filterParam);
 
     return {

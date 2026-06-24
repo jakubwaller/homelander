@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocale } from '../locales/LocaleContext';
+import { ExternalLinkIcon, RetryIcon } from '../shared/Icons';
 import { swallow } from '../shared/logCatch.js';
 import { useStore } from '../stores/appStore';
 import { userErrorText } from '../shared/userErrors';
@@ -204,7 +205,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
             onMouseMove={onTipMove}
             onMouseLeave={onTipHide}
           >
-            <span style={{ fontSize: '16px' }}>↗</span>
+            <ExternalLinkIcon size={14} />
           </button>
         )}
 
@@ -222,7 +223,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
               onMouseMove={onTipMove}
               onMouseLeave={onTipHide}
             >
-              <span style={{ fontSize: '24px' }}>⟳</span>
+              <RetryIcon size={16} />
             </button>
           )
         )}
@@ -253,7 +254,7 @@ function HistoryEntry({ listing, isExpanded, onToggle, onRetry, retrying, onSupp
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mt-2">
             <div>
               <span style={{ color: 'var(--text-muted)' }}>{t('history.status', 'Status:')} </span>
-              <span style={{ color: statusColor }} className="font-medium">
+              <span className={`badge badge-${badgeClass.replace('badge-', '')} text-xs`}>
                 {outcomeLabel}
               </span>
             </div>
@@ -753,7 +754,7 @@ export default function HistoryTab() {
             onMouseLeave={hideTip}
             style={retryAllDone ? { background: 'var(--success)', color: 'white', padding: '2px 6px', fontSize: '16px' } : { color: 'var(--accent)', padding: '2px 6px', fontSize: '16px' }}
           >
-            <span style={{ fontSize: '24px' }}>{retryAllDone ? '✓' : '⟳'}</span>
+            <span style={{ fontSize: '24px' }}>{retryAllDone ? '✓' : <RetryIcon size={16} />}</span>
           </button>
         )}
 

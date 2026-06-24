@@ -6,7 +6,8 @@ import { existsSync, mkdirSync, appendFileSync, statSync, readdirSync } from 'no
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
+import { app } from 'electron';
 import puppeteer from 'puppeteer';
 
 const CDP_PORT = 9222;
@@ -20,11 +21,17 @@ function swallow(err, context) {
 
 
 function getBundledChromiumPath() {
-  // Tier 1: Puppeteer's bundled Chromium (dev mode / npm install)
-  try {
-    const p = puppeteer.executablePath();
-    if (p && existsSync(p)) return p;
-  } catch {}
+  // Tier 1: Puppeteer's bundled Chromium (dev mode / npm install).
+  // In packaged builds, puppeteer.executablePath() can return a
+  // wrong-architecture binary from a stale ~/.cache/puppeteer/ left
+  // by a previous install — skip it and go straight to the bundled
+  // chrome-bin/ which always matches the DMG architecture.
+  if (!app.isPackaged) {
+    try {
+      const p = puppeteer.executablePath();
+      if (p && existsSync(p)) return p;
+    } catch {}
+  }
 
   // Tier 2: Our bundled extraResource (production build)
   try {
@@ -108,7 +115,7 @@ export class ChromeManager {
 
   _options(options = {}) {
     return {
-      visibility: options.visibility || 'hidden_unless_needed',
+      visibility: options.visibility || 'always_show',
       maxTabs: clampMaxTabs(options.maxTabs),
     };
   }
@@ -151,6 +158,21 @@ export class ChromeManager {
     }
     this._restartWindow.push(now);
 
+    // Prevent macOS App Nap on the Chromium child process.
+    // powerSaveBlocker only covers the Electron main process; the
+    // spawned Chromium gets App Napped independently when its
+    // window is occluded or minimised.  NSAppSleepDisabled in
+    // UserDefaults tells Chromium's base::mac::IsAppNapEnabled()
+    // to skip App Nap at the kernel level.  Must run BEFORE
+    // puppeteer.launch() — Chromium reads NSUserDefaults at
+    // process start.
+    try {
+      execSync(
+        'defaults write com.google.chrome.for.testing NSAppSleepDisabled -bool YES',
+        { timeout: 2000 },
+      );
+    } catch (err) { swallow(err, 'chrome/app-nap-defaults'); }
+
     this.browser = await puppeteer.launch({
       executablePath,
       headless: false,
@@ -182,9 +204,26 @@ export class ChromeManager {
         '--disable-renderer-backgrounding',
         '--disable-ipc-flooding-protection',
 
-        // macOS-specific: tell Chromium to ignore native occlusion signals
-        // (WindowServer "hidden" flag) and intensive wake-up throttling.
-        '--disable-features=NetworkServiceSandbox,CalculateNativeWinOcclusion,IntensiveWakeUpThrottling,MacWindowOcclusion',
+        // macOS + Windows: tell Chromium to ignore native occlusion signals
+        // (WindowServer "hidden" flag / DWM inactive-desktop suspension)
+        // and intensive wake-up throttling.
+        '--disable-features=NetworkServiceSandbox,CalculateNativeWinOcclusion,NativeWindowOcclusion,IntensiveWakeUpThrottling,MacWindowOcclusion',
+
+        // Force CPU software rendering (SwiftShader).  Drops the
+        // CoreAnimation / GPU process entirely — no CVDisplayLink,
+        // no VSync dependency, no GPU process to suspend when the
+        // macOS WindowServer stops sending frame callbacks to an
+        // occluded window.  Page.captureScreenshot still works.
+        '--disable-gpu',
+
+        // Windows virtual-desktop resilience: decouple the renderer from
+        // DWM's swap-buffer queue.  When DWM stops compositing the window
+        // (inactive virtual desktop), these flags prevent the Blink main
+        // thread from deadlocking on a full swap-buffer queue — frames are
+        // generated and immediately discarded instead of blocking on DWM.
+        '--disable-gpu-compositing',
+        '--disable-gpu-vsync',
+        '--disable-frame-rate-limit',
       ],
     });
 
@@ -321,25 +360,12 @@ export class ChromeManager {
   }
 
   isManualLoginRunning() {
-    if (!this.manualLoginProcess) return false;
-    // macOS open -a: the helper exits immediately — Chrome itself may
-    // still be running.  Check CDP health instead of process state.
-    if (process.platform === 'darwin' && this.manualLoginProcess.exitCode !== null) {
-      return false; // open helper exited — launch() falls through to isHealthy()
-    }
-    return this.manualLoginProcess.exitCode === null && !this.manualLoginProcess.killed;
+    return !!this.manualLoginProcess && this.manualLoginProcess.exitCode === null && !this.manualLoginProcess.killed;
   }
 
   async stopManualLoginProcess(timeoutMs = 20000) {
     const proc = this.manualLoginProcess;
-    if (!proc) {
-      // macOS: launched via open -a — the open helper already exited.
-      // Kill Chrome by its user-data-dir so it doesn't linger.
-      if (process.platform === 'darwin' && this.profileDir) {
-        try { spawn('pkill', ['-f', `Google Chrome for Testing.*${this.profileDir}`]); } catch {}
-      }
-      return;
-    }
+    if (!proc) return;
     if (proc.exitCode !== null || proc.killed) {
       this.manualLoginProcess = null;
       return;
@@ -441,67 +467,37 @@ export class ChromeManager {
       IS24_HOME,
     ];
 
-    const isMac = process.platform === 'darwin';
+    // Spawn Chrome with process tracking (all platforms).
+    this.manualLoginProcess = spawn(executablePath, chromeArgs, {
+      detached: false,
+      stdio: 'ignore',
+    });
 
-    if (isMac) {
-      // macOS: spawn() of the raw binary inside a .app bundle causes the
-      // window to land on a random Space.  Use open -a to launch the app
-      // bundle properly — macOS treats it as a full application and opens
-      // it in the current Space with a Dock icon.
-      const appPath = executablePath.replace(/\/Contents\/MacOS\/[^/]+$/, '');
-      this._logToFile(`Launching via open -a: ${appPath}`);
-      this.manualLoginProcess = spawn('open', [
-        '-a', appPath,
-        '--args', ...chromeArgs,
-      ], { stdio: 'ignore' });
-      this._logToFile(`open -a spawned: pid=${this.manualLoginProcess.pid}`);
-      // The 'open' process exits immediately after launching the app;
-      // the Chrome process is adopted by launchd.  Crash detection
-      // isn't possible without the PID, but macOS Chrome is stable.
-      this.manualLoginProcess.on('error', (err) => {
-        swallow(err, `manual-login-open: ${err.message}`);
-        this._logToFile(`open -a error: ${err.message}`);
-      });
-      // open exits quickly — no crash window to detect
-      this.manualLoginProcess.once('exit', () => {
-        // The open helper exited; Chrome itself may still be running.
-        // Do NOT null manualLoginProcess here — CDP health check handles it.
-      });
-      this.manualLoginProcess.unref();
-    } else {
-      // Windows/Linux: spawn the raw binary with process tracking.
-      this.manualLoginProcess = spawn(executablePath, chromeArgs, {
-        detached: false,
-        stdio: 'ignore',
-      });
+    this._logToFile(`Chrome spawned: pid=${this.manualLoginProcess.pid}`);
 
-      this._logToFile(`Chrome spawned: pid=${this.manualLoginProcess.pid}`);
+    // Catch spawn errors (ENOENT / permission denied)
+    this.manualLoginProcess.on('error', (err) => {
+      swallow(err, `manual-login-spawn: ${err.message}`);
+      this._logToFile(`Spawn error: ${err.message}`);
+    });
 
-      // Catch spawn errors (ENOENT / permission denied)
-      this.manualLoginProcess.on('error', (err) => {
-        swallow(err, `manual-login-spawn: ${err.message}`);
-        this._logToFile(`Spawn error: ${err.message}`);
-      });
+    // Detect immediate crash. Fire-and-forget — does NOT block return.
+    // Renderer picks up the failure via chrome:status IPC.
+    let _startupClosed = false;
+    const _startupTimer = setTimeout(() => { _startupClosed = true; }, 3000);
+    this.manualLoginProcess.once('exit', (code) => {
+      clearTimeout(_startupTimer);
+      this.manualLoginProcess = null;
+      this._lastManualLoginCrash = null;
+      if (!_startupClosed && code !== null && code !== 0) {
+        const msg = `Chromium crashed on startup (exit ${code})`;
+        console.error(`[chrome] ${msg}`);
+        this._lastManualLoginCrash = { message: msg, code, at: new Date().toISOString() };
+        this._logToFile(msg);
+      }
+    });
 
-      // Detect immediate crash. Fire-and-forget — does NOT block return.
-      // Renderer picks up the failure via chrome:status IPC.
-      let _startupClosed = false;
-      const _startupTimer = setTimeout(() => { _startupClosed = true; }, 3000);
-      this.manualLoginProcess.once('exit', (code) => {
-        clearTimeout(_startupTimer);
-        this.manualLoginProcess = null;
-        this._lastManualLoginCrash = null;
-        if (!_startupClosed && code !== null && code !== 0) {
-          const msg = `Chromium crashed on startup (exit ${code})`;
-          console.error(`[chrome] ${msg}`);
-          this._lastManualLoginCrash = { message: msg, code, at: new Date().toISOString() };
-          this._logToFile(msg);
-        }
-      });
-
-      this.manualLoginProcess.unref();
-    }
-
+    this.manualLoginProcess.unref();
     return { manualLogin: true, profileDir: this.profileDir };
   }
 

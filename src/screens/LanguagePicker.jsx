@@ -60,7 +60,12 @@ export default function LanguagePicker() {
           aria-label="Deutsch"
           style={cardStyle('de')}
         >
-          <span style={{ fontSize: 48 }}>🇩🇪</span>
+          <span style={{ 
+            width: 48, height: 48, borderRadius: '50%', 
+            background: '#1a1a1a', border: '2px solid #f59e0b',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16
+          }}>DE</span>
           <span style={{
             fontSize: 20,
             fontWeight: 500,
@@ -78,7 +83,12 @@ export default function LanguagePicker() {
           aria-label="English"
           style={cardStyle('en')}
         >
-          <span style={{ fontSize: 48 }}>🇬🇧</span>
+          <span style={{ 
+            width: 48, height: 48, borderRadius: '50%', 
+            background: '#1a3a5c', border: '2px solid #3b82f6',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16
+          }}>EN</span>
           <span style={{
             fontSize: 20,
             fontWeight: 500,

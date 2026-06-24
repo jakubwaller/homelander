@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocale } from '../locales/LocaleContext';
 import { swallow } from '../shared/logCatch.js';
 import { useStore } from '../stores/appStore';
+import { ExternalLinkIcon, RetryIcon } from '../shared/Icons';
 import { userErrorText } from '../shared/userErrors';
 
 function formatTime(iso) {
@@ -195,6 +196,7 @@ export default function ActivityFeed() {
         const statusColor = isSent ? 'var(--success)' : isDeactivated ? 'var(--text-muted)' : isPremium ? '#a855f7' : 'var(--danger)';
         const statusIcon = isSent ? '✓' : isDeactivated ? '⊘' : isPremium ? '💎' : '✗';
         const outcomeLabel = isSent ? t('livefeed.sent', 'Sent') : isDeactivated ? t('livefeed.deactivated', 'Deactivated') : isPremium ? t('livefeed.premium', 'Premium') : t('livefeed.failed', 'Failed');
+        const badgeClass = isSent ? 'success' : isDeactivated ? 'deactivated' : isPremium ? 'premium' : 'fail';
 
         return (
           <div
@@ -240,8 +242,7 @@ export default function ActivityFeed() {
                     {item.title || t('livefeed.unknownListing', 'Unknown Listing')}
                   </span>
                   <span
-                    className="badge badge-sm text-xs"
-                    style={{ background: statusColor + '20', color: statusColor }}
+                    className={`badge badge-${badgeClass} text-xs`}
                     onMouseEnter={(e) => {
                       e.stopPropagation();
                       const tipKey = isSent ? 'sentTip' : isPremium ? 'premiumTip' : isDeactivated ? 'deactivatedTip' : isCaptcha ? 'captchaTip' : 'failedTip';
@@ -279,7 +280,7 @@ export default function ActivityFeed() {
                   onMouseMove={moveTip}
                   onMouseLeave={hideTip}
                 >
-                  <span style={{ fontSize: '16px' }}>↗</span>
+                  <ExternalLinkIcon size={14} />
                 </button>
               )}
 
@@ -297,7 +298,7 @@ export default function ActivityFeed() {
                     onMouseMove={moveTip}
                     onMouseLeave={hideTip}
                   >
-                    <span style={{ fontSize: '24px' }}>⟳</span>
+                    <RetryIcon size={20} />
                   </button>
                 )
               )}
@@ -320,7 +321,7 @@ export default function ActivityFeed() {
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mt-2">
                   <div>
                     <span style={{ color: 'var(--text-muted)' }}>{t('livefeed.status', 'Status:')} </span>
-                    <span style={{ color: statusColor }} className="font-medium">{outcomeLabel}</span>
+                    <span className={`badge badge-${badgeClass} text-xs`}>{outcomeLabel}</span>
                   </div>
                   <div>
                     <span style={{ color: 'var(--text-muted)' }}>{t('livefeed.time', 'Time:')} </span>

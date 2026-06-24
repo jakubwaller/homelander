@@ -280,6 +280,7 @@ export default function SearchTab() {
         <StatBadge label={t('search.failed', 'Failed')} value={stats.failed} color="var(--danger)" showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
         <StatBadge label={t('livefeed.deactivated', 'Deactivated')} value={stats.deactivated || 0} color="var(--text-muted)" tooltip={t('livefeed.deactivatedTip')} showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
         <StatBadge label={t('livefeed.premium', 'Premium')} value={stats.premium || 0} color="#a855f7" tooltip={t('livefeed.premiumTip')} showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
+        <span className="w-px h-5 self-center" style={{ backgroundColor: 'var(--border)' }} />
         <StatBadge label={t('livefeed.captcha', 'Captcha')} value={stats.captcha || 0} color="#f59e0b" tooltip={t('livefeed.captchaTip')} showTip={showTip} moveTip={moveTip} hideTip={hideTip} />
 
         </div>

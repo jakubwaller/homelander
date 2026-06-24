@@ -2,7 +2,7 @@
 appId: com.homelander.app
 productName: Homelander
 copyright: Copyright © 2026
-npmRebuild: false
+npmRebuild: true
 
 directories:
   output: release

@@ -440,7 +440,7 @@ function getDefaultConfig() {
       interval_seconds: 600,
     },
     browser: {
-      visibility: 'hidden_unless_needed',
+      visibility: 'always_show',
       max_tabs: 5,
     },
     _setupComplete: false,

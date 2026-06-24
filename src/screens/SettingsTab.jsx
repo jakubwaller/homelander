@@ -524,7 +524,7 @@ export default function SettingsTab() {
                 fontWeight: locale === lang ? 600 : 400,
               }}
             >
-              {lang === 'en' ? '🇬🇧 English' : '🇩🇪 Deutsch'}
+              {lang === 'en' ? 'EN English' : 'DE Deutsch'}
             </button>
           ))}
         </div>

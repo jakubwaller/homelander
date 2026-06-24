@@ -189,6 +189,25 @@ export class IS24Contactor {
         get: () => false,
         configurable: true,
       });
+
+      // Polyfill rAF → setTimeout: prevents React 18 commit phase
+      // stall when macOS WindowServer stops VSync for occluded or
+      // minimised windows.  React's virtual DOM reconciliation
+      // completes, but the commit/paint phase is gated on
+      // requestAnimationFrame — which never fires without
+      // CoreAnimation VSync.  Our page.evaluate() polls wait for
+      // DOM state that never lands.  setTimeout bypasses
+      // CoreAnimation entirely and runs on the CPU timer, which
+      // our --disable-background-timer-throttling flag keeps
+      // unclamped.
+      Object.defineProperty(window, 'requestAnimationFrame', {
+        value: (cb) => window.setTimeout(cb, 16),
+        writable: true, configurable: true,
+      });
+      Object.defineProperty(window, 'cancelAnimationFrame', {
+        value: (id) => window.clearTimeout(id),
+        writable: true, configurable: true,
+      });
     });
   }
 

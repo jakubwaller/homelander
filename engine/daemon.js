@@ -193,27 +193,6 @@ async function applyOne(listing, filterId, db) {
   }
 
   try {
-    // ── Per-form login check — scans ALL open IS24 tabs, opens one if needed ──
-    if (!applyPaused && contactor && contactor.browser && contactor.browser.isConnected()) {
-      try {
-        const loggedIn = await contactor.checkIS24LoginAnyTab();
-        if (!loggedIn) {
-          log('*** IS24 login check failed before form submit — pausing apply ***');
-          emit({ type: 'session_expired', reason: 'IS24 login check failed — no logged-in IS24 tab found' });
-          applyPaused = true;
-          pauseResumeTime = null;
-          writePauseFlag('session_expired');
-          // Navigate the persistent page to IS24 homepage so the user can log in.
-          // Use in-page navigation to avoid CDP Page.navigate window activation.
-          try {
-            await contactor.page.evaluate(() => { window.location.href = 'https://www.immobilienscout24.de/'; });
-            await contactor.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 });
-          } catch (err) { swallow(err, 'apply/session-expiry-redirect'); }
-          return;
-        }
-      } catch (_) { /* best-effort; don't disrupt apply */ }
-    }
-
     const result = await contactor.apply(
       listing.expose_id,
       message,
