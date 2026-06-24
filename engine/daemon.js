@@ -439,6 +439,16 @@ async function applyLoop(db) {
       continue;
     }
 
+    // Quick CDP health check before processing listings — fresh
+    // TCP connection, not the stale Puppeteer WebSocket.
+    try {
+      await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(3000) });
+    } catch {
+      log('CDP ping failed at round start — waiting for recovery');
+      await sleep(5000);
+      continue;
+    }
+
     let didWork = false;
     for (const filter of filters) {
       if (applyPaused || checkPauseFlag()) break;
@@ -469,6 +479,20 @@ async function applyLoop(db) {
       // Check CDP alive before every listing — catches Cmd+Q instantly
       if (!contactor || !contactor.browser || !contactor.browser.isConnected()) {
         log('CDP disconnected — breaking filter loop');
+        break;
+      }
+
+      // Quick CDP HTTP ping — fresh TCP connection, bypasses the
+      // long-lived Puppeteer WebSocket.  If macOS QoS-downgraded the
+      // daemon on a Space switch, the WebSocket can stall even though
+      // Chromium itself is responsive to new connections.  This catches
+      // that state and skips the listing instead of timing out.
+      try {
+        await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(3000) });
+      } catch {
+        log(`CDP ping failed (Space throttled?) — skipping ${listing.expose_id}`);
+        // Don't burn a listing — break the filter loop so ensureCDPHealthy
+        // handles reconnection at the top of the next iteration.
         break;
       }
       log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
