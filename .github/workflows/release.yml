@@ -46,6 +46,10 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Bump version in package.json
+        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
+        run: node -e "const p=require('./package.json');p.version='${{ github.event.inputs.version }}'.replace(/^v/,'');require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
+
       - name: Install
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
         run: npm ci --ignore-scripts
