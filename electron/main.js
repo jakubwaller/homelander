@@ -1331,6 +1331,17 @@ function registerIpcHandlers() {
     try { unlinkSync(CONFIG_PATH); } catch (err) { logRawError('data:clean config delete', err, { code: 'CONFIG_SAVE_FAILED' }); }
     try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
 
+    // Delete logs
+    try { unlinkSync(DAEMON_LOG); } catch (err) { swallow(err, 'main/clean-daemon-log'); }
+    try { unlinkSync(CHROME_LOG); } catch (err) { swallow(err, 'main/clean-chrome-log'); }
+
+    // Delete Chrome profiles (session cookies, browser state)
+    const chromeProfilesDir = join(DATA_DIR, 'chrome-profiles');
+    try { rmSync(chromeProfilesDir, { recursive: true, force: true }); } catch (err) { swallow(err, 'main/clean-chrome-profiles'); }
+
+    // Delete support bundles
+    try { rmSync(SUPPORT_DIR, { recursive: true, force: true }); } catch (err) { swallow(err, 'main/clean-support-bundles'); }
+
     // Relaunch fresh — config will be recreated with defaults
     app.relaunch();
     app.exit(0);
