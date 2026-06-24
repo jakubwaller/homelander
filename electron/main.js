@@ -737,33 +737,22 @@ function handleDaemonEvent(event) {
       break;
     case 'listing':
       mainWindow.webContents.send('homelander:listing', event);
-      // Native notification
-      if (config.notifications !== false) {
-        if (event.outcome === 'SENT') {
-          new Notification({
-            title: '✓ Bewerbung gesendet',
-            body: `${event.title} — ${event.address || 'keine Adresse'}`,
-            silent: true,
-            icon: APP_ICON_PNG,
-          }).show();
-        } else if (event.outcome === 'FAIL') {
-          const userError = toUserError(event.detail || event.failureReason || 'Application failed', { operation: 'listing apply' });
-          new Notification({
-            title: 'Bewerbung braucht Aufmerksamkeit',
-            body: `${event.title} — ${userError.title}`,
-            silent: true,
-            icon: APP_ICON_PNG,
-          }).show();
-        }
-      }
       break;
     case 'captcha_wall':
       mainWindow.webContents.send('homelander:event', event);
+      break;
+    case 'perimeter_captcha':
+      daemonStatus = 'perimeter_captcha';
+      try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'perimeter_captcha' }), 'utf8'); } catch (err) { swallow(err, 'main/write-pause-flag'); }
+      mainWindow.webContents.send('homelander:event', {
+        type: 'perimeter_captcha',
+        reason: event.reason,
+      });
       if (config.notifications !== false) {
         new Notification({
-          title: '🔐 Captcha-Wand erkannt',
-          body: `Nach ${event.consecutive} Captchas automatisch für 15 Minuten pausiert`,
-          silent: true,
+          title: '🛡 Captcha-Prüfung nötig',
+          body: 'IS24 verlangt eine Sicherheitsabfrage — öffne Chromium um sie zu lösen',
+          silent: false,
           icon: APP_ICON_PNG,
         }).show();
       }
