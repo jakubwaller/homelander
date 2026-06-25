@@ -77,44 +77,6 @@ IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Ch
 
 Everything runs on your computer. Your data stays local.
 
-## 🏃 Contributing Quick Start
-
-### Prerequisites
-
-- **Node.js 20+** ([nodejs.org](https://nodejs.org))
-- **Chrome** — bundled automatically via Puppeteer (no separate install)
-- **2captcha account** ([2captcha.com](https://2captcha.com)) — ~$3 covers hundreds of applications
-
-### Install & Run
-
-```bash
-git clone https://github.com/B1Z0N/homelander.git
-cd homelander
-npm install
-npm run dev
-```
-
-### Build
-
-```bash
-npm run dist:mac     # macOS .dmg + .zip
-npm run dist:win     # Windows .exe (NSIS)
-npm run dist:linux   # Linux .deb + .AppImage
-```
-
-## 🔧 First Launch
-
-The setup wizard guides you through 6 steps:
-
-1. **Language** - select german or english.
-2. **Your details** — name, email, phone, address
-3. **Message template** — the message sent with each application (use `{{title}}`, `{{address}}`, `{{name}}`)
-4. **IS24 account** — log in manually (IS24 blocks automated login)
-5. **2captcha API key** — for automatic captcha solving
-6. **First search** — paste an IS24 search URL
-
-After setup, the app opens to the Searches tab. Add more searches anytime.
-
 ## ⬇️ Installation
 
 Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
@@ -138,6 +100,19 @@ Then launch from Applications or Spotlight.
 ### Windows
 
 Download the `.exe` and run it. Windows SmartScreen may show a warning — click **More info** → **Run anyway**.
+
+## 🔧 First Launch
+
+The setup wizard guides you through 6 steps:
+
+1. **Language** - select german or english.
+2. **Your details** — name, email, phone, address
+3. **Message template** — the message sent with each application (use `{{title}}`, `{{address}}`, `{{name}}`)
+4. **IS24 account** — log in manually (IS24 blocks automated login)
+5. **2captcha API key** — for automatic captcha solving
+6. **First search** — paste an IS24 search URL
+
+After setup, the app opens to the Searches tab. Add more searches anytime.
 
 ## ⚙️ Configuration
 
@@ -174,6 +149,30 @@ No telemetry. No analytics. No cloud. Your `config.json`, `homelander.db`, and C
 **Does it work outside Germany?** The app works anywhere, but it's designed for the German ImmobilienScout24 platform.
 
 **Can I search multiple areas?** Yes. Add multiple search URLs — each polls independently.
+
+## 🛠️ Development
+
+### Prerequisites
+
+- **Node.js 20+** ([nodejs.org](https://nodejs.org))
+- **Chrome** — bundled automatically via Puppeteer (no separate install)
+
+### Install & Run
+
+```bash
+git clone https://github.com/B1Z0N/homelander.git
+cd homelander
+npm install
+npm run dev
+```
+
+### Build
+
+```bash
+npm run dist:mac     # macOS .dmg + .zip
+npm run dist:win     # Windows .exe (NSIS)
+npm run dist:linux   # Linux .deb + .AppImage
+```
 
 ## 🤝 Contributing
 
