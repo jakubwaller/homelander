@@ -35,30 +35,6 @@
 
 ---
 
-## ⬇️ Installation
-
-Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
-
-| Platform | Package |
-|----------|---------|
-| macOS (Apple Silicon) | `Homelander-*.arm64.dmg` |
-| macOS (Intel) | `Homelander-*.dmg` |
-| Windows | `Homelander-*.exe` |
-
-### macOS — first run
-
-macOS may block the app because it's not notarized. After moving to Applications, unblock it:
-
-```bash
-xattr -cr /Applications/Homelander.app
-```
-
-Then launch from Applications or Spotlight.
-
-### Windows
-
-Download the `.exe` and run it. Windows SmartScreen may show a warning — click **More info** → **Run anyway**.
-
 ## 🚀 Why Homelander?
 
 ImmobilienScout24 is Germany's largest real estate platform. Apartments in competitive markets (Berlin, Munich, Hamburg) get 100+ applications within hours. If you're not among the first to apply, you never hear back.
@@ -100,6 +76,34 @@ IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Ch
 6. **Results appear** in the live feed and history — SENT, FAIL, captcha_wall, session_expired, etc.
 
 Everything runs on your computer. Your data stays local.
+
+## ⬇️ Installation
+
+Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
+
+| Platform | Package |
+|----------|---------|
+| macOS (Apple Silicon) | `Homelander-*.arm64.dmg` |
+| macOS (Intel) | `Homelander-*.dmg` |
+| Windows | `Homelander-*.exe` |
+
+### macOS — first run
+
+macOS may block the app because it's not notarized. After moving to Applications, unblock it:
+
+```bash
+xattr -cr /Applications/Homelander.app
+```
+
+Then launch from Applications or Spotlight.
+
+### Windows
+
+Download the `.exe` and run it. Windows SmartScreen may show a warning — click **More info** → **Run anyway**.
+
+## ⚠️ Disclaimer
+
+Homelander is an independent open-source tool and is **not affiliated with, endorsed by, or connected to ImmobilienScout24 GmbH**. Use at your own risk. The authors assume no liability for any consequences of using this software, including but not limited to account restrictions, blocked access, or any other actions taken by ImmobilienScout24. This software is provided "as is" without warranty of any kind.
 
 ## 🔧 First Launch
 
