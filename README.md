@@ -16,8 +16,21 @@
   <img src="https://img.shields.io/badge/electron-42-47848f" alt="Electron 42">
 </p>
 
+## 📸 Screenshots
+
 <p align="center">
-  <img src="brand/social/preview-1200x630.png" width="640" alt="Homelander screenshot">
+  <img src="brand/screenshots/search-tab.png" width="640" alt="Search tab">
+  <br><sub>Search tab — manage searches, view live feed</sub>
+</p>
+
+<p align="center">
+  <img src="brand/screenshots/history-tab.png" width="640" alt="History tab">
+  <br><sub>History tab — browse sent applications, export CSV</sub>
+</p>
+
+<p align="center">
+  <img src="brand/screenshots/settings-tab.png" width="640" alt="Settings tab">
+  <br><sub>Settings tab — persona, message template, captcha config</sub>
 </p>
 
 ---
