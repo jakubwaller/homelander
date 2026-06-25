@@ -44,7 +44,7 @@ ImmobilienScout24 is Germany's largest real estate platform. Apartments in compe
 | **Manual refreshing** | You can't sit at your desk 24/7 hitting F5 |
 | **Browser extensions** | Detectable, limited to what the browser can do |
 | **Cloud bots** | Costs around a 100€ |
-| **Homelander** | Runs on your computer, uses a real Chromium browser, handles captchas, auto-pauses when IS24 rate-limits you |
+| **Homelander** | Runs on your computer, uses a real Chromium browser, handles captchas, auto-pauses on captcha walls and session expiry |
 
 Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 
