@@ -34,7 +34,7 @@ npm run test:i18n     # i18n key parity check
 - **ESM** (`"type": "module"` in package.json) — **except** `electron/preload.cjs` which MUST remain CommonJS
 - **Plain JavaScript** with JSDoc — no TypeScript
 - **Zustand store** (`src/stores/appStore.js`) is the single source of truth in the renderer
-- **Daemon events** are JSON objects with a `type` field: `stats`, `listing`, `captcha_wall`, `paused`, `resumed`, `error`, `poll_error`, `session_expired`, `chrome_dead`
+- **Daemon events** are JSON objects with a `type` field: `stats`, `listing`, `paused`, `resumed`, `error`, `poll_error`, `session_expired`, `chrome_dead`
 - **i18n**: `src/locales/de.json` and `src/locales/en.json` must have the same keys. Run `npm run test:i18n` to verify.
 
 ## Architecture

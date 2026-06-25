@@ -44,7 +44,7 @@ ImmobilienScout24 is Germany's largest real estate platform. Apartments in compe
 | **Manual refreshing** | You can't sit at your desk 24/7 hitting F5 |
 | **Browser extensions** | Detectable, limited to what the browser can do |
 | **Cloud bots** | Costs around a 100€ |
-| **Homelander** | Runs on your computer, uses a real Chromium browser, handles captchas, auto-pauses on captcha walls and session expiry |
+| **Homelander** | Runs on your computer, uses a real Chromium browser, handles captchas, auto-pauses on session expiry and AWS perimeter challenges |
 
 Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 
@@ -53,7 +53,7 @@ Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 - **🪄 One-click setup** — guided 6-step wizard, no terminal needed
 - **🤖 Auto-apply** — fills IS24 contact forms via a bundled Chromium browser
 - **🔐 Captcha solving** — optional, but automatic using 2captcha (~$0.001 per solve)
-- **🧠 Smart pausing** — detects captcha walls, session expiry, and AWS perimeter challenges, auto-pauses
+- **🧠 Smart pausing** — detects session expiry and AWS perimeter challenges, auto-pauses
 - **⏱️ Three speed modes** — fast, balanced, slow (45-90s delays between applications)
 - **💻 Cross-platform** — macOS, Windows, Linux
 - **🌍 Multilanguage** — full German and English UI
@@ -162,7 +162,7 @@ IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Ch
 3. **New listings land in SQLite** — deduplicated, timestamped
 4. **Apply engine opens each listing** in a background Chromium window, fills the contact form with your details, and submits
 5. **Captchas are solved** via 2captcha automatically
-6. **Results appear** in the live feed and history — SENT, FAIL, captcha_wall, session_expired, etc.
+6. **Results appear** in the live feed and history — SENT, FAIL, etc.
 
 Everything runs on your computer. Your data stays local.
 

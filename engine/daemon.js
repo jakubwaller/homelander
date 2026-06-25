@@ -11,8 +11,7 @@
 // Communicates status via stdout JSON lines:
 //   {"type":"stats",...}
 //   {"type":"listing","outcome":"SENT",...}
-//   {"type":"captcha_wall","consecutive":5}
-//   {"type":"paused","reason":"captcha_wall","resume_in_sec":900}
+//   {"type":"paused","reason":"session_expired"}
 //   {"type":"resumed"}
 //   {"type":"error","message":"..."}
 //   {"type":"poll_error","filter_id":"...","error":"..."}
@@ -206,8 +205,7 @@ function loadConfig() {
 // JS is single-threaded — no locks needed.
 
 let applyPaused = false;
-let pauseResumeTime = null;   // null = manual pause; timestamp = auto-resume
-let consecutiveCaptchas = 0;
+let pauseResumeTime = null;   // null = manual pause (session_expired, perimeter_captcha)
 
 // contactor is a shared reference so the apply loop can reconnect
 let contactor = null;
@@ -257,7 +255,6 @@ async function applyOne(listing, filterId, db) {
       const captchaSolved = result.captcha?.solved || result.captcha?.attempts > 0;
       const failureReason = captchaSolved ? 'captcha_solved' : '';
       db.markSent(listing.hash, 'SENT', result.detail || 'modal ✓', failureReason);
-      consecutiveCaptchas = 0;
       log(`  ✓ SENT | ${listing.expose_id} | ${listing.title} | ${result.detail || ''}${captchaSolved ? ' (captcha solved)' : ''}`);
       emit({
         type: 'listing',
@@ -292,12 +289,6 @@ async function applyOne(listing, filterId, db) {
       db.markSent(listing.hash, outcome, reason, failureReason);
       const logIcon = isDeactivated ? '◌' : isPremium ? '💎' : '✗';
       log(`  ${logIcon} ${outcome} | ${listing.expose_id} | ${listing.title} | ${reason}`);
-
-      if (failureReason === 'captcha') {
-        consecutiveCaptchas++;
-      } else {
-        consecutiveCaptchas = 0;
-      }
 
       if (isSessionExpired) {
         log('*** IS24 SESSION EXPIRED — pausing apply ***');
@@ -376,19 +367,6 @@ async function applyOne(listing, filterId, db) {
 // Polling is completely independent — it runs in pollLoop().
 
 async function applyLoop(db) {
-  // Restore captcha-wall pause if daemon restarted during cooldown
-  try {
-    if (existsSync(PAUSE_FLAG)) {
-      const data = JSON.parse(readFileSync(PAUSE_FLAG, 'utf8'));
-      if (data?.reason === 'captcha_wall') {
-        applyPaused = true;
-        pauseResumeTime = Date.now() + 15 * 60 * 1000;  // conservative restart
-        log('Restored captcha-wall pause from flag');
-        emit({ type: 'paused', reason: 'captcha_wall_restored', resume_in_sec: 900 });
-      }
-    }
-  } catch (err) { swallow(err, 'daemon/restore-captcha-pause'); }
-
   // Prune debug artifacts on startup (keep 50 most recent per subdir)
   DEBUG.prune(50);
 
@@ -417,15 +395,6 @@ async function applyLoop(db) {
       if (applyPaused && !checkPauseFlag() && pauseResumeTime === null) {
         log('Pause flag removed — auto-resuming');
         applyPaused = false;
-        consecutiveCaptchas = 0;
-        emit({ type: 'resumed' });
-        continue;
-      }
-      if (pauseResumeTime != null && Date.now() >= pauseResumeTime) {
-        log('Captcha wall cooldown elapsed — resuming apply');
-        applyPaused = false;
-        consecutiveCaptchas = 0;
-        removePauseFlag();
         emit({ type: 'resumed' });
         continue;
       }
@@ -535,17 +504,6 @@ async function applyLoop(db) {
 
       const queue = db.getSeenListings(filter.id);
       if (queue.length === 0) continue;
-
-      // Check captcha wall before each listing
-      if (consecutiveCaptchas >= 5) {
-        log('Captcha wall detected — pausing apply for 15 minutes');
-        applyPaused = true;
-        pauseResumeTime = Date.now() + 15 * 60 * 1000;
-        writePauseFlag('captcha_wall');
-        emit({ type: 'captcha_wall', consecutive: consecutiveCaptchas });
-        emit({ type: 'paused', reason: 'captcha_wall', resume_in_sec: 900 });
-        break;
-      }
 
       const listing = queue[0];
       if (applyPaused || checkPauseFlag() || !filterIsStillEnabled(db, filter.id)) {

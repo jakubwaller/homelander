@@ -183,7 +183,7 @@ npm run dist:linux             # Linux .deb + .AppImage
 
 - **ContextBridge is CommonJS** — `electron/preload.cjs` MUST stay `.cjs`; ESM breaks `contextBridge.exposeInMainWorld()`
 - **Single-instance lock** — Electron `requestSingleInstanceLock()` prevents duplicate processes
-- **Daemon communicates via stdout JSON** — types: `stats`, `listing`, `captcha_wall`, `paused`, `resumed`, `error`, `poll_error`, `session_expired`, `chrome_dead`, `ready_for_restart`
+- **Daemon communicates via stdout JSON** — types: `stats`, `listing`, `paused`, `resumed`, `error`, `poll_error`, `session_expired`, `chrome_dead`, `ready_for_restart`
 - **Config is mutable at runtime** — daemon receives config patches via IPC `mergePatch()`, no restart needed
 - **Test flag:** `HOMELANDER_TEST_FAST=1` disables all jitter/timeouts in the contactor
 - **Puppeteer downloads skipped in CI:** `PUPPETEER_SKIP_DOWNLOAD=true`

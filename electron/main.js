@@ -749,9 +749,6 @@ function handleDaemonEvent(event) {
     case 'listing':
       mainWindow.webContents.send('homelander:listing', event);
       break;
-    case 'captcha_wall':
-      mainWindow.webContents.send('homelander:event', event);
-      break;
     case 'perimeter_captcha':
       daemonStatus = 'perimeter_captcha';
       try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'perimeter_captcha' }), 'utf8'); } catch (err) { swallow(err, 'main/write-pause-flag'); }

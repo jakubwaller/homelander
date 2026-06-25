@@ -202,14 +202,14 @@ describe('Daemon pause/resume logic', () => {
     assert.strictEqual(data.reason, 'manual');
   });
 
-  it('captcha wall pause persists with reason', () => {
+  it('session expiry pause persists with reason', () => {
     writeFileSync(pauseFlagPath, JSON.stringify({
       paused_at: new Date().toISOString(),
-      reason: 'captcha_wall',
+      reason: 'session_expired',
     }), 'utf8');
 
     const data = JSON.parse(readFileSync(pauseFlagPath, 'utf8'));
-    assert.strictEqual(data.reason, 'captcha_wall');
+    assert.strictEqual(data.reason, 'session_expired');
   });
 });
 
