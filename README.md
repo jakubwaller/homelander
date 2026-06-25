@@ -19,17 +19,17 @@
 ## 📸 Screenshots
 
 <p align="center">
-  <img src="brand/screenshots/search-tab.png" width="800" alt="Search tab">
+  <img src="brand/screenshots/search-tab.png" width="960" alt="Search tab">
   <br><sub>Search tab — manage searches, view live feed</sub>
 </p>
 
 <p align="center">
-  <img src="brand/screenshots/history-tab.png" width="800" alt="History tab">
+  <img src="brand/screenshots/history-tab.png" width="960" alt="History tab">
   <br><sub>History tab — browse sent applications, export CSV</sub>
 </p>
 
 <p align="center">
-  <img src="brand/screenshots/settings-tab.png" width="800" alt="Settings tab">
+  <img src="brand/screenshots/settings-tab.png" width="960" alt="Settings tab">
   <br><sub>Settings tab — persona, message template, captcha config</sub>
 </p>
 
