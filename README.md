@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/B1Z0N/homelander/actions/workflows/ci.yml"><img src="https://github.com/B1Z0N/homelander/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/electron-42-47848f" alt="Electron 42">
 </p>
 
