@@ -602,7 +602,7 @@ export default function SetupWizard({ onComplete }) {
                 {(config.message_template || DEFAULT_MESSAGE)
                   .replace(/\{\{title\}\}/g, 'Helle 2-Zimmer-Wohnung in Berlin-Mitte')
                   .replace(/\{\{address\}\}/g, 'Torstraße 15, 10119 Berlin')
-                  .replace(/\{\{name\}\}/g, `${persona.vorname || 'Max'} ${persona.nachname || 'Mustermann'}`)}
+                  .replace(/\{\{name\}\}/g, [persona.anrede, persona.vorname || 'Max', persona.nachname || 'Mustermann'].filter(Boolean).join(' '))}
               </div>
             </div>
           </div>
