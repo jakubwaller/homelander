@@ -64,8 +64,8 @@ Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 ```
 IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Chrome CDP] → IS24 Forms
                                    │                    │
-                              Electron App         Headed, offscreen
-                              (React UI)           (-32000,-32000px)
+                              Electron App            Headed
+                              (React UI)    
 ```
 
 1. **You paste an IS24 search URL** — any valid search, including Tauschwohnung
