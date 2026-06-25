@@ -4,6 +4,24 @@ All notable changes to Homelander are documented here. Format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+- Screenshots section in README (Search, History, Settings)
+- Installation section in README with platform table, macOS `xattr -cr`, Windows SmartScreen note
+- Donation support: `.github/FUNDING.yml` (GitHub Sponsors, Buy Me a Coffee, Ko-fi)
+- Donation section in README with styled badge buttons
+- Donation card in Settings tab (between Language and Clean All Data)
+
+### Changed
+- README restructured: Screenshots → Why → Features → Installation → Disclaimer → …
+- Disclaimer strengthened: hobby/portfolio project, not for actual IS24 use, strictly prohibited
+- `{{name}}` now resolves to `Vorname Nachname` only (no Herr/Frau / Anrede)
+
+### Removed
+- Captcha wall auto-pause: removed `consecutiveCaptchas` counter, 5-failure pause, auto-resume, `captcha_wall` IPC emission
+
+### Fixed
+- `{{name}}` template resolution now consistent between Settings preview, Setup wizard preview, and actual daemon messages
+
 ## [1.3.3] - 2026-06-25
 
 ### Added
