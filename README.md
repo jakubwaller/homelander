@@ -115,15 +115,29 @@ The setup wizard guides you through 6 steps:
 
 After setup, the app opens to the Searches tab. Add more searches anytime.
 
-## ⬇️ User Downloads
+## ⬇️ Installation
 
-Pre-built binaries on the [Releases](https://github.com/B1Z0N/homelander/releases) page:
+Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
 
 | Platform | Package |
 |----------|---------|
 | macOS (Apple Silicon) | `Homelander-*.arm64.dmg` |
 | macOS (Intel) | `Homelander-*.dmg` |
 | Windows | `Homelander-*.exe` |
+
+### macOS — first run
+
+macOS may block the app because it's not notarized. After moving to Applications, unblock it:
+
+```bash
+xattr -cr /Applications/Homelander.app
+```
+
+Then launch from Applications or Spotlight.
+
+### Windows
+
+Download the `.exe` and run it. Windows SmartScreen may show a warning — click **More info** → **Run anyway**.
 
 ## ⚙️ Configuration
 
