@@ -110,6 +110,13 @@
     "browser": {
       "title": "Browser Management",
       "openChrome": "Open Homelander Chromium"
+    },
+    "donate": {
+      "title": "Support ❤️",
+      "desc": "Homelander is free and open source. Help keep development going.",
+      "github": "GitHub Sponsor",
+      "buymeacoffee": "Buy Me a Coffee",
+      "kofi": "Ko-fi"
     }
   },
   "chromium": {

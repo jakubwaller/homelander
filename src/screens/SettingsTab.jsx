@@ -537,7 +537,37 @@ export default function SettingsTab() {
         </p>
       </Section>
 
-      {/* ── 7. Clean All Data ──────────────────────────────────── */}
+      {/* ── 7. Support Homelander ─────────────────────────────── */}
+      <Section title={t("settings.donate.title", "Support ❤️")}>
+        <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+          {t("settings.donate.desc", "Homelander is free and open source. Help keep development going.")}
+        </p>
+        <div className="flex gap-3">
+          <button
+            className="btn text-xs"
+            onClick={() => window.homelander?.openExternal('https://github.com/sponsors/B1Z0N')}
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            ❤️ {t("settings.donate.github", "GitHub Sponsor")}
+          </button>
+          <button
+            className="btn text-xs"
+            onClick={() => window.homelander?.openExternal('https://www.buymeacoffee.com/b1z0n')}
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            ☕ {t("settings.donate.buymeacoffee", "Buy Me a Coffee")}
+          </button>
+          <button
+            className="btn text-xs"
+            onClick={() => window.homelander?.openExternal('https://ko-fi.com/b1z0n')}
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            🧡 {t("settings.donate.kofi", "Ko-fi")}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── 8. Clean All Data ──────────────────────────────────── */}
       <div className="pt-2">
         {cleanupStep === null ? (
           <button className="btn btn-danger text-sm w-full" onClick={handleCleanData}>

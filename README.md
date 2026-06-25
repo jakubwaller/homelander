@@ -188,6 +188,18 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and 
 - Feature ideas → [Feature request](https://github.com/B1Z0N/homelander/issues/new?template=feature_request.yml)
 - Questions → [Discussions](https://github.com/B1Z0N/homelander/discussions)
 
+## ❤️ Support
+
+If Homelander saves you time and stress, consider supporting development:
+
+<p align="center">
+  <a href="https://github.com/sponsors/B1Z0N"><img src="https://img.shields.io/badge/Sponsor-GitHub-30363D?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub"></a>
+  &nbsp;
+  <a href="https://www.buymeacoffee.com/b1z0n"><img src="https://img.shields.io/badge/Buy%20Me%20A-Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee"></a>
+  &nbsp;
+  <a href="https://ko-fi.com/b1z0n"><img src="https://img.shields.io/badge/Ko--fi-Support-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support on Ko-fi"></a>
+</p>
+
 ## 📄 License
 
 MIT © [Mykola Fedurko](https://github.com/B1Z0N)

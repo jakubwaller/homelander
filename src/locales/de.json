@@ -110,6 +110,13 @@
     "browser": {
       "title": "Browser-Verwaltung",
       "openChrome": "Homelander-Chromium öffnen"
+    },
+    "donate": {
+      "title": "Unterstützen ❤️",
+      "desc": "Homelander ist kostenlos und Open Source. Hilf mit, die Entwicklung am Laufen zu halten.",
+      "github": "GitHub Sponsor",
+      "buymeacoffee": "Buy Me a Coffee",
+      "kofi": "Ko-fi"
     }
   },
   "chromium": {
