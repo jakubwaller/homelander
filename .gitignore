@@ -25,6 +25,7 @@ node_modules/
 Thumbs.db
 
 # IDE
+.hermes/
 .vscode/
 .idea/
 

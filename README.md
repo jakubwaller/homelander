@@ -1,80 +1,52 @@
-# Homelander
+<p align="center">
+  <img src="brand/social/avatar-1024.png" width="128" alt="Homelander">
+</p>
 
-Desktop app for automated IS24 apartment applications. Paste a search URL — Homelander finds listings and applies for you.
+<h1 align="center">Homelander</h1>
 
-## Features
+<p align="center">
+  <b>Desktop app that automates apartment applications on ImmobilienScout24</b><br>
+  Paste a search URL — it polls for new listings and auto-applies for you.
+</p>
 
-- **One-click setup** — guided wizard, no terminal needed
-- **Auto-apply** — fills IS24 contact forms via your Chrome browser
-- **Captcha solving** — automatic via 2captcha ($0.001/solve)
-- **Smart pausing** — detects captcha walls and auto-pauses
-- **Three speed modes** — fast, balanced, slow
-- **Cross-platform** — macOS, Windows, Linux
+<p align="center">
+  <a href="https://github.com/B1Z0N/homelander/actions/workflows/ci.yml"><img src="https://github.com/B1Z0N/homelander/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/electron-42-47848f" alt="Electron 42">
+</p>
 
-## How it works
+<p align="center">
+  <img src="brand/social/preview-1200x630.png" width="640" alt="Homelander screenshot">
+</p>
 
-1. You paste an IS24 search URL
-2. Homelander polls IS24's mobile API every 10 minutes for new listings
-3. When new listings appear, it opens them in a background Chrome window
-4. It fills the contact form with your details and submits
-5. Captchas are solved automatically via 2captcha
-6. Results appear in the live feed and history
+---
 
-No VPS. No terminal. Everything runs on your computer.
+## 🚀 Why Homelander?
 
-## Quick Start
+ImmobilienScout24 is Germany's largest real estate platform. Apartments in competitive markets (Berlin, Munich, Hamburg) get 100+ applications within hours. If you're not among the first to apply, you never hear back.
 
-### Prerequisites
+| Approach | Problem |
+|----------|---------|
+| **Manual refreshing** | You can't sit at your desk 24/7 hitting F5 |
+| **Browser extensions** | Detectable, limited to what the browser can do |
+| **VPS bots** | Complex setup, you're running a headless bot in the cloud |
+| **Homelander** | Runs on your computer, uses a real Chromium browser, handles captchas, auto-pauses when IS24 rate-limits you |
 
-- **Node.js 20+** ([nodejs.org](https://nodejs.org))
-- **Chrome** — bundled automatically via `puppeteer` (npm install handles it)
-- **2captcha account** ([2captcha.com](https://2captcha.com)) — ~$3 covers hundreds of applications
+No terminal. No VPS. No manual refreshing. Set it and forget it.
 
-### Install
+## ✨ Features
 
-```bash
-git clone https://github.com/B1Z0N/homelander.git
-cd homelander
-npm install
-```
+- **🪄 One-click setup** — guided 5-step wizard, no terminal needed
+- **🤖 Auto-apply** — fills IS24 contact forms via a bundled Chromium browser
+- **🔐 Captcha solving** — automatic via 2captcha (~$0.001 per solve)
+- **🧠 Smart pausing** — detects captcha walls, session expiry, and AWS perimeter challenges, auto-pauses
+- **⏱️ Three speed modes** — fast, balanced, slow (45-90s delays between applications)
+- **💻 Cross-platform** — macOS, Windows, Linux
+- **🌍 i18n** — full German and English UI
+- **📦 Local-first** — all data in SQLite, nothing sent to us
 
-### Run (development)
-
-```bash
-# Terminal 1: Start the Vite dev server
-npm run dev:renderer
-
-# Terminal 2: Start Electron
-npm run dev:electron
-```
-
-Or with a single command:
-
-```bash
-npm run dev
-```
-
-### Build (production)
-
-```bash
-npm run dist:mac     # macOS .dmg
-npm run dist:win     # Windows .exe
-npm run dist:linux   # Linux .deb + .AppImage
-```
-
-## First Launch
-
-The setup wizard guides you through 5 steps:
-
-1. **Your details** — name, email, phone, address
-2. **Message template** — the message sent with each application
-3. **IS24 account** — log in manually (IS24 blocks automated login)
-4. **2captcha API key** — for automatic captcha solving
-5. **First search** — paste an IS24 search URL
-
-After setup, the app opens to the Searches tab. Add more searches anytime.
-
-## Architecture
+## 📦 How it works
 
 ```
 IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Chrome CDP] → IS24 Forms
@@ -83,48 +55,129 @@ IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Ch
                               (React UI)           (-32000,-32000px)
 ```
 
-- **Poller**: Hits IS24's public mobile API every 10 minutes, discovers new listings
-- **SQLite**: Stores filters, listings, results (at `~/.homelander/homelander.db`)
-- **Apply Engine**: Reuses the battle-tested `is24-contactor.js` — fills forms, solves captchas, verifies submissions
-- **Chrome**: Runs headed but offscreen — invisible to you, looks normal to IS24's anti-bot
+1. **You paste an IS24 search URL** — any valid search, including Tauschwohnung
+2. **Poller hits IS24's mobile API** every 10 minutes for new listings
+3. **New listings land in SQLite** — deduplicated, timestamped
+4. **Apply engine opens each listing** in a background Chromium window, fills the contact form with your details, and submits
+5. **Captchas are solved** via 2captcha automatically
+6. **Results appear** in the live feed and history — SENT, FAIL, captcha_wall, session_expired, etc.
 
-## Configuration
+Everything runs on your computer. Your data stays local.
+
+## 🏃 Quick Start
+
+### Prerequisites
+
+- **Node.js 20+** ([nodejs.org](https://nodejs.org))
+- **Chrome** — bundled automatically via Puppeteer (no separate install)
+- **2captcha account** ([2captcha.com](https://2captcha.com)) — ~$3 covers hundreds of applications
+
+### Install & Run
+
+```bash
+git clone https://github.com/B1Z0N/homelander.git
+cd homelander
+npm install
+npm run dev
+```
+
+### Build
+
+```bash
+npm run dist:mac     # macOS .dmg + .zip
+npm run dist:win     # Windows .exe (NSIS)
+npm run dist:linux   # Linux .deb + .AppImage
+```
+
+## 🔧 First Launch
+
+The setup wizard guides you through 5 steps:
+
+1. **Your details** — name, email, phone, address
+2. **Message template** — the message sent with each application (use `{{title}}`, `{{address}}`, `{{name}}`)
+3. **IS24 account** — log in manually (IS24 blocks automated login)
+4. **2captcha API key** — for automatic captcha solving
+5. **First search** — paste an IS24 search URL
+
+After setup, the app opens to the Searches tab. Add more searches anytime.
+
+## ⬇️ Downloads
+
+Pre-built binaries on the [Releases](https://github.com/B1Z0N/homelander/releases) page:
+
+| Platform | Package |
+|----------|---------|
+| macOS (Apple Silicon) | `Homelander-*.arm64.dmg` |
+| macOS (Intel) | `Homelander-*.dmg` |
+| Windows | `Homelander-*.exe` |
+| Linux | `Homelander-*.deb` / `Homelander-*.AppImage` |
+
+## ⚙️ Configuration
 
 All settings editable from the Settings tab:
 
-- **Persona** — your contact details
-- **Message template** — use `{{title}}`, `{{address}}`, `{{name}}` as placeholders
-- **Timing** — speed preset (fast/balanced/slow), poll interval, send limits
-- **2captcha API key** — stored encrypted in your OS keychain
+| Setting | Description |
+|---------|-------------|
+| Persona | Your contact details (anrede, name, email, phone, address) |
+| Message template | Use `{{title}}`, `{{address}}`, `{{name}}` placeholders |
+| Timing | Speed preset (fast / balanced / slow), poll interval, send limits |
+| Browser visibility | Hidden unless needed / always visible |
+| 2captcha API key | Stored in your OS keychain |
 
-Config is stored at `~/.homelander/config.json`.
+Config lives at `~/.homelander/config.json`. Database at `~/.homelander/homelander.db` (SQLite, WAL mode).
 
-## Data
+## 📊 Data & Privacy
 
-All data is local — nothing is sent anywhere except:
-- IS24's mobile API (to discover listings)
-- IS24's website via Chrome (to submit contact forms)
-- 2captcha API (to solve captchas)
+All data is **local** — nothing is sent anywhere except:
 
-Database at `~/.homelander/homelander.db`. Debug logs and screenshots at `~/.homelander/debug/`.
+- **IS24's mobile API** — to discover new listings
+- **IS24's website via Chromium** — to submit contact forms
+- **2captcha API** — to solve captchas
 
-## Captcha Wall
+No telemetry. No analytics. No cloud. Your `config.json`, `homelander.db`, and Chrome profile stay on your machine.
 
-IS24 triggers a captcha wall after ~12-15 contact form submissions. Homelander detects this and auto-pauses for 15 minutes. The polling continues — new listings accumulate and are processed after the cooldown.
+## 🛡️ Captcha Wall
 
-You can also switch to **slow** mode (45-90s between listings) to avoid the wall entirely.
+IS24 triggers a captcha wall after ~12-15 contact form submissions. Homelander detects this and auto-pauses for 15 minutes. Polling continues — new listings accumulate and are processed after the cooldown.
 
-## Tips
+Switch to **slow mode** (45-90s between listings) to avoid the wall entirely.
 
-- **Tauschwohnung listings** are immune to the captcha wall — add a Tausch search for reliable sends
-- **Multiple searches** — add several URLs for different areas/budgets
-- **Check history** — every application is logged with outcome and details
-- **Pause per search** — pause individual searches while keeping others running
+## ❓ FAQ
 
-## License
+**Is this safe?** Yes. Everything runs locally. Your IS24 credentials and personal data never leave your computer except when submitting to IS24 (via the same browser IS24 expects).
 
-MIT
+**Can IS24 detect me?** Homelander uses a real Chromium browser (no `--enable-automation` flag), natural typing delays, and behaves like a human. The bundled Chromium profile matches what IS24 sees from regular users.
 
-## Credits
+**What does it cost?** The app is free and open-source. You only pay 2captcha for solving captchas (~$0.001/solve, about $3 for hundreds of applications).
 
-Built on the auto-apply engine developed and battle-tested across hundreds of IS24 listings.
+**Does it work outside Germany?** The app works anywhere, but it's designed for the German ImmobilienScout24 platform.
+
+**Can I search multiple areas?** Yes. Add multiple search URLs — each polls independently.
+
+## 🏗️ Architecture
+
+| Layer | Technology |
+|-------|------------|
+| Desktop shell | Electron 42, Node 24 |
+| Renderer | React 19, Vite 6, Tailwind CSS 4 |
+| State | Zustand 5 |
+| Browser automation | Puppeteer 24 (bundled Chromium) |
+| Database | better-sqlite3 12, WAL mode |
+| Build | electron-builder |
+| CI | GitHub Actions (macOS) |
+
+## 🤝 Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
+
+- Bug reports → [Issue template](https://github.com/B1Z0N/homelander/issues/new?template=bug_report.yml)
+- Feature ideas → [Feature request](https://github.com/B1Z0N/homelander/issues/new?template=feature_request.yml)
+- Questions → [Discussions](https://github.com/B1Z0N/homelander/discussions)
+
+## 📄 License
+
+MIT © [Mykola Fedurko](https://github.com/B1Z0N)
+
+## 🙏 Credits
+
+Built on an auto-apply engine developed and battle-tested across hundreds of IS24 listings. Key icon brand by the author.

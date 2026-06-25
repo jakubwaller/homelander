@@ -1,9 +1,25 @@
 {
   "name": "homelander",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "private": true,
-  "author": "B1Z0N <kolausf@gmail.com>",
-  "description": "Desktop app for automated IS24 apartment applications — polls listings, auto-fills contact forms via Chrome CDP.",
+  "author": "Mykola Fedurko <kolausf@gmail.com>",
+  "description": "Desktop app that automates apartment applications on ImmobilienScout24 — polls listings and auto-fills contact forms via a bundled Chromium browser.",
+  "keywords": [
+    "immobilienscout24",
+    "apartment",
+    "automation",
+    "electron",
+    "puppeteer",
+    "housing",
+    "germany",
+    "desktop-app",
+    "auto-apply",
+    "is24",
+    "chromium",
+    "react",
+    "sqlite",
+    "cross-platform"
+  ],
   "type": "module",
   "main": "electron/main.js",
   "scripts": {

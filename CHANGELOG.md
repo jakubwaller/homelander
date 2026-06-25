@@ -1,0 +1,88 @@
+# Changelog
+
+All notable changes to Homelander are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/).
+
+## [Unreleased]
+
+## [1.3.3] - 2026-06-25
+
+### Added
+- `--disable-gpu` flag on macOS to prevent SwiftShader GPU compositor zombie on screen lock
+
+### Changed
+- Removed UA spoofing — use natural Chrome for Testing identity
+- GPU compositing flags scoped to Windows-only
+
+### Fixed
+- Clicking X now quits the app instead of hiding to background
+- Perimeter captcha: don't use `return` in `finally` block (overrode captcha result)
+- Perimeter captcha: stay on captcha page, don't redirect to IS24
+- Perimeter captcha: don't navigate to `about:blank`
+
+## [1.3.2] - 2026-06-20
+
+### Fixed
+- Detach daemon from parent Job Object + elevate OS priority to prevent Windows background throttling
+- Disable Windows EcoQoS power throttling + force 1ms timer resolution via Win32 API
+- Add CalculateNativeWinOcclusion flag for Windows virtual-desktop resilience
+
+## [1.3.1] - 2026-06-15
+
+### Fixed
+- Clean all data now deletes logs, Chrome profiles, and support bundles
+- Also delete `debug/` directory on clean all data
+- Re-verify move-in date at end of form fill
+- Prevent empty history list on double-clicking same outcome filter
+
+## [1.3.0] - 2026-06-10
+
+### Added
+- Echo daemon events to stderr for CLI dev visibility
+- CDP HTTP ping before each apply round and listing
+- SVG flags for language picker
+- AWS WAF perimeter captcha detection, pause + notify in status bar
+
+### Changed
+- Notifications: removed SENT/FAIL/captcha_wall, added perimeter_captcha
+- Chrome bundled into installer (no runtime download)
+
+### Fixed
+- Prevent macOS Space-switch CDP timeouts (App Nap + stdout backpressure)
+- Close shared DB handle before unlinking in `data:clean`
+- SVG flags — proper 3:2 aspect ratio, Union Jack clip-path
+- Fix EBUSY on data clean (await daemon exit + db.close)
+- CI: auto-bump package.json version from release tag input
+
+## [1.2.2] - 2026-06-01
+
+### Added
+- SVG icons, uniform badges
+
+### Fixed
+- Windows virtual-desktop anti-deadlock flags
+
+## [1.2.1] - 2026-05-28
+
+### Fixed
+- Parentheses around `??`/`||` in JSX to fix build
+- Scope per-filter 'Processed X/Y' denominator to today
+
+## [1.2.0] - 2026-05-25
+
+### Added
+- Bundle Chromium in installer — remove runtime download step
+
+## [1.1.x] - 2026-05 (series)
+
+### Added
+- Chromium download progress wired to setup wizard (1.1.22)
+- Directory walk for Chrome executable — finds chrome.exe wherever it extracts (1.1.21)
+- Chrome startup diagnostics — log executable path, PID, file existence (1.1.18)
+- Homelander key icon in setup wizard header
+
+### Fixed
+- Route `ensureChromiumInstalled` logs to chrome.log (1.1.20)
+- `_logToFile` require() broken in ESM — logs never written (1.1.19)
+- `--enable-logging --log-file` for Chromium spawn on Windows (1.1.17)
+- Include Chrome crash info + chrome.log in support bundle
+- 🐞 tooltip now anchored to right edge — no longer overflows screen
