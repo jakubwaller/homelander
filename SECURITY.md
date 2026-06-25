@@ -2,27 +2,23 @@
 
 ## Reporting a Vulnerability
 
-Homelander handles IS24 credentials, 2captcha API keys, and personal contact data locally. If you discover a security issue, please **do not** open a public issue.
+If you discover a security vulnerability, please **do not** open a public issue.
 
-Email: **kolausf@gmail.com**
+Instead, email the maintainer directly:
 
-Expected response: within 48 hours. Please include:
+📧 **fedurkomykola@gmail.com**
 
-- Description of the vulnerability
+Please include:
+- A description of the vulnerability
 - Steps to reproduce
 - Affected version(s)
 
+You will receive a response within 48 hours. The vulnerability will be addressed in a patch release.
+
 ## Scope
 
-- Credential storage (config.json, OS keychain)
-- Support bundle data leakage
-- Browser automation surface (Chromium sandboxing)
-- Dependencies with known CVEs
+Homelander runs entirely on your local machine. Your IS24 credentials, personal data, and 2captcha API key are stored in `~/.homelander/config.json` and never leave your computer except when submitting forms to ImmobilienScout24 via the bundled Chromium browser.
 
 ## Supported Versions
 
-| Version | Supported          |
-|---------|--------------------|
-| 1.4.x   | :white_check_mark: |
-| 1.3.x   | :white_check_mark: |
-| < 1.3   | :x:                |
+Only the latest release receives security patches.
