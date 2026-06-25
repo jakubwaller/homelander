@@ -85,7 +85,9 @@ Download the `.exe` and run it. Windows SmartScreen may show a warning — click
 
 ## ⚠️ Disclaimer
 
-Homelander is an independent open-source tool and is **not affiliated with, endorsed by, or connected to ImmobilienScout24 GmbH**. Use at your own risk. The authors assume no liability for any consequences of using this software, including but not limited to account restrictions, blocked access, or any other actions taken by ImmobilienScout24. This software is provided "as is" without warranty of any kind.
+Homelander is a **fun portfolio / hobby project** created for educational purposes. It is **not intended to be used on ImmobilienScout24** and is in no way a tool for submitting actual applications or interacting with the IS24 platform.
+
+This project is **not affiliated with, endorsed by, or connected to ImmobilienScout24 GmbH** in any way. Any use of this software to interact with IS24 is strictly prohibited and may violate IS24's terms of service. The authors assume no liability for any consequences, including but not limited to account restrictions, blocked access, legal claims, or any other actions taken by ImmobilienScout24 or any other party. This software is provided "as is" without warranty of any kind.
 
 ## 🔧 First Launch
 
