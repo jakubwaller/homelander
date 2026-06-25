@@ -59,24 +59,6 @@ Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 - **🌍 Multilanguage** — full German and English UI
 - **📦 Local-first** — all data in SQLite, nothing sent to us
 
-## 📦 How it works
-
-```
-IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Chrome CDP] → IS24 Forms
-                                   │                    │
-                              Electron App            Headed
-                              (React UI)    
-```
-
-1. **You paste an IS24 search URL** — any valid search, including Tauschwohnung
-2. **Poller hits IS24's mobile API** every 10 minutes for new listings
-3. **New listings land in SQLite** — deduplicated, timestamped
-4. **Apply engine opens each listing** in a background Chromium window, fills the contact form with your details, and submits
-5. **Captchas are solved** via 2captcha automatically
-6. **Results appear** in the live feed and history — SENT, FAIL, captcha_wall, session_expired, etc.
-
-Everything runs on your computer. Your data stays local.
-
 ## ⬇️ Installation
 
 Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
@@ -142,18 +124,6 @@ All data is **local** — nothing is sent anywhere except:
 
 No telemetry. No analytics. No cloud. Your `config.json`, `homelander.db`, and Chrome profile stay on your machine.
 
-## ❓ FAQ
-
-**Is this safe?** Yes. Everything runs locally. Your IS24 credentials and personal data never leave your computer except when submitting to IS24 (via the same browser IS24 expects).
-
-**Can IS24 detect me?** Homelander uses a real Chromium browser, natural typing delays, and behaves like a human. The bundled Chromium profile matches what IS24 sees from regular users.
-
-**What does it cost?** The app is free and open-source. You only pay 2captcha for solving captchas, and that is optional (~$0.001/solve, about $3 for hundreds of applications).
-
-**Does it work outside Germany?** The app works anywhere, but it's designed for the German ImmobilienScout24 platform.
-
-**Can I search multiple areas?** Yes. Add multiple search URLs — each polls independently.
-
 ## 🛠️ Development
 
 ### Prerequisites
@@ -177,6 +147,36 @@ npm run dist:mac     # macOS .dmg + .zip
 npm run dist:win     # Windows .exe (NSIS)
 npm run dist:linux   # Linux .deb + .AppImage
 ```
+
+## 📦 How it works
+
+```
+IS24 Mobile API ←─ HTTP ──→ [Poller → SQLite → Apply Engine → Chrome CDP] → IS24 Forms
+                                   │                    │
+                              Electron App            Headed
+                              (React UI)    
+```
+
+1. **You paste an IS24 search URL** — any valid search, including Tauschwohnung
+2. **Poller hits IS24's mobile API** every 10 minutes for new listings
+3. **New listings land in SQLite** — deduplicated, timestamped
+4. **Apply engine opens each listing** in a background Chromium window, fills the contact form with your details, and submits
+5. **Captchas are solved** via 2captcha automatically
+6. **Results appear** in the live feed and history — SENT, FAIL, captcha_wall, session_expired, etc.
+
+Everything runs on your computer. Your data stays local.
+
+## ❓ FAQ
+
+**Is this safe?** Yes. Everything runs locally. Your IS24 credentials and personal data never leave your computer except when submitting to IS24 (via the same browser IS24 expects).
+
+**Can IS24 detect me?** Homelander uses a real Chromium browser, natural typing delays, and behaves like a human. The bundled Chromium profile matches what IS24 sees from regular users.
+
+**What does it cost?** The app is free and open-source. You only pay 2captcha for solving captchas, and that is optional (~$0.001/solve, about $3 for hundreds of applications).
+
+**Does it work outside Germany?** The app works anywhere, but it's designed for the German ImmobilienScout24 platform.
+
+**Can I search multiple areas?** Yes. Add multiple search URLs — each polls independently.
 
 ## 🤝 Contributing
 
