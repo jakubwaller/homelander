@@ -411,7 +411,7 @@ export default function SettingsTab() {
           {renderPreview(templateDraft, {
             title: 'Schöne 3-Zimmer-Wohnung',
             address: 'Musterstraße 42, 10115 Berlin',
-            name: [persona.anrede, persona.vorname, persona.nachname].filter(Boolean).join(' ') || 'Max Mustermann',
+            name: [persona.vorname, persona.nachname].filter(Boolean).join(' ') || 'Max Mustermann',
           }, t)}
         </div>
         <div className="pt-3">

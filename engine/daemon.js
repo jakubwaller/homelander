@@ -147,7 +147,7 @@ function personaliseMessage(template, listing) {
   return template
     .replace(/\{\{title\}\}/g, listing.title || '')
     .replace(/\{\{address\}\}/g, listing.address || '')
-    .replace(/\{\{name\}\}/g, [listing._contact?.anrede, listing._contact?.vorname, listing._contact?.nachname].filter(Boolean).join(' ').trim());
+    .replace(/\{\{name\}\}/g, [listing._contact?.vorname, listing._contact?.nachname].filter(Boolean).join(' ').trim());
 }
 
 /** Shallow merge for config patches received via IPC. */
