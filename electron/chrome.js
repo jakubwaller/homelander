@@ -168,7 +168,10 @@ export class ChromeManager {
     // process start.
     try {
       execSync(
-        'defaults write com.google.chrome.for.testing NSAppSleepDisabled -bool YES',
+        // Cover both system Chrome and Chrome for Testing — the production
+        // machine may use either.  The first write that succeeds is enough;
+        // the second is harmless if the domain doesn't exist.
+        'defaults write com.google.Chrome NSAppSleepDisabled -bool YES; defaults write com.google.chrome.for.testing NSAppSleepDisabled -bool YES',
         { timeout: 2000 },
       );
     } catch (err) { swallow(err, 'chrome/app-nap-defaults'); }
@@ -209,10 +212,12 @@ export class ChromeManager {
         // and intensive wake-up throttling.
         '--disable-features=NetworkServiceSandbox,CalculateNativeWinOcclusion,NativeWindowOcclusion,IntensiveWakeUpThrottling,MacWindowOcclusion',
 
-        // Force CPU software rendering (SwiftShader) on non-macOS platforms.
-        // On macOS the real GPU compositor handles space transitions natively;
-        // software rendering prevents that and triggers App Nap throttling.
-        ...(process.platform !== 'darwin' ? ['--disable-gpu'] : []),
+        // Force CPU software rendering (SwiftShader) on all platforms.
+        // The GPU compositor is the root cause of the macOS screen-lock
+        // zombie deadlock (LatencyInfo vector overflow).  SwiftShader
+        // has no GPU context to lose when WindowServer detaches surfaces,
+        // so the renderer stays responsive across lock/unlock cycles.
+        '--disable-gpu',
 
         // Windows virtual-desktop resilience: decouple the renderer from
         // DWM's swap-buffer queue.  When DWM stops compositing the window

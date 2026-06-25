@@ -18,7 +18,7 @@
 //   {"type":"poll_error","filter_id":"...","error":"..."}
 //   {"type":"ready_for_restart"}  // emitted when graceful restart is ready
 
-import { readFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -112,10 +112,10 @@ function emit(obj) {
 }
 
 function log(msg) {
-  const ts = new Date().toISOString().slice(11, 19);
+  const ts = new Date().toLocaleTimeString('de-DE', { hour12: false });
   const line = `[${ts}] ${msg}`;
   process.stderr.write(line + '\n');
-  try { appendFileSync(DAEMON_LOG, line + '\n', 'utf8'); } catch (err) { swallow(err, 'daemon/append-log'); }
+  // Main process catches stderr and persists to DAEMON_LOG – no double-write here.
 }
 /** Logged-catch replacement for bare catch {} — never throws, always logs to daemon log. */
 function swallow(err, context) {
@@ -346,7 +346,12 @@ async function applyOne(listing, filterId, db) {
     // CDP-level errors mean the browser connection is toast — null the
     // contactor so the next loop iteration forces a full reconnect. IS24
     // form-fill errors (TypeError, timeout loading page) are left alone.
-    const cdpFatal = /Target closed|Session closed|Protocol error|WebSocket is not open|Connection closed|Detached from target|Browser has been disconnected/i;
+    //
+    // "timed out" / "protocolTimeout" catches the macOS GPU compositor
+    // deadlock (zombie renderer): CDP commands queue forever while the
+    // WebSocket stays open, so we must null the contactor and let
+    // ensureCDPHealthy() kill + respawn Chrome.
+    const cdpFatal = /Target closed|Session closed|Protocol error|WebSocket is not open|Connection closed|Detached from target|Browser has been disconnected|timed out|protocolTimeout/i;
     if (cdpFatal.test(errMsg) || (contactor?.browser && !contactor.browser.isConnected())) {
       log('  CDP connection lost — nulling contactor for reconnect');
       contactor = null;
@@ -435,6 +440,15 @@ async function applyLoop(db) {
         try {
           await contactor.connect();
           cdpFailCount = 0;
+          // Verify the renderer is actually alive — puppeteer.connect()
+          // succeeds even when Chrome is a GPU-compositor zombie
+          // (WebSocket still open, but CDP commands won't resolve).
+          const alive = await contactor.pingRenderer().catch(() => false);
+          if (!alive) {
+            log('CDP reconnected but renderer dead (zombie) — restarting Chrome');
+            emit({ type: 'chrome_dead', detail: 'Renderer unresponsive after CDP reconnect' });
+            process.exit(0);
+          }
           log('CDP reconnected');
         } catch (err) {
           cdpFailCount++;
@@ -460,6 +474,12 @@ async function applyLoop(db) {
           );
           await contactor.connect();
           cdpFailCount = 0;
+          const alive = await contactor.pingRenderer().catch(() => false);
+          if (!alive) {
+            log('Contactor re-created but renderer dead (zombie) — restarting Chrome');
+            emit({ type: 'chrome_dead', detail: 'Renderer unresponsive after contactor recreate' });
+            process.exit(0);
+          }
           log('Contactor re-created and CDP reconnected');
         } catch (err) {
           const isFatal = err.message.includes('CDP_FAILED') || err.message.includes('ECONNREFUSED');
@@ -491,6 +511,18 @@ async function applyLoop(db) {
       log('CDP ping failed at round start — waiting for recovery');
       await sleep(5000);
       continue;
+    }
+
+    // Renderer liveness check — the HTTP ping above passes even when
+    // Chrome is a zombie (GPU compositor deadlock).  This sends a real
+    // CDP command to verify the renderer can still process messages.
+    if (contactor) {
+      const rendererAlive = await contactor.pingRenderer().catch(() => false);
+      if (!rendererAlive) {
+        log('Renderer unresponsive (zombie) — requesting Chrome restart');
+        emit({ type: 'chrome_dead', detail: 'Renderer unresponsive after CDP reconnect (GPU compositor deadlock)' });
+        process.exit(0);
+      }
     }
 
     let didWork = false;

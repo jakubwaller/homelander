@@ -132,6 +132,22 @@ export class IS24Contactor {
     this.contact = persona;
   }
 
+  /**
+   * Lightweight renderer liveness check — sends a trivial CDP command
+   * and verifies the renderer can still respond.  Returns true if the
+   * renderer is responsive, false if it's a zombie (GPU compositor
+   * deadlock, WebSocket open but CDP commands never resolve).
+   */
+  async pingRenderer() {
+    if (!this.page || this.page.isClosed()) return false;
+    try {
+      await this.page.evaluate(() => 1, { timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Hot-reload timing speed/overrides without restarting. */
   updateTiming(speed, overrides = {}) {
     const preset = SPEEDS[speed] || SPEEDS.balanced;
@@ -169,6 +185,13 @@ export class IS24Contactor {
     const cdpClient = await this.page.target().createCDPSession();
     try {
       await cdpClient.send('Page.setWebLifecycleState', { state: 'active' });
+      // macOS screen lock detaches the window from WindowServer, which
+      // causes Chromium's internal focus tracking to mark the renderer as
+      // blurred/inactive.  Emulation.setFocusEmulationEnabled forces the
+      // renderer to believe it always has focus, preventing occlusion-based
+      // compositor and JS timer throttling that leads to the GPU deadlock
+      // (LatencyInfo vector overflow → zombie renderer).
+      await cdpClient.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     } catch (err) { swallow(err, 'contacter/cdp-lifecycle'); }
     finally { await cdpClient.detach().catch(() => {}); }
 
