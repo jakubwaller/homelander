@@ -30,7 +30,7 @@ export function compactValidationError(validation, fallback, t) {
     const names = [...new Set(unsupported.map(p => p.key))];
     const shown = names.slice(0, 4).join(', ');
     const more = names.length > 4 ? ` +${names.length - 4}` : '';
-    return `${t('search.unsupportedFilters', 'Nicht unterstützte Filter')}: ${shown}${more}`;
+    return `${t('search.unsupportedFilters', 'Unsupported filters')}: ${shown}${more}`;
   }
   return fallback;
 }

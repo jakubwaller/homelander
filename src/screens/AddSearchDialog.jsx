@@ -95,11 +95,11 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
       <div className="card p-6 w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-base font-semibold mb-4">{t('search.addSearch', 'IS24-Suche hinzufügen')}</h2>
+        <h2 className="text-base font-semibold mb-4">{t('search.addSearch', 'Add IS24 Search')}</h2>
 
         {/* URL input */}
         <label className="block text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
-          {t('search.pasteUrl', 'Vollständige IS24-Such-URL einfügen')}
+          {t('search.pasteUrl', 'Paste a full IS24 search URL')}
         </label>
         <input
           type="url"
@@ -127,7 +127,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
         {/* Parsed preview */}
         {validation?.preview && (
           <div className="mb-4 px-3 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
-            <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('search.parsedSearch', 'Gelesene Suche')}</div>
+            <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('search.parsedSearch', 'Parsed search')}</div>
             {validation.preview.location && (
               <div className="text-sm mb-1">📍 {validation.preview.location}</div>
             )}
@@ -143,7 +143,7 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
             )}
             {!testError && validation.unsupportedParams?.length > 0 && (
               <div className="text-xs mt-2" style={{ color: 'var(--danger)' }}>
-                {t('search.unsupportedFilterCount', '{{count}} nicht unterstützte Filter').replace('{{count}}', validation.unsupportedParams.length)}
+                {t('search.unsupportedFilterCount', '{{count}} unsupported filters').replace('{{count}}', validation.unsupportedParams.length)}
               </div>
             )}
           </div>
@@ -174,14 +174,14 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
             onClick={handleTest}
             disabled={!url.trim() || testing}
           >
-            {testing ? t('search.testing', 'Prüfe…') : t('search.test', 'Prüfen')}
+            {testing ? t('search.testing', 'Testing…') : t('search.test', 'Test')}
           </button>
           <button
             className="btn btn-primary"
             onClick={handleAdd}
             disabled={!url.trim() || testing}
           >
-            {testing ? t('search.testing', 'Prüfe…') : t('search.addSearchButton', 'Suche hinzufügen')}
+            {testing ? t('search.testing', 'Testing…') : t('search.addSearchButton', 'Add search')}
           </button>
         </div>
       </div>

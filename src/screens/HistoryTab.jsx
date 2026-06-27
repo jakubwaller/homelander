@@ -782,7 +782,7 @@ export default function HistoryTab() {
         {/* Loading state */}
         {loading && (
           <div className="py-12 text-center" style={{ color: 'var(--text-muted)' }}>
-            <p className="text-sm">{t('history.loading', 'Verlauf wird geladen…')}</p>
+            <p className="text-sm">{t('history.loading', 'Loading history…')}</p>
           </div>
         )}
 
@@ -853,7 +853,7 @@ export default function HistoryTab() {
             {/* Loading more indicator */}
             {loadingMore && (
               <div className="py-4 text-center" style={{ color: 'var(--text-muted)' }}>
-                <p className="text-xs">{t('history.loadingMore', 'Lade mehr…')}</p>
+                <p className="text-xs">{t('history.loadingMore', 'Loading more…')}</p>
               </div>
             )}
 
@@ -863,7 +863,7 @@ export default function HistoryTab() {
                 className="py-4 text-center text-xs"
                 style={{ color: 'var(--text-muted)' }}
               >
-                {t('history.endOfHistory', '— Ende des Verlaufs —')}
+                {t('history.endOfHistory', '— End of history —')}
               </div>
             )}
           </div>

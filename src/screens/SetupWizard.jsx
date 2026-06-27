@@ -212,7 +212,7 @@ export default function SetupWizard({ onComplete }) {
           errors.push(t('setup.emailInvalid', 'Email format is invalid'));
         }
         if (!p.telefon?.trim()) errors.push(t('setup.telefonRequired', 'Telefon is required'));
-        if (!p.strasse?.trim()) errors.push(t('setup.strasseRequired', 'Straße is required'));
+        if (!p.strasse?.trim()) errors.push(t('setup.strasseRequired', 'Street is required'));
         if (!p.hausnummer?.trim()) errors.push(t('setup.hausnrRequired', 'Hausnr. is required'));
         if (!p.plz?.trim()) errors.push(t('setup.plzRequired', 'PLZ is required'));
         if (p.plz?.trim() && !/^\d{4,5}$/.test(String(p.plz).trim())) {
@@ -224,7 +224,7 @@ export default function SetupWizard({ onComplete }) {
         if (!p.personen?.trim()) errors.push(t('setup.personenRequired', 'Personen is required'));
         if (!p.haustiere?.trim()) errors.push(t('setup.haustiereRequired', 'Haustiere is required'));
         if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push(t('setup.haustiereZusatzRequired', 'Anzahl und Tierart is required'));
-        if (!p.beschaeftigung?.trim()) errors.push(t('setup.beschaeftigungRequired', 'Beschäftigung is required'));
+        if (!p.beschaeftigung?.trim()) errors.push(t('setup.beschaeftigungRequired', 'Employment is required'));
         if (!p.einkommen?.trim()) errors.push(t('setup.einkommenRequired', 'Einkommen (netto) is required'));
         if (!p.unterlagen?.trim()) errors.push(t('setup.unterlagenRequired', 'Unterlagen is required'));
         if (errors.length > 0) {
@@ -341,7 +341,7 @@ export default function SetupWizard({ onComplete }) {
   if (!config) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p style={{ color: 'var(--text-muted)' }}>{t('setup.loading', 'Lädt…')}</p>
+        <p style={{ color: 'var(--text-muted)' }}>{t('setup.loading', 'Loading…')}</p>
       </div>
     );
   }
@@ -491,7 +491,7 @@ export default function SetupWizard({ onComplete }) {
 
             <div className="grid grid-cols-4 gap-3">
               <div className="col-span-2">
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.strasse', 'Straße')}</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.strasse', 'Street')}</label>
                 <input className="input" value={persona.strasse || ''} onChange={(e) => updatePersona('strasse', e.target.value)} />
               </div>
               <div>
@@ -552,7 +552,7 @@ export default function SetupWizard({ onComplete }) {
                 )}
               </div>
               <div>
-                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.beschaeftigung', 'Beschäftigung')}</label>
+                <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('settings.personaFields.beschaeftigung', 'Employment')}</label>
                 <select className="select" value={persona.beschaeftigung || ''} onChange={(e) => updatePersona('beschaeftigung', e.target.value)}>
                   <option value="">—</option>
                   {BESCHAEFTIGUNG_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -723,7 +723,7 @@ export default function SetupWizard({ onComplete }) {
 
             {searchValidation?.preview && (
               <div className="px-3 py-2 rounded-lg" style={{ background: 'var(--bg-secondary)' }}>
-                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('search.parsedSearch', 'Gelesene Suche')}</div>
+                <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>{t('search.parsedSearch', 'Parsed search')}</div>
                 {searchValidation.preview.location && (
                   <div className="text-sm mb-1">📍 {searchValidation.preview.location}</div>
                 )}
@@ -739,7 +739,7 @@ export default function SetupWizard({ onComplete }) {
                 )}
                 {!searchTestError && searchValidation.unsupportedParams?.length > 0 && (
                   <div className="text-xs mt-2" style={{ color: 'var(--danger)' }}>
-                    {t('search.unsupportedFilterCount', '{{count}} nicht unterstützte Filter').replace('{{count}}', searchValidation.unsupportedParams.length)}
+                    {t('search.unsupportedFilterCount', '{{count}} unsupported filters').replace('{{count}}', searchValidation.unsupportedParams.length)}
                   </div>
                 )}
               </div>
@@ -764,7 +764,7 @@ export default function SetupWizard({ onComplete }) {
               onClick={testSearchUrl}
               disabled={!searchUrl.trim() || searchTesting || saving}
             >
-              {searchTesting ? t('search.testing', 'Prüfe…') : t('search.test', 'Prüfen')}
+              {searchTesting ? t('search.testing', 'Testing…') : t('search.test', 'Test')}
             </button>
 
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>

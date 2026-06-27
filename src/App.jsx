@@ -233,7 +233,7 @@ function AppInner() {
             {daemonStatus === 'running' ? t('status.active', 'Active')
               : daemonStatus === 'paused' ? t('status.paused', 'Paused')
               : daemonStatus === 'session_expired' ? t('status.loginNeeded', 'Login needed')
-              : daemonStatus === 'perimeter_captcha' ? t('status.captchaNeeded', 'Captcha lösen')
+              : daemonStatus === 'perimeter_captcha' ? t('status.captchaNeeded', 'Solve captcha')
               : daemonStatus === 'restarting' ? t('status.restarting', 'Restarting…')
               : t('status.stopped', 'Stopped')}
           </span>

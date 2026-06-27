@@ -327,7 +327,7 @@ export default function SearchTab() {
             className="font-medium hover:underline"
             onClick={() => setError(null)}
           >
-            {t('common.dismiss', 'Schließen')}
+            {t('common.dismiss', 'Dismiss')}
           </button>
         </div>
       )}
@@ -341,7 +341,7 @@ export default function SearchTab() {
             </h2>
             {filters.length > 0 && nextPollCountdown && (
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                · {t('search.nextPollIn', 'Nächste Prüfung in {{time}}').replace('{{time}}', nextPollCountdown)}
+                · {t('search.nextPollIn', 'Next poll in {{time}}').replace('{{time}}', nextPollCountdown)}
               </span>
             )}
           </div>
@@ -349,7 +349,7 @@ export default function SearchTab() {
             className="btn btn-primary text-sm"
             onClick={() => setShowAddDialog(true)}
           >
-            + {t('search.addSearchButton', 'Suche hinzufügen')}
+            + {t('search.addSearchButton', 'Add search')}
           </button>
         </div>
 
@@ -365,13 +365,13 @@ export default function SearchTab() {
               {t('search.noSearchesConfigured', 'Noch keine Suchen eingerichtet.')}
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              {t('search.noSearchesHint', 'Füge eine IS24-Such-URL hinzu, um automatisch Bewerbungen zu starten.')}
+              {t('search.noSearchesHint', 'Add an IS24 search URL to start auto-applying to new listings.')}
             </p>
             <button
               className="btn btn-primary mt-4 text-sm"
               onClick={() => setShowAddDialog(true)}
             >
-              + {t('search.addFirstSearch', 'Erste Suche hinzufügen')}
+              + {t('search.addFirstSearch', 'Add your first search')}
             </button>
           </div>
         ) : (
@@ -393,7 +393,7 @@ export default function SearchTab() {
       {/* ── Mark as already applied ──────────────────────────── */}
       <section>
         <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-          {t('search.markAppliedLabel', 'Exposés überspringen, auf die du dich bereits manuell beworben hast:')}
+          {t("search.markAppliedLabel", "Skip exposés you've already applied to manually:")}
         </p>
         <form onSubmit={handleMarkApplied} className="flex items-center gap-2">
           <input
@@ -401,7 +401,7 @@ export default function SearchTab() {
             style={{ maxWidth: 360 }}
             type="text"
             inputMode="url"
-            placeholder={t('search.markAppliedPlaceholder', 'Exposé-URL einfügen…')}
+            placeholder={t('search.markAppliedPlaceholder', 'Paste exposé URL…')}
             value={manualUrl}
             onChange={(event) => {
               setManualUrl(event.target.value);
@@ -422,7 +422,7 @@ export default function SearchTab() {
             >
               {manualResult.ok
                 ? t('search.markedApplied', '✓ Bereits beworben')
-                : t('search.markAppliedInvalid', 'Ungültige Exposé-URL')}
+                : t('search.markAppliedInvalid', 'Invalid exposé URL')}
             </span>
           )}
         </form>
@@ -514,10 +514,10 @@ function InlineAddDialog({ onAdd, onCancel }) {
     try {
       const ok = await onAdd(webUrl.trim(), name.trim() || undefined);
       if (!ok) {
-        setLocalError(t('search.addFailed', 'Suche konnte nicht hinzugefügt werden'));
+        setLocalError(t('search.addFailed', 'Could not add search'));
       }
     } catch {
-      setLocalError(t('search.addFailed', 'Suche konnte nicht hinzugefügt werden'));
+      setLocalError(t('search.addFailed', 'Could not add search'));
     } finally {
       setSubmitting(false);
     }
@@ -530,7 +530,7 @@ function InlineAddDialog({ onAdd, onCancel }) {
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div className="card p-6 w-full" style={{ maxWidth: 480 }}>
-        <h2 className="text-base font-semibold mb-4">{t('search.addSearch', 'IS24-Suche hinzufügen')}</h2>
+        <h2 className="text-base font-semibold mb-4">{t('search.addSearch', 'Add IS24 Search')}</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
             <label
@@ -584,7 +584,7 @@ function InlineAddDialog({ onAdd, onCancel }) {
               className="btn btn-primary text-sm"
               disabled={submitting || !webUrl.trim()}
             >
-              {submitting ? t('search.adding', 'Füge hinzu…') : t('search.addSearchButton', 'Suche hinzufügen')}
+              {submitting ? t('search.adding', 'Adding…') : t('search.addSearchButton', 'Add search')}
             </button>
           </div>
         </form>

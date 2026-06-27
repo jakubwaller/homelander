@@ -27,7 +27,7 @@ function renderPreview(template, sample, t) {
     }
     return <span className="text-sm whitespace-pre-wrap">{result}</span>;
   } catch {
-    return <span className="text-xs" style={{ color: 'var(--danger)' }}>{t('settings.invalidTemplate', 'Ungültige Vorlage.')}</span>;
+    return <span className="text-xs" style={{ color: 'var(--danger)' }}>{t('settings.invalidTemplate', 'Invalid template.')}</span>;
   }
 }
 
@@ -146,7 +146,7 @@ export default function SettingsTab() {
       errors.push(t('setup.emailInvalid', 'Email format is invalid'));
     }
     if (!p.telefon?.trim()) errors.push(t('setup.telefonRequired', 'Telefon is required'));
-    if (!p.strasse?.trim()) errors.push(t('setup.strasseRequired', 'Straße is required'));
+    if (!p.strasse?.trim()) errors.push(t('setup.strasseRequired', 'Street is required'));
     if (!p.hausnummer?.trim()) errors.push(t('setup.hausnrRequired', 'Hausnr. is required'));
     if (!p.plz?.trim()) errors.push(t('setup.plzRequired', 'PLZ is required'));
     if (p.plz?.trim() && !/^\d{4,5}$/.test(String(p.plz).trim())) {
@@ -158,7 +158,7 @@ export default function SettingsTab() {
     if (!p.personen?.trim()) errors.push(t('setup.personenRequired', 'Personen is required'));
     if (!p.haustiere?.trim()) errors.push(t('setup.haustiereRequired', 'Haustiere is required'));
     if (p.haustiere === 'Ja' && !p.haustiere_zusatz?.trim()) errors.push(t('setup.haustiereZusatzRequired', 'Anzahl und Tierart is required'));
-    if (!p.beschaeftigung?.trim()) errors.push(t('setup.beschaeftigungRequired', 'Beschäftigung is required'));
+    if (!p.beschaeftigung?.trim()) errors.push(t('setup.beschaeftigungRequired', 'Employment is required'));
     if (!p.einkommen?.trim()) errors.push(t('setup.einkommenRequired', 'Einkommen (netto) is required'));
     if (!p.unterlagen?.trim()) errors.push(t('setup.unterlagenRequired', 'Unterlagen is required'));
     if (errors.length > 0) {
@@ -230,7 +230,7 @@ export default function SettingsTab() {
 
   const handleConfirmClean = async () => {
     if (!cleanupEmail.trim()) {
-      setCleanupError(t('settings.cleanup.emailRequired', 'Gib deine E-Mail zur Bestätigung ein.'));
+      setCleanupError(t('settings.cleanup.emailRequired', 'Enter your email to confirm.'));
       return;
     }
     setCleanupStep('purging');
@@ -250,7 +250,7 @@ export default function SettingsTab() {
   if (!config) {
     return (
       <div className="py-12 text-center" style={{ color: 'var(--text-muted)' }}>
-        <p className="text-sm">{t('settings.loadingConfig', 'Lade Konfiguration…')}</p>
+        <p className="text-sm">{t('settings.loadingConfig', 'Loading configuration…')}</p>
       </div>
     );
   }
@@ -392,7 +392,7 @@ export default function SettingsTab() {
             </div>
           </div>
         ) : (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{t('settings.loadingPersona', 'Lade Persona…')}</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>{t('settings.loadingPersona', 'Loading persona…')}</p>
         )}
       </Section>
 

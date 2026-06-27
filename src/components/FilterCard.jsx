@@ -39,11 +39,11 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
       if (result?.error) {
         setPollMessage({ type: 'error', text: result.error });
       } else if (result?.pending) {
-        setPollMessage({ type: 'muted', text: t('search.pollStarted', 'Prüfung gestartet…') });
+        setPollMessage({ type: 'muted', text: t('search.pollStarted', 'Poll started…') });
       } else if ((result?.inserted || 0) > 0) {
-        setPollMessage({ type: 'success', text: t('search.pollAdded', '{{count}} neue Inserate gefunden.').replace('{{count}}', result.inserted) });
+        setPollMessage({ type: 'success', text: t('search.pollAdded', '{{count}} new listings found.').replace('{{count}}', result.inserted) });
       } else {
-        setPollMessage({ type: 'muted', text: t('search.noNewListings', 'Keine neuen Inserate.') });
+        setPollMessage({ type: 'muted', text: t('search.noNewListings', 'No new listings.') });
       }
     } catch (err) {
       setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'poll search' }, t) });
@@ -60,10 +60,10 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
     try {
       const result = await window.homelander.clearQueue(filter.id);
       if (result?.error || result?.ok === false) {
-        setPollMessage({ type: 'error', text: result?.error || t('search.clearQueueFailed', 'Warteschlange konnte nicht geleert werden.') });
+        setPollMessage({ type: 'error', text: result?.error || t('search.clearQueueFailed', 'Could not clear queue.') });
       } else {
         const cleared = Number.isFinite(result?.cleared) ? result.cleared : (filter.new_count || 0);
-        setPollMessage({ type: 'success', text: `${t('search.queueCleared', 'Warteschlange geleert')} (${cleared})` });
+        setPollMessage({ type: 'success', text: `${t('search.queueCleared', 'Queue cleared')} (${cleared})` });
       }
     } catch (err) {
       setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'clear queue' }, t) });
@@ -86,8 +86,8 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
 
           {/* Stats row */}
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>{t('search.today', 'Heute')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
-            <span>{t('search.total', 'Gesamt')} <strong style={{ color: 'var(--text-secondary)' }}>{filter.processed_all_time || 0}/{filter.total_seen || 0}</strong></span>
+            <span>{t('search.today', 'Today')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
+            <span>{t('search.total', 'Total')} <strong style={{ color: 'var(--text-secondary)' }}>{filter.processed_all_time || 0}/{filter.total_seen || 0}</strong></span>
             {filter.new_count > 0 && (
               <span className="badge badge-accent">+{filter.new_count} {t('search.pending', 'pending')}</span>
             )}
@@ -99,7 +99,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
             className="text-xs mt-1 truncate block hover:underline cursor-pointer"
             style={{ color: 'var(--text-muted)', maxWidth: 400 }}
             onClick={(e) => { e.preventDefault(); window.homelander.openExternal(filter.web_url); }}
-            title={t('search.openInBrowser', 'Im Browser öffnen')}
+            title={t('search.openInBrowser', 'Open in browser')}
           >
             {filter.web_url}
           </a>
@@ -133,7 +133,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
         <div className="flex items-center gap-2 flex-shrink-0">
           {!!filter.enabled && (
             <span
-              onMouseEnter={(e) => showTooltip(t('search.pollNow', 'Jetzt prüfen'), e)}
+              onMouseEnter={(e) => showTooltip(t('search.pollNow', 'Poll now'), e)}
               onMouseLeave={hideTooltip}
             >
               <button
@@ -146,7 +146,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
             </span>
           )}
           <span
-            onMouseEnter={(e) => showTooltip(t('search.clearQueue', 'Warteschlange leeren'), e)}
+            onMouseEnter={(e) => showTooltip(t('search.clearQueue', 'Clear queue'), e)}
             onMouseLeave={hideTooltip}
           >
             <button
@@ -169,7 +169,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
             </button>
           </span>
           <span
-            onMouseEnter={(e) => showTooltip(confirming ? t('search.confirmTitle', 'Bestätigen') : t('search.removeTitle', 'Löschen'), e)}
+            onMouseEnter={(e) => showTooltip(confirming ? t('search.confirmTitle', 'Confirm') : t('search.removeTitle', 'Remove'), e)}
             onMouseLeave={hideTooltip}
           >
             <button
