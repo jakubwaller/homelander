@@ -49,6 +49,10 @@ const DAEMON_LOG = join(dirname(DB_PATH), 'daemon.log');
 let pollIntervalSec = parseInt(args['poll-interval'], 10);
 let nextPollDueAt = 0; // ms timestamp; reset by settings save and manual poll
 
+// Page lock — prevents Nachrichten scraper from stealing the CDP page
+// while the apply loop is filling a form.
+let pageTaskRunning = false;
+
 // Elevate OS scheduling priority so the daemon's event loop stays responsive
 // even when the parent Electron window is occluded or on another desktop.
 // Windows: SetPriorityClass(ABOVE_NORMAL) — prevents EcoQoS starvation.
@@ -361,6 +365,68 @@ async function applyOne(listing, filterId, db) {
   }
 }
 
+// ── Nachrichten sync: scrape sent-message listing IDs to skip already-applied ─
+
+/** Runs once per daemon startup (after a delay), scraping the user's IS24
+ *  "Nachrichten" page for expose IDs of listings they already contacted.
+ *  Inserts MANUAL exclusion stubs so the apply loop never touches them. */
+async function syncAlreadyAppliedFromSentMessages(db) {
+  if (!contactor) {
+    log('Nachrichten sync skipped: no CDP connection');
+    return;
+  }
+
+  // Don't steal the page while the apply loop is filling a form.
+  if (pageTaskRunning) {
+    log('Nachrichten sync skipped: page busy (apply loop active)');
+    return;
+  }
+
+  pageTaskRunning = true;
+  try {
+    log('Nachrichten sync: scraping sent messages...');
+
+    const result = await contactor.scrapeSentMessageExposeIds({
+      maxPages: 10,
+      delayMs: 1500,
+      timeoutMs: 30000,
+    });
+
+    if (!result.ok) {
+      log(`Nachrichten sync skipped: ${result.reason}`);
+      return;
+    }
+
+    let inserted = 0;
+    let skipped = 0;
+
+    for (const exposeId of result.exposeIds) {
+      // Check if already in DB (any status/outcome).
+      const existing = db.db.prepare(
+        'SELECT 1 FROM listings WHERE expose_id = ? LIMIT 1'
+      ).get(exposeId);
+
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      // Insert MANUAL stub so the poll + apply loops skip it.
+      db.markAlreadyApplied(exposeId);
+      inserted++;
+    }
+
+    log(
+      `Nachrichten sync complete: ${inserted} inserted, ${skipped} already known, ` +
+      `${result.exposeIds.length} discovered, ${result.pagesVisited} pages visited`
+    );
+  } catch (err) {
+    log(`Nachrichten sync failed: ${err.message}`);
+  } finally {
+    pageTaskRunning = false;
+  }
+}
+
 // ── Apply loop ─────────────────────────────────────────────────
 // Runs continuously, processing one listing per enabled filter per round.
 // Respects applyPaused / captcha wall / session expiry / pendingRestart.
@@ -475,7 +541,7 @@ async function applyLoop(db) {
     // Quick CDP health check before processing listings — fresh
     // TCP connection, not the stale Puppeteer WebSocket.
     try {
-      await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(3000) });
+      await fetch('http://localhost:9222/json/version', { signal: AbortSignal.timeout(3000) });
     } catch {
       log('CDP ping failed at round start — waiting for recovery');
       await sleep(5000);
@@ -522,15 +588,36 @@ async function applyLoop(db) {
       // Chromium itself is responsive to new connections.  This catches
       // that state and skips the listing instead of timing out.
       try {
-        await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(3000) });
+        await fetch('http://localhost:9222/json/version', { signal: AbortSignal.timeout(3000) });
       } catch {
         log(`CDP ping failed (Space throttled?) — skipping ${listing.expose_id}`);
         // Don't burn a listing — break the filter loop so ensureCDPHealthy
         // handles reconnection at the top of the next iteration.
         break;
       }
+      // Atomic claim — only one writer processes a listing at a time.
+      // If Electron marked it MANUAL or cleared the queue between the
+      // getSeenListings read and now, changes=0 and we skip.
+      {
+        const claim = db.db.prepare(
+          "UPDATE listings SET status = 'processing' WHERE hash = ? AND status = 'seen'"
+        ).run(listing.hash);
+        if (claim.changes === 0) {
+          log(`Skipping ${listing.expose_id} — claimed by another writer or no longer 'seen'`);
+          continue;
+        }
+      }
+      // Belt-and-suspenders: skip manually-applied listings even if they
+      // slipped past the poll filter (retry, race, etc.)
+      if (db.isManuallyApplied(listing.expose_id)) {
+        log(`Skipping ${listing.expose_id} — already applied manually, removing from queue`);
+        db.deleteByHash(listing.hash);
+        continue;
+      }
       log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
+      pageTaskRunning = true;
       await applyOne(listing, filter.id, db);
+      pageTaskRunning = false;
       didWork = true;
 
       // If CDP died inside applyOne (contactor nulled), break the filter
@@ -604,9 +691,26 @@ async function pollLoop(db) {
             }
             break;
           }
-          filterFetched += listings.length;
-          const inserted = db.insertListings(listings, filter.id);
+          const filteredListings = (currentConfig.polling?.exclude_tauschwohnungen ?? true)
+            ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
+            : listings;
+          // Skip listings already marked as manually applied
+          const alreadyManual = new Set(
+            db.db.prepare(
+              `SELECT expose_id FROM listings WHERE outcome = 'MANUAL' AND filter_id = ?`
+            ).all(filter.id).map(r => r.expose_id)
+          );
+          const dedupedListings = filteredListings.filter(
+            (l) => !alreadyManual.has(String(l.expose_id))
+          );
+          filterFetched += dedupedListings.length;
+          const firstPollLimit = 10;
+          const listingsToInsert = filter.last_polled_at
+            ? dedupedListings
+            : dedupedListings.slice(0, Math.max(0, firstPollLimit - filterNew));
+          const inserted = db.insertListings(listingsToInsert, filter.id);
           filterNew += inserted;
+          if (!filter.last_polled_at && filterNew >= firstPollLimit) break;
           if (listings.length < PAGE_SIZE) break;
           if (inserted === 0) break;
         }
@@ -667,9 +771,26 @@ function setupIpc(db) {
             }
             break;
           }
-          allFetched += listings.length;
-          const inserted = db.insertListings(listings, filter.id);
+          const filteredListings = (currentConfig.polling?.exclude_tauschwohnungen ?? true)
+            ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
+            : listings;
+          // Skip listings already marked as manually applied
+          const alreadyManualPn = new Set(
+            db.db.prepare(
+              `SELECT expose_id FROM listings WHERE outcome = 'MANUAL' AND filter_id = ?`
+            ).all(filter.id).map(r => r.expose_id)
+          );
+          const dedupedPn = filteredListings.filter(
+            (l) => !alreadyManualPn.has(String(l.expose_id))
+          );
+          allFetched += dedupedPn.length;
+          const firstPollLimit = 10;
+          const listingsToInsert = filter.last_polled_at
+            ? dedupedPn
+            : dedupedPn.slice(0, Math.max(0, firstPollLimit - allInserted));
+          const inserted = db.insertListings(listingsToInsert, filter.id);
           allInserted += inserted;
+          if (!filter.last_polled_at && allInserted >= firstPollLimit) break;
           if (listings.length < PAGE_SIZE) break;
           if (inserted === 0) break;
         }
@@ -687,6 +808,13 @@ function setupIpc(db) {
         log(`Poll-now error [${msg.filterId}]: ${err.message}`);
         emit({ type: 'poll_error', filter_id: msg.filterId, error: err.message });
       }
+    }
+
+    if (msg.type === 'clear_queue' && msg.filterId) {
+      const result = db.clearQueue(msg.filterId);
+      log(`Clear queue [${msg.filterId}]: ${result.cleared} listings skipped`);
+      emit({ type: 'queue_cleared', filter_id: msg.filterId, cleared: result.cleared });
+      emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: new Date(nextPollDueAt).toISOString() });
     }
 
     // ── Reset automatic all-search poll deadline ─────────────
@@ -770,6 +898,14 @@ function setupIpc(db) {
         emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
         changed = true;
       }
+      if (msg.exclude_tauschwohnungen !== undefined) {
+        if (!currentConfig.polling) currentConfig.polling = {};
+        if (msg.exclude_tauschwohnungen !== undefined) {
+          currentConfig.polling.exclude_tauschwohnungen = Boolean(msg.exclude_tauschwohnungen);
+        }
+        log('Config hot-reload: polling filters updated');
+        changed = true;
+      }
       if (msg.persona) {
         currentConfig.persona = msg.persona;
         if (contactor) contactor.updateContact(msg.persona);
@@ -813,6 +949,20 @@ async function main() {
   _db = db;
   log('Database opened');
 
+  // Reset stale processing listings — if the daemon crashed mid-apply,
+  // these would be stuck in 'processing' forever and never get retried.
+  const staleCount = db.db.prepare(
+    "UPDATE listings SET status = 'seen' WHERE status = 'processing'"
+  ).run().changes;
+  if (staleCount > 0) log(`Reset ${staleCount} stale processing listing(s) to seen`);
+
+  // Reset first-poll cap for all filters — each app launch gets a fresh
+  // first poll so returning filters don't backfill their entire history.
+  const resetFilters = db.db.prepare(
+    "UPDATE filters SET last_polled_at = NULL"
+  ).run().changes;
+  if (resetFilters > 0) log(`Reset first-poll cap for ${resetFilters} filter(s)`);
+
   // Connect to Chrome
   try {
     contactor = new IS24Contactor(
@@ -832,6 +982,14 @@ async function main() {
 
   // Set up IPC from Electron parent
   setupIpc(db);
+
+  // ── Nachrichten sync: scrape sent messages to skip already-applied listings ─
+  // Runs after a 30s delay to let CDP settle and login state stabilise.
+  setTimeout(() => {
+    syncAlreadyAppliedFromSentMessages(db).catch(err =>
+      log(`Nachrichten sync error: ${err.message}`)
+    );
+  }, 30_000);
 
   // ── Check for persisted pause flag ─────────────────────────
   if (checkPauseFlag()) {

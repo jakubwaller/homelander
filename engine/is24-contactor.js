@@ -1014,21 +1014,22 @@ export class IS24Contactor {
     const hasTextarea = await this.page.evaluate((s) => !!document.querySelector(s), textareaSel);
 
     if (hasTextarea) {
-      const currentMsg = await this.page.evaluate((s) => document.querySelector(s)?.value || '', textareaSel);
+      // Clear any pre-existing text using native setter + InputEvent.
+      // Cmd+A / Ctrl+A is intercepted by IS24's React — the native setter
+      // is the only reliable way to clear the textarea.
+      await this.page.evaluate((s) => {
+        const el = document.querySelector(s);
+        if (!el) return;
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype, 'value'
+        ).set;
+        nativeSetter.call(el, '');
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContent' }));
+      }, textareaSel);
+      await jitter(100, 200);
 
-      if (currentMsg && currentMsg.length > 0) {
-        await this.page.click(textareaSel);
-        await jitter(100, 200);
-        await this.page.keyboard.down('Meta');
-        await this.page.keyboard.press('KeyA');
-        await this.page.keyboard.up('Meta');
-        await jitter(80, 150);
-        await this.page.keyboard.press('Backspace');
-        await jitter(150, 300);
-      } else {
-        await this.page.click(textareaSel);
-        await jitter(100, 200);
-      }
+      await this.page.click(textareaSel);
+      await jitter(100, 200);
 
       const kbdDelay = Array.isArray(this.t.typeDelay)
         ? this.t.typeDelay[0] + Math.random() * (this.t.typeDelay[1] - this.t.typeDelay[0])
@@ -1492,6 +1493,145 @@ export class IS24Contactor {
       if (result.error) return null;
       return result.text;
     } catch { return null; }
+  }
+
+  /** Scrape expose IDs from the user's IS24 "Nachrichten" (sent messages) page.
+   *  Navigates the CDP browser, paginates through message pages, and extracts
+   *  all listing expose IDs from anchor links. Safe to call when idle — does NOT
+   *  interact with the apply loop's form-filling page.
+   *
+   *  @param {{ maxPages?: number, delayMs?: number, timeoutMs?: number }} options
+   *  @returns {{ ok: boolean, reason?: string, exposeIds: string[], pagesVisited: number }}
+   */
+  async scrapeSentMessageExposeIds(options = {}) {
+    const {
+      maxPages = 10,
+      delayMs = 1500,
+      timeoutMs = 30000,
+    } = options;
+
+    const ids = new Set();
+
+    // 1. Verify login first — don't waste navigation on expired session.
+    try {
+      const loggedIn = await this.checkIS24Login();
+      if (!loggedIn) {
+        return { ok: false, reason: 'NOT_LOGGED_IN', exposeIds: [], pagesVisited: 0 };
+      }
+    } catch {
+      return { ok: false, reason: 'LOGIN_CHECK_FAILED', exposeIds: [], pagesVisited: 0 };
+    }
+
+    // 2. Navigate to Nachrichten.
+    try {
+      await this.page.goto('https://www.immobilienscout24.de/nachrichten/', {
+        waitUntil: 'domcontentloaded',
+        timeout: timeoutMs,
+      });
+    } catch {
+      return { ok: false, reason: 'NAVIGATION_FAILED', exposeIds: [], pagesVisited: 0 };
+    }
+
+    // 3. Detect auth redirect.
+    const afterUrl = this.page.url();
+    if (/\/login|\/sso|\/auth|\/registrier/i.test(afterUrl)) {
+      return { ok: false, reason: 'AUTH_REDIRECT', exposeIds: [], pagesVisited: 0 };
+    }
+
+    // 4. Page loop — extract IDs, click "next", repeat.
+    const visitedUrls = new Set();
+    let pagesVisited = 0;
+
+    for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+      pagesVisited++;
+
+      // Jittered delay between pages.
+      await new Promise(r => setTimeout(r, delayMs + Math.floor(Math.random() * delayMs)));
+
+      // Prevent infinite loops.
+      const currentUrl = this.page.url();
+      if (visitedUrls.has(currentUrl)) break;
+      visitedUrls.add(currentUrl);
+
+      // Extract expose IDs from all links on the current page.
+      try {
+        const pageIds = await this.page.evaluate(() => {
+          const ids = [];
+          const seen = new Set();
+
+          for (const a of document.querySelectorAll('a[href]')) {
+            const href = a.href || '';
+            const match = href.match(/\/expose\/(\d{6,})/);
+            if (match && !seen.has(match[1])) {
+              seen.add(match[1]);
+              ids.push(match[1]);
+            }
+          }
+
+          return ids;
+        });
+
+        for (const id of pageIds) ids.add(id);
+      } catch (err) {
+        // Page may have unloaded mid-evaluate — treat as end of results.
+        break;
+      }
+
+      // Try to find and click the "next page" control.
+      const nextClicked = await this.page.evaluate(() => {
+        // Strategy 1: [rel="next"] link
+        const relNext = document.querySelector('a[rel="next"]');
+        if (relNext && relNext.href) {
+          window.location.href = relNext.href;
+          return true;
+        }
+
+        // Strategy 2: button/link with "Weiter" / "Nächste" / "Next"
+        const candidates = Array.from(
+          document.querySelectorAll('a[href], button')
+        );
+
+        const next = candidates.find(el => {
+          if (el.disabled) return false;
+          if (el.getAttribute('aria-disabled') === 'true') return false;
+          const text = (el.textContent || '').trim().toLowerCase();
+          const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+          return (
+            text === 'weiter' || text === 'nächste' || text === 'next' ||
+            text === 'weiter »' || text === 'nächste »' ||
+            aria.includes('weiter') || aria.includes('nächste') || aria.includes('next')
+          );
+        });
+
+        if (!next) return false;
+
+        if (next.tagName.toLowerCase() === 'a' && next.href) {
+          window.location.href = next.href;
+        } else {
+          next.click();
+        }
+        return true;
+      }).catch(() => false);
+
+      if (!nextClicked) break;
+
+      // Wait for the next page to load.
+      try {
+        await this.page.waitForNavigation({
+          waitUntil: 'domcontentloaded',
+          timeout: timeoutMs,
+        });
+      } catch {
+        // Navigation timed out or failed — stop paginating.
+        break;
+      }
+    }
+
+    return {
+      ok: true,
+      exposeIds: Array.from(ids),
+      pagesVisited,
+    };
   }
 
   async disconnect() {

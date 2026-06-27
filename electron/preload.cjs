@@ -12,11 +12,13 @@ contextBridge.exposeInMainWorld('homelander', {
   resumeDaemon: () => ipcRenderer.invoke('daemon:resume'),
   getDaemonStatus: () => ipcRenderer.invoke('daemon:status'),
   pollNow: (filterId) => ipcRenderer.invoke('daemon:poll-now', filterId),
+  clearQueue: (filterId) => ipcRenderer.invoke('daemon:clear-queue', filterId),
   retryListing: (exposeId) => ipcRenderer.invoke('daemon:retry-listing', exposeId),
   retryAllFailed: (filterId) => ipcRenderer.invoke('daemon:retry-all-failed', filterId),
 
   // ── Filters ───────────────────────────────────────────────
   getFilters: () => ipcRenderer.invoke('filters:list'),
+  getFilter: (id) => ipcRenderer.invoke('filters:get', id),
   addFilter: (webUrl, name) => ipcRenderer.invoke('filters:add', webUrl, name),
   removeFilter: (id) => ipcRenderer.invoke('filters:remove', id),
   updateFilter: (id, patch) => ipcRenderer.invoke('filters:update', id, patch),
@@ -27,6 +29,7 @@ contextBridge.exposeInMainWorld('homelander', {
     ipcRenderer.invoke('listings:history', limit, offset, filterId, outcome),
   getStats: (filterId) => ipcRenderer.invoke('listings:stats', filterId),
   getTodayStats: (filterId) => ipcRenderer.invoke('listings:todayStats', filterId),
+  markApplied: (url) => ipcRenderer.invoke('listings:mark-applied', url),
   createSupportBundle: (payload) => ipcRenderer.invoke('support:bundle', payload || { scope: 'global' }),
 
   // ── Config ────────────────────────────────────────────────

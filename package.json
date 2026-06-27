@@ -23,6 +23,7 @@
   "type": "module",
   "main": "electron/main.js",
   "scripts": {
+    "predev": "npm run rebuild:electron",
     "dev": "lsof -ti:5173 | xargs kill -9 2>/dev/null; concurrently \"vite\" \"sleep 2 && electron .\"",
     "dev:renderer": "vite",
     "dev:electron": "electron .",

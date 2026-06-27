@@ -47,6 +47,8 @@ export default function SearchTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [tip, setTip] = useState(null);
+  const [manualUrl, setManualUrl] = useState('');
+  const [manualResult, setManualResult] = useState(null);
   const activeTipTargetRef = useRef(null);
 
   const hideTip = useCallback(() => {
@@ -240,6 +242,30 @@ export default function SearchTab() {
     }
   }, [setFilters, setStats, setPollError, clearPollError]);
 
+  const handleMarkApplied = useCallback(async (event) => {
+    event.preventDefault();
+    const url = manualUrl.trim();
+    if (!url || !window.homelander?.markApplied) {
+      setManualResult({ ok: false });
+      setTimeout(() => setManualResult(null), 2500);
+      return;
+    }
+
+    setManualResult(null);
+    try {
+      const result = await window.homelander.markApplied(url);
+      if (result?.ok) {
+        setManualUrl('');
+        setManualResult({ ok: true });
+      } else {
+        setManualResult({ ok: false });
+      }
+    } catch {
+      setManualResult({ ok: false });
+    }
+    setTimeout(() => setManualResult(null), 2500);
+  }, [manualUrl]);
+
   // ── Countdown for next auto-poll ──────────────────────────────
   const [nextPollCountdown, setNextPollCountdown] = useState('');
   const [configAppliedFlash, setConfigAppliedFlash] = useState(false);
@@ -362,6 +388,44 @@ export default function SearchTab() {
             ))}
           </div>
         )}
+      </section>
+
+      {/* ── Mark as already applied ──────────────────────────── */}
+      <section>
+        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+          {t('search.markAppliedLabel', 'Exposés überspringen, auf die du dich bereits manuell beworben hast:')}
+        </p>
+        <form onSubmit={handleMarkApplied} className="flex items-center gap-2">
+          <input
+            className="input text-xs py-1.5"
+            style={{ maxWidth: 360 }}
+            type="text"
+            inputMode="url"
+            placeholder={t('search.markAppliedPlaceholder', 'Exposé-URL einfügen…')}
+            value={manualUrl}
+            onChange={(event) => {
+              setManualUrl(event.target.value);
+              setManualResult(null);
+            }}
+          />
+          <button
+            type="submit"
+            className="btn btn-ghost text-xs px-3 py-1.5"
+            disabled={!manualUrl.trim()}
+          >
+            ✓
+          </button>
+          {manualResult && (
+            <span
+              className="text-xs font-medium"
+              style={{ color: manualResult.ok ? 'var(--success)' : 'var(--danger)' }}
+            >
+              {manualResult.ok
+                ? t('search.markedApplied', '✓ Bereits beworben')
+                : t('search.markAppliedInvalid', 'Ungültige Exposé-URL')}
+            </span>
+          )}
+        </form>
       </section>
 
       {/* ── Add search dialog ─────────────────────────────────── */}

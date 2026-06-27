@@ -27,8 +27,9 @@ describe('Daemon listing lifecycle', () => {
   });
 
   it('inserts listings and tracks seen → sent → stats', () => {
-    const filter = db.addFilter({
-      id: randomUUID(),
+    const filterId = randomUUID();
+    db.addFilter({
+      id: filterId,
       name: 'Test Search',
       web_url: 'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten',
       mobile_params: '{}',
@@ -44,28 +45,29 @@ describe('Daemon listing lifecycle', () => {
       image_url: 'https://example.com/img.jpg',
     };
 
-    const inserted = db.insertListings([listing], filter.id);
+    const inserted = db.insertListings([listing], filterId);
     assert.strictEqual(inserted, 1);
 
     // Should be in "seen" state
-    const queue = db.getSeenListings(filter.id);
+    const queue = db.getSeenListings(filterId);
     assert.strictEqual(queue.length, 1);
     assert.strictEqual(queue[0].expose_id, '123456789');
 
     // After markSent, should move to SENT
     db.markSent(queue[0].hash, 'SENT', 'modal ✓', '');
-    const queueAfter = db.getSeenListings(filter.id);
+    const queueAfter = db.getSeenListings(filterId);
     assert.strictEqual(queueAfter.length, 0);
 
     // Stats should reflect the sent listing
-    const stats = db.getStats(filter.id);
+    const stats = db.getStats(filterId);
     assert.strictEqual(stats.sent, 1);
     assert.strictEqual(stats.total, 1);
   });
 
   it('tracks FAIL, DEACTIVATED, and PREMIUM outcomes', () => {
-    const filter = db.addFilter({
-      id: randomUUID(),
+    const filterId = randomUUID();
+    db.addFilter({
+      id: filterId,
       name: 'Test',
       web_url: 'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten',
       mobile_params: '{}',
@@ -77,15 +79,15 @@ describe('Daemon listing lifecycle', () => {
       { expose_id: '3', title: 'C', price: 700, size: 60, rooms: 3, address: 'c', image_url: '' },
     ];
 
-    db.insertListings(listings, filter.id);
-    const queue = db.getSeenListings(filter.id);
+    db.insertListings(listings, filterId);
+    const queue = db.getSeenListings(filterId);
     assert.strictEqual(queue.length, 3);
 
     db.markSent(queue[0].hash, 'FAIL', 'ERROR: timeout', 'error');
     db.markSent(queue[1].hash, 'DEACTIVATED', 'deactivated', 'deactivated');
     db.markSent(queue[2].hash, 'PREMIUM', 'premium listing', 'premium');
 
-    const stats = db.getStats(filter.id);
+    const stats = db.getStats(filterId);
     assert.strictEqual(stats.total, 3);
     assert.strictEqual(stats.failed, 1);
     assert.strictEqual(stats.deactivated, 1);
@@ -129,8 +131,9 @@ describe('Daemon stats aggregation', () => {
   });
 
   it('today stat counts only same-day listings', () => {
-    const filter = db.addFilter({
-      id: randomUUID(),
+    const filterId = randomUUID();
+    db.addFilter({
+      id: filterId,
       name: 'Test',
       web_url: 'https://www.example.com/test',
       mobile_params: '{}',
@@ -143,19 +146,20 @@ describe('Daemon stats aggregation', () => {
       address: 'Test', image_url: '',
     };
 
-    db.insertListings([listing], filter.id);
-    const queue = db.getSeenListings(filter.id);
+    db.insertListings([listing], filterId);
+    const queue = db.getSeenListings(filterId);
     db.markSent(queue[0].hash, 'SENT', 'ok', '');
 
     // After marking as sent, 'today' should reflect it (sent_at is now)
-    const stats = db.getStats(filter.id);
+    const stats = db.getStats(filterId);
     assert.strictEqual(stats.today, 1);
     assert.strictEqual(stats.sent, 1);
   });
 
   it('getTodayStats uses localtime date filtering', () => {
-    const filter = db.addFilter({
-      id: randomUUID(),
+    const filterId = randomUUID();
+    db.addFilter({
+      id: filterId,
       name: 'Test',
       web_url: 'https://www.example.com/test',
       mobile_params: '{}',
@@ -168,11 +172,11 @@ describe('Daemon stats aggregation', () => {
       address: 'Test', image_url: '',
     };
 
-    db.insertListings([listing], filter.id);
-    const queue = db.getSeenListings(filter.id);
+    db.insertListings([listing], filterId);
+    const queue = db.getSeenListings(filterId);
     db.markSent(queue[0].hash, 'SENT', 'ok', '');
 
-    const todayStats = db.getTodayStats(filter.id);
+    const todayStats = db.getTodayStats(filterId);
     assert.strictEqual(todayStats.sent, 1);
     assert.strictEqual(todayStats.today, 1);
   });

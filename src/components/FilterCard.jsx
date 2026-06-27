@@ -10,7 +10,15 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
   const { t } = useLocale();
   const [confirming, setConfirming] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [pollMessage, setPollMessage] = useState(null);
+  const [tooltip, setTooltip] = useState(null);
+
+  const showTooltip = (text, e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltip({ text, x: rect.left + rect.width / 2, y: rect.top });
+  };
+  const hideTooltip = () => setTooltip(null);
 
   const handleRemove = () => {
     if (confirming) {
@@ -43,6 +51,26 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
     }
   };
 
+  const handleClearQueue = async () => {
+    if (!window.homelander?.clearQueue || clearing) return;
+    setClearing(true);
+    setPollMessage(null);
+    try {
+      const result = await window.homelander.clearQueue(filter.id);
+      if (result?.error || result?.ok === false) {
+        setPollMessage({ type: 'error', text: result?.error || t('search.clearQueueFailed', 'Warteschlange konnte nicht geleert werden.') });
+      } else {
+        const cleared = Number.isFinite(result?.cleared) ? result.cleared : (filter.new_count || 0);
+        setPollMessage({ type: 'success', text: `${t('search.queueCleared', 'Warteschlange geleert')} (${cleared})` });
+      }
+    } catch (err) {
+      setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'clear queue' }, t) });
+    } finally {
+      setClearing(false);
+      setTimeout(() => setPollMessage(null), 5000);
+    }
+  };
+
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between gap-3">
@@ -63,9 +91,15 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
           </div>
 
           {/* URL preview */}
-          <p className="text-xs mt-1 truncate" style={{ color: 'var(--text-muted)', maxWidth: 400 }}>
+          <a
+            href="#"
+            className="text-xs mt-1 truncate block hover:underline cursor-pointer"
+            style={{ color: 'var(--text-muted)', maxWidth: 400 }}
+            onClick={(e) => { e.preventDefault(); window.homelander.openExternal(filter.web_url); }}
+            title={t('search.openInBrowser', 'Im Browser öffnen')}
+          >
             {filter.web_url}
-          </p>
+          </a>
 
           {/* Poll error */}
           {pollError && (
@@ -95,28 +129,71 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {!!filter.enabled && (
+            <span
+              onMouseEnter={(e) => showTooltip(t('search.pollNow', 'Jetzt prüfen'), e)}
+              onMouseLeave={hideTooltip}
+            >
+              <button
+                className="btn btn-ghost text-xs"
+                onClick={handlePollNow}
+                disabled={polling}
+              >
+                {polling ? '⏳' : '▶'}
+              </button>
+            </span>
+          )}
+          <span
+            onMouseEnter={(e) => showTooltip(t('search.clearQueue', 'Warteschlange leeren'), e)}
+            onMouseLeave={hideTooltip}
+          >
             <button
               className="btn btn-ghost text-xs"
-              onClick={handlePollNow}
-              disabled={polling}
+              onClick={handleClearQueue}
+              disabled={clearing || !(filter.new_count > 0)}
             >
-              {polling ? '⏳' : '▶'} {t('search.pollNow', 'Poll now')}
+              {clearing ? '⏳' : '🧹'}
             </button>
-          )}
-          <button
-            className="btn btn-ghost text-xs"
-            onClick={() => onPause(filter.id, !filter.enabled)}
+          </span>
+          <span
+            onMouseEnter={(e) => showTooltip(filter.enabled ? t('search.pauseTitle', 'Pause') : t('search.resumeTitle', 'Fortsetzen'), e)}
+            onMouseLeave={hideTooltip}
           >
-            {filter.enabled ? t('search.pause', '⏸ Pause') : t('search.resume', '▶ Resume')}
-          </button>
-          <button
-            className={`btn text-xs ${confirming ? 'btn-danger' : 'btn-ghost'}`}
-            onClick={handleRemove}
+            <button
+              className="btn btn-ghost text-xs"
+              onClick={() => onPause(filter.id, !filter.enabled)}
+            >
+              {filter.enabled ? '⏸' : '▶'}
+            </button>
+          </span>
+          <span
+            onMouseEnter={(e) => showTooltip(confirming ? t('search.confirmTitle', 'Bestätigen') : t('search.removeTitle', 'Löschen'), e)}
+            onMouseLeave={hideTooltip}
           >
-            {confirming ? t('search.confirm', 'Confirm?') : '🗑'}
-          </button>
+            <button
+              className={`btn text-xs ${confirming ? 'btn-danger' : 'btn-ghost'}`}
+              onClick={handleRemove}
+            >
+              {confirming ? '✓' : '🗑'}
+            </button>
+          </span>
         </div>
       </div>
+      {tooltip && (
+        <div
+          className="fixed pointer-events-none z-50 px-3 py-1.5 rounded-lg text-xs font-medium shadow-lg"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y - 36,
+            transform: 'translateX(-50%)',
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {tooltip.text}
+        </div>
+      )}
     </div>
   );
 }

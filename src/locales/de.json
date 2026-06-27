@@ -34,7 +34,7 @@
   "settings": {
     "persona": "Persona",
     "messageTemplate": "Nachrichtenvorlage",
-    "timing": "Zeitsteuerung",
+    "application": "Bewerbung",
     "captcha": "2captcha API-Schlüssel",
     "support": "Support-Paket",
     "danger": "Gefahrenzone",
@@ -51,6 +51,7 @@
     "speedSlowDesc": "Maximale Verzögerungen, am sichersten",
     "pollInterval": "Abfrageintervall (min)",
     "pollIntervalDesc": "Wie oft nach neuen Inseraten gesucht wird",
+    "excludeTauschwohnungen": "Tauschwohnungen ausschließen",
     "placeholder": {
       "apiKey": "2captcha API-Schlüssel eingeben",
       "email": "deine@email.com",
@@ -319,6 +320,10 @@
     "processed": "Verarbeitet",
     "sent": "Gesendet",
     "failed": "Fehlgeschlagen",
+    "markAppliedPlaceholder": "Exposé-URL einfügen…",
+    "markAppliedLabel": "Exposés überspringen, auf die du dich bereits manuell beworben hast:",
+    "markedApplied": "✓ Bereits beworben",
+    "markAppliedInvalid": "Ungültige Exposé-URL",
     "searchPlaceholder": "z.B. Berlin 2-Zimmer",
     "addFailed": "Suche konnte nicht hinzugefügt werden",
     "addSearchButton": "Suche hinzufügen",
@@ -345,8 +350,12 @@
     "pending": "ausstehend",
     "pollNow": "Jetzt prüfen",
     "pause": "⏸ Pause",
+    "pauseTitle": "Pause",
     "resume": "▶ Fortsetzen",
+    "resumeTitle": "Fortsetzen",
     "confirm": "Bestätigen?",
+    "confirmTitle": "Bestätigen",
+    "removeTitle": "Löschen",
     "editFilter": "Filternamen bearbeiten",
     "rename": "Umbenennen",
     "remove": "Entfernen",
@@ -366,7 +375,11 @@
     "selectAll": "Alle auswählen",
     "clearSelection": "Leeren",
     "selected": "ausgewählt",
-    "anyMoment": "jeden Moment"
+    "anyMoment": "jeden Moment",
+    "clearQueue": "Warteschlange leeren",
+    "clearQueueFailed": "Warteschlange konnte nicht geleert werden.",
+    "queueCleared": "Warteschlange geleert",
+    "openInBrowser": "Im Browser öffnen"
   },
   "errors": {
     "backendUnavailable": {

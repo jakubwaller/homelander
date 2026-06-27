@@ -57,7 +57,7 @@ export default function SettingsTab() {
   // Local editing state
   const [personaDraft, setPersonaDraft] = useState(null);
   const [templateDraft, setTemplateDraft] = useState('');
-  const [timingDraft, setTimingDraft] = useState({ speed: 'balanced', poll_interval: 10 });
+  const [timingDraft, setTimingDraft] = useState({ speed: 'balanced', poll_interval: 10, exclude_tauschwohnungen: true });
   const [captchaDraft, setCaptchaDraft] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
   const [cleanupStep, setCleanupStep] = useState(null); // null | 'confirm' | 'purging'
@@ -109,6 +109,7 @@ export default function SettingsTab() {
     setTimingDraft({
       speed: config.timing?.speed || 'balanced',
       poll_interval: Math.max(5, Math.round((config.polling?.interval_seconds ?? 600) / 60)),
+      exclude_tauschwohnungen: config.polling?.exclude_tauschwohnungen ?? true,
     });
     setCaptchaDraft(config.captcha?.api_key || '');
   }, [config]);
@@ -184,7 +185,11 @@ export default function SettingsTab() {
     const seconds = clamped * 60;
     save({
       timing: { ...config?.timing, speed: timingDraft.speed },
-      polling: { ...config?.polling, interval_seconds: seconds },
+      polling: {
+        ...config?.polling,
+        interval_seconds: seconds,
+        exclude_tauschwohnungen: timingDraft.exclude_tauschwohnungen,
+      },
     });
   };
 
@@ -422,7 +427,7 @@ export default function SettingsTab() {
       </Section>
 
       {/* ── 3. Timing ────────────────────────────────────────────── */}
-      <Section title={t("settings.timing")}>
+      <Section title={t("settings.application")}>
         <div className="flex items-start justify-between">
           <div className="flex gap-4 flex-1">
             <div className="flex-1">
@@ -452,6 +457,15 @@ export default function SettingsTab() {
               />
               <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{t('settings.pollIntervalDesc', 'How often to check for new listings')}</p>
             </div>
+            <label className="flex items-center gap-1.5 text-xs mt-2 cursor-pointer select-none" style={{ color: 'var(--text-muted)' }}>
+                <input
+                  type="checkbox"
+                  checked={timingDraft.exclude_tauschwohnungen}
+                  onChange={(e) => updateTimingField('exclude_tauschwohnungen', e.target.checked)}
+                  className="cursor-pointer"
+                />
+                {t('settings.excludeTauschwohnungen', 'Exclude Tauschwohnungen')}
+              </label>
           </div>
           <div className="flex items-end ml-4" style={{ paddingTop: '1.65rem' }}>
             <button className="btn btn-primary text-xs" onClick={saveTiming}>

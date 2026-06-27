@@ -84,7 +84,7 @@ describe('HomelanderDB constructor', () => {
   it('records schema version', () => {
     const db = freshDB();
     const row = db.db.prepare('SELECT version FROM schema_version').get();
-    assert.equal(row.version, 1);
+    assert.equal(row.version, 3);
     db.close();
   });
 });
@@ -220,16 +220,22 @@ describe('getFilters', () => {
 });
 
 describe('removeFilter', () => {
-  it('removes filter and NULLs out related listings', () => {
+  it('archives filter and keeps listings intact', () => {
     const db = seededDB();
     seedListing(db);
     db.removeFilter('f1');
 
-    assert.equal(db.getFilter('f1'), undefined);
-    // Listing still exists but filter_id is NULL
+    // Filter still exists but is archived
+    const filter = db.getFilter('f1');
+    assert.ok(filter);
+    assert.equal(filter.archived, 1);
+    // Not returned by getFilters (excludes archived)
+    assert.equal(db.getFilters().length, 0);
+    // Listings keep their filter_id, but pending ones are cleared from queue
     const listings = db.db.prepare('SELECT * FROM listings').all();
     assert.equal(listings.length, 1);
-    assert.equal(listings[0].filter_id, null);
+    assert.equal(listings[0].filter_id, 'f1');
+    assert.equal(listings[0].status, 'skipped');
     db.close();
   });
 

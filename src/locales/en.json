@@ -34,7 +34,7 @@
   "settings": {
     "persona": "Persona",
     "messageTemplate": "Message Template",
-    "timing": "Timing",
+    "application": "Application",
     "captcha": "2captcha API Key",
     "support": "Support Bundle",
     "danger": "Danger Zone",
@@ -51,6 +51,7 @@
     "speedSlowDesc": "Maximum delays, safest",
     "pollInterval": "Poll interval (min)",
     "pollIntervalDesc": "How often to check for new listings",
+    "excludeTauschwohnungen": "Exclude Tauschwohnungen",
     "placeholder": {
       "apiKey": "Enter your 2captcha API key",
       "email": "your@email.com",
@@ -319,6 +320,10 @@
     "processed": "Processed",
     "sent": "Sent",
     "failed": "Failed",
+    "markAppliedPlaceholder": "Paste exposé URL…",
+    "markAppliedLabel": "Skip exposés you've already applied to manually:",
+    "markedApplied": "✓ Already applied",
+    "markAppliedInvalid": "Invalid exposé URL",
     "searchPlaceholder": "e.g. Berlin 2-room",
     "addFailed": "Could not add search",
     "addSearchButton": "Add search",
@@ -345,8 +350,12 @@
     "pending": "pending",
     "pollNow": "Poll now",
     "pause": "⏸ Pause",
+    "pauseTitle": "Pause",
     "resume": "▶ Resume",
+    "resumeTitle": "Resume",
     "confirm": "Confirm?",
+    "confirmTitle": "Confirm",
+    "removeTitle": "Remove",
     "editFilter": "Edit filter name",
     "rename": "Rename",
     "remove": "Remove",
@@ -366,7 +375,11 @@
     "selectAll": "Select all",
     "clearSelection": "Clear",
     "selected": "selected",
-    "anyMoment": "any moment"
+    "anyMoment": "any moment",
+    "clearQueue": "Clear queue",
+    "clearQueueFailed": "Could not clear queue.",
+    "queueCleared": "Queue cleared",
+    "openInBrowser": "Open in browser"
   },
   "errors": {
     "backendUnavailable": {

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS filters (
   web_url TEXT NOT NULL,
   mobile_params TEXT NOT NULL,
   enabled INTEGER DEFAULT 1,
+  archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   last_polled_at TEXT,
   total_seen INTEGER DEFAULT 0
@@ -55,6 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_listings_status ON listings(status);
 CREATE INDEX IF NOT EXISTS idx_listings_filter ON listings(filter_id);
 CREATE INDEX IF NOT EXISTS idx_listings_discovered ON listings(filter_id, discovered_at);
 CREATE INDEX IF NOT EXISTS idx_results_timestamp ON results(timestamp);
+CREATE INDEX IF NOT EXISTS idx_listings_expose_id ON listings(expose_id);
 `;
 
 export class HomelanderDB {
@@ -79,6 +81,14 @@ export class HomelanderDB {
     }
 
     if (!version || version.version < SCHEMA_VERSION) {
+      // v2 → v3: add archived column (safe to run on new DBs too — no-op)
+      if (version && version.version < 3) {
+        try {
+          this.db.exec('ALTER TABLE filters ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+        } catch {
+          // Column already exists (first-run via SCHEMA) — ignore
+        }
+      }
       this.db.exec(SCHEMA);
       this.db.prepare('INSERT OR REPLACE INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     }
@@ -108,6 +118,7 @@ export class HomelanderDB {
           OR (status = 'seen' AND date(discovered_at, 'localtime') = date('now', 'localtime'))
         )) as today_seen
       FROM filters f
+      WHERE f.archived = 0
       ORDER BY f.created_at DESC, f.rowid DESC
     `).all();
   }
@@ -117,9 +128,14 @@ export class HomelanderDB {
   }
 
   updateFilter(id, patch) {
+    const ALLOWED = new Set([
+      'name', 'web_url', 'mobile_params', 'enabled',
+      'last_polled_at', 'total_seen',
+    ]);
     const sets = [];
     const vals = [];
     for (const [k, v] of Object.entries(patch)) {
+      if (!ALLOWED.has(k)) continue;
       sets.push(`${k} = ?`);
       // better-sqlite3 rejects JS booleans — convert to 0/1
       vals.push(typeof v === 'boolean' ? (v ? 1 : 0) : v);
@@ -130,9 +146,10 @@ export class HomelanderDB {
   }
 
   removeFilter(id) {
-    // Null out references first so FK constraint doesn't block the delete
-    this.db.prepare('UPDATE listings SET filter_id = NULL WHERE filter_id = ?').run(id);
-    this.db.prepare('DELETE FROM filters WHERE id = ?').run(id);
+    // Soft-delete: archive the filter, clear pending queue so aggregate
+    // stats reflect only active searches. Processed listings stay for history.
+    this.db.prepare('UPDATE filters SET archived = 1 WHERE id = ?').run(id);
+    this.clearQueue(id);
   }
 
   // ── Listings ─────────────────────────────────────────────────
@@ -143,6 +160,12 @@ export class HomelanderDB {
 
   insertListing(listing) {
     const hash = HomelanderDB.hashListing(listing.expose_id, listing.price);
+    // Stubs use price 0, so their hash may differ from the later real listing.
+    // Guard by expose ID to ensure manually-applied listings stay skipped.
+    const manuallyApplied = this.db.prepare(`
+      SELECT 1 FROM listings WHERE expose_id = ? AND outcome = 'MANUAL' LIMIT 1
+    `).get(listing.expose_id);
+    if (manuallyApplied) return { changes: 0, skipped: true };
     try {
       return this.db.prepare(`
         INSERT INTO listings (hash, expose_id, title, price, size, rooms, address, image_url, filter_id, status)
@@ -163,10 +186,13 @@ export class HomelanderDB {
   /** Bulk insert — returns count of actually inserted listings. */
   insertListings(listings, filterId) {
     let inserted = 0;
-    for (const listing of listings) {
-      const result = this.insertListing({ ...listing, filter_id: filterId });
-      if (result.changes > 0) inserted++;
-    }
+    const txn = this.db.transaction(() => {
+      for (const listing of listings) {
+        const result = this.insertListing({ ...listing, filter_id: filterId });
+        if (result.changes > 0) inserted++;
+      }
+    });
+    txn();
     return inserted;
   }
 
@@ -181,16 +207,64 @@ export class HomelanderDB {
     return this.db.prepare(sql).all(...params);
   }
 
+  clearQueue(filterId) {
+    const info = this.db.prepare(
+      "UPDATE listings SET status = 'skipped', outcome = 'SKIPPED', detail = 'queue cleared' WHERE filter_id = ? AND status = 'seen'"
+    ).run(filterId);
+    return { cleared: info.changes };
+  }
+
+  isManuallyApplied(exposeId) {
+    return !!this.db.prepare(
+      "SELECT 1 FROM listings WHERE expose_id = ? AND outcome = 'MANUAL' LIMIT 1"
+    ).get(String(exposeId));
+  }
+
+  deleteByHash(hash) {
+    const txn = this.db.transaction(() => {
+      this.db.prepare('DELETE FROM listings WHERE hash = ?').run(hash);
+      this.db.prepare('DELETE FROM results WHERE listing_hash = ?').run(hash);
+    });
+    txn();
+  }
+
+  markAlreadyApplied(exposeId) {
+    const id = String(exposeId);
+    const found = !!this.db.prepare(
+      'SELECT 1 FROM listings WHERE expose_id = ? LIMIT 1'
+    ).get(id);
+
+    if (found) {
+      this.db.prepare(`
+        UPDATE listings
+        SET status = 'sent', outcome = 'MANUAL', detail = 'applied manually',
+          sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE expose_id = ? AND status != 'processing'
+      `).run(id);
+    } else {
+      const hash = HomelanderDB.hashListing(id, 0);
+      this.db.prepare(`
+        INSERT INTO listings (hash, expose_id, price, status, outcome, detail, sent_at)
+        VALUES (?, ?, 0, 'sent', 'MANUAL', 'applied manually', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      `).run(hash, id);
+    }
+
+    return { found, exposeId: id };
+  }
+
   markSent(hash, outcome, detail, failureReason = '') {
     const status = outcome === 'SENT' ? 'sent' : 'failed';
-    this.db.prepare(`
-      UPDATE listings SET status = ?, outcome = ?, sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), detail = ?, failure_reason = ?
-      WHERE hash = ?
-    `).run(status, outcome, detail || '', failureReason || '', hash);
+    const txn = this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE listings SET status = ?, outcome = ?, sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), detail = ?, failure_reason = ?
+        WHERE hash = ?
+      `).run(status, outcome, detail || '', failureReason || '', hash);
 
-    this.db.prepare(`
-      INSERT INTO results (listing_hash, outcome, detail) VALUES (?, ?, ?)
-    `).run(hash, outcome, detail || '');
+      this.db.prepare(`
+        INSERT INTO results (listing_hash, outcome, detail) VALUES (?, ?, ?)
+      `).run(hash, outcome, detail || '');
+    });
+    txn();
   }
 
   /** Reset a listing back to 'seen' so the apply loop picks it up again.
@@ -228,7 +302,7 @@ export class HomelanderDB {
   }
 
   getHistory(limit = 100, offset = 0, filterId = null, outcome = null) {
-    let sql = 'SELECT * FROM listings WHERE outcome IS NOT NULL';
+    let sql = "SELECT * FROM listings WHERE outcome IS NOT NULL AND outcome != 'MANUAL'";
     const params = [];
     if (filterId) {
       sql += ' AND filter_id = ?';
@@ -256,15 +330,15 @@ export class HomelanderDB {
   }
 
   getStats(filterId = null) {
-    const whereFilter = filterId ? ' WHERE filter_id = ?' : '';
+    const whereFilter = filterId ? ' WHERE filter_id = ?' : ' WHERE filter_id IS NOT NULL';
     const filterParam = filterId ? [filterId] : [];
 
     // Waterfall partition: sent + failed + deactivated + premium = total.
     // Each listing falls into exactly ONE bucket. Captcha is orthogonal.
     const row = this.db.prepare(`
       SELECT
-        COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') THEN 1 ELSE 0 END), 0) as total,
-        COALESCE(SUM(CASE WHEN status = 'sent' OR outcome = 'SENT' THEN 1 ELSE 0 END), 0) as sent,
+        COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') AND outcome != 'MANUAL' THEN 1 ELSE 0 END), 0) as total,
+        COALESCE(SUM(CASE WHEN (status = 'sent' OR outcome = 'SENT') AND outcome != 'MANUAL' THEN 1 ELSE 0 END), 0) as sent,
         COALESCE(SUM(CASE WHEN outcome = 'DEACTIVATED' THEN 1 ELSE 0 END), 0) as deactivated,
         COALESCE(SUM(CASE WHEN outcome = 'PREMIUM'
                            OR failure_reason LIKE '%premium%'
@@ -279,7 +353,7 @@ export class HomelanderDB {
                          THEN 1 ELSE 0 END), 0) as failed,
         COALESCE(SUM(CASE WHEN (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') THEN 1 ELSE 0 END), 0) as captcha,
         COALESCE(SUM(CASE WHEN status = 'seen' THEN 1 ELSE 0 END), 0) as seen_unapplied,
-        COALESCE(SUM(CASE WHEN status = 'sent' AND date(sent_at, 'localtime') = date('now', 'localtime') THEN 1 ELSE 0 END), 0) as today
+        COALESCE(SUM(CASE WHEN status = 'sent' AND outcome != 'MANUAL' AND date(sent_at, 'localtime') = date('now', 'localtime') THEN 1 ELSE 0 END), 0) as today
       FROM listings${whereFilter}
     `).get(...filterParam);
 
@@ -291,14 +365,14 @@ export class HomelanderDB {
   }
 
   getTodayStats(filterId = null) {
-    const whereFilter = filterId ? ' AND filter_id = ?' : '';
+    const whereFilter = filterId ? ' AND filter_id = ?' : ' AND filter_id IS NOT NULL';
     const filterParam = filterId ? [filterId] : [];
 
     // Same waterfall partition as getStats(), scoped to today by sent_at.
     const row = this.db.prepare(`
       SELECT
-        COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') THEN 1 ELSE 0 END), 0) as total,
-        COALESCE(SUM(CASE WHEN status = 'sent' OR outcome = 'SENT' THEN 1 ELSE 0 END), 0) as sent,
+        COALESCE(SUM(CASE WHEN status IN ('sent', 'failed') AND outcome != 'MANUAL' THEN 1 ELSE 0 END), 0) as total,
+        COALESCE(SUM(CASE WHEN (status = 'sent' OR outcome = 'SENT') AND outcome != 'MANUAL' THEN 1 ELSE 0 END), 0) as sent,
         COALESCE(SUM(CASE WHEN outcome = 'DEACTIVATED' THEN 1 ELSE 0 END), 0) as deactivated,
         COALESCE(SUM(CASE WHEN outcome = 'PREMIUM'
                            OR failure_reason LIKE '%premium%'
@@ -312,7 +386,7 @@ export class HomelanderDB {
                            AND detail NOT LIKE '%Suchen+%'
                          THEN 1 ELSE 0 END), 0) as failed,
         COALESCE(SUM(CASE WHEN (failure_reason LIKE '%captcha%' OR detail LIKE '%captcha%') THEN 1 ELSE 0 END), 0) as captcha,
-        COALESCE(SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END), 0) as today
+        COALESCE(SUM(CASE WHEN status = 'sent' AND outcome != 'MANUAL' THEN 1 ELSE 0 END), 0) as today
       FROM listings WHERE date(sent_at, 'localtime') = date('now', 'localtime')${whereFilter}
     `).get(...filterParam);
 
@@ -332,7 +406,7 @@ export class HomelanderDB {
     return this.db.prepare(`
       SELECT hash, expose_id, title, price, address, outcome, failure_reason, detail, sent_at, image_url
       FROM listings
-      WHERE outcome IS NOT NULL
+      WHERE outcome IS NOT NULL AND outcome != 'MANUAL'
       ORDER BY COALESCE(sent_at, discovered_at) DESC, rowid DESC
       LIMIT ?
     `).all(limit);
@@ -342,7 +416,7 @@ export class HomelanderDB {
     // Count how many consecutive FAIL/captcha results we have (most recent first)
     const rows = this.db.prepare(`
       SELECT outcome, failure_reason FROM listings
-      WHERE outcome IS NOT NULL
+      WHERE outcome IS NOT NULL AND outcome != 'MANUAL'
       ORDER BY COALESCE(sent_at, discovered_at) DESC, rowid DESC
       LIMIT 20
     `).all();

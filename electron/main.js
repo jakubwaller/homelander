@@ -472,6 +472,7 @@ function getDefaultConfig() {
     },
     polling: {
       interval_seconds: 600,
+      exclude_tauschwohnungen: true,
     },
     browser: {
       visibility: 'always_show',
@@ -963,9 +964,26 @@ function registerIpcHandlers() {
         for (let page = 1; page <= MAX_PAGES; page++) {
           const { listings, error } = await fetchListings(filter.web_url, page);
           if (error) break;
-          allFetched += listings.length;
-          const inserted = db().insertListings(listings, filter.id);
+          const filteredListings = (config.polling?.exclude_tauschwohnungen ?? true)
+            ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
+            : listings;
+          // Skip listings already marked as manually applied
+          const alreadyManualMain = new Set(
+            db().db.prepare(
+              `SELECT expose_id FROM listings WHERE outcome = 'MANUAL' AND filter_id = ?`
+            ).all(filter.id).map(r => r.expose_id)
+          );
+          const dedupedListings = filteredListings.filter(
+            (l) => !alreadyManualMain.has(String(l.expose_id))
+          );
+          allFetched += dedupedListings.length;
+          const firstPollLimit = 10;
+          const listingsToInsert = filter.last_polled_at
+            ? dedupedListings
+            : dedupedListings.slice(0, Math.max(0, firstPollLimit - allInserted));
+          const inserted = db().insertListings(listingsToInsert, filter.id);
           allInserted += inserted;
+          if (!filter.last_polled_at && allInserted >= firstPollLimit) break;
           if (listings.length < PAGE_SIZE) break;
           if (inserted === 0) break;
         }
@@ -994,6 +1012,19 @@ function registerIpcHandlers() {
       }
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:poll-now', err, { code: 'SEARCH_POLL_FAILED' }) };
+    }
+  });
+
+  ipcMain.handle('daemon:clear-queue', async (_event, filterId) => {
+    if (daemonProcess && daemonStatus !== 'stopped') {
+      daemonProcess.send({ type: 'clear_queue', filterId });
+      return { ok: true };
+    }
+    try {
+      const result = db().clearQueue(filterId);
+      return { ok: true, cleared: result.cleared };
+    } catch (err) {
+      return { ok: false, ...gracefulFailure('daemon:clear-queue', err, { code: 'DATABASE_ERROR', filterId }) };
     }
   });
 
@@ -1037,6 +1068,15 @@ function registerIpcHandlers() {
       return { filters, error: null };
     } catch (err) {
       return { filters: [], ...gracefulFailure('filters:list', err, { code: 'DATABASE_ERROR' }) };
+    }
+  });
+
+  ipcMain.handle('filters:get', async (_e, id) => {
+    try {
+      const filter = db().getFilter(id);
+      return { filter: filter || null, error: null };
+    } catch (err) {
+      return { filter: null, ...gracefulFailure('filters:get', err, { code: 'DATABASE_ERROR' }) };
     }
   });
 
@@ -1101,6 +1141,19 @@ function registerIpcHandlers() {
   });
 
   // Listings
+  ipcMain.handle('listings:mark-applied', async (_event, exposeUrl) => {
+    const match = typeof exposeUrl === 'string' ? exposeUrl.match(/expose\/(\d+)/) : null;
+    if (!match) return { ok: false, error: 'Invalid IS24 exposé URL' };
+
+    const exposeId = match[1];
+    try {
+      const result = db().markAlreadyApplied(exposeId);
+      return { ok: true, exposeId, wasNew: !result.found };
+    } catch (err) {
+      return { ok: false, ...gracefulFailure('listings:mark-applied', err, { code: 'DATABASE_ERROR', exposeId }) };
+    }
+  });
+
   ipcMain.handle('listings:history', async (_e, limit, offset, filterId, outcome) => {
     try {
             const listings = db().getHistory(limit || 100, offset || 0, filterId, outcome);
@@ -1169,6 +1222,7 @@ function registerIpcHandlers() {
       if (patch.message_template !== undefined) msg.message_template = config.message_template;
       if (patch.captcha) msg.captcha = config.captcha;
       if (patch.polling?.interval_seconds !== undefined) msg.poll_interval = config.polling.interval_seconds;
+      if (patch.polling?.exclude_tauschwohnungen !== undefined) msg.exclude_tauschwohnungen = config.polling.exclude_tauschwohnungen;
       if (patch.browser) msg.browser = config.browser;
 
       const personaChanged = patch.persona && Object.keys(patch.persona).length > 0;
