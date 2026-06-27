@@ -4,7 +4,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { IS24Contactor } from '../engine/is24-contactor.js';
+import { IS24Contactor, extractExposeIdsFromText } from '../engine/is24-contactor.js';
 
 /** Create a contactor with a mocked page. */
 function mockContactor() {
@@ -27,6 +27,21 @@ function evaluateSeq(...states) {
     return typeof s === 'function' ? s() : s;
   };
 }
+
+// ============================================================================
+// Nachrichten expose ID extraction tests
+// ============================================================================
+describe('extractExposeIdsFromText() — Nachrichten sync', () => {
+  it('extracts expose IDs from links, query params, and embedded page data', () => {
+    const ids = extractExposeIdsFromText(
+      'https://www.immobilienscout24.de/expose/123456789',
+      'https://www.immobilienscout24.de/somewhere?exposeId=987654321&foo=bar',
+      '{"exposeId":"112233445"}',
+      'duplicate https://www.immobilienscout24.de/expose/123456789',
+    ).sort();
+    assert.deepEqual(ids, ['112233445', '123456789', '987654321']);
+  });
+});
 
 // ============================================================================
 // _isBlocked() tests

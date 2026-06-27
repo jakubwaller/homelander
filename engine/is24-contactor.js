@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IS24_EXPOSE_URL = 'https://www.immobilienscout24.de/expose';
+const IS24_NACHRICHTEN_URL = 'https://www.immobilienscout24.de/meinkonto/nachrichten';
 const DEBUG_DIR = process.env.HOMELANDER_DEBUG_DIR || join(__dirname, '..', 'debug');
 const DEFAULT_WINDOW = { windowState: 'normal', left: 80, top: 60, width: 1200, height: 850 };
 
@@ -95,6 +96,24 @@ const SPEEDS = {
 function jitter(min, max) {
   if (process.env.HOMELANDER_TEST_FAST === '1') return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, min + Math.random() * (max - min)));
+}
+
+export function extractExposeIdsFromText(...values) {
+  const ids = new Set();
+  const patterns = [
+    /(?:^|[/?#&])expose\/(\d{5,})\b/gi,
+    /(?:^|[?&#])(exposeId|expose_id|expose)=(\d{5,})\b/gi,
+    /\bexpose(?:Id|ID)?["'\s:=]+(\d{5,})\b/gi,
+  ];
+  for (const value of values) {
+    const text = String(value || '');
+    for (const pattern of patterns) {
+      pattern.lastIndex = 0;
+      let match;
+      while ((match = pattern.exec(text))) ids.add(match[2] || match[1]);
+    }
+  }
+  return [...ids];
 }
 
 /** Deep-merge timing overrides onto a speed preset. */
@@ -567,6 +586,91 @@ export class IS24Contactor {
           .some((el) => /^\s*(Anmelden|Jetzt einloggen|Einloggen)\s*$/i.test(el.textContent || ''));
       });
     } catch { return false; }
+  }
+
+  /**
+   * Open IS24 Nachrichten and scrape expose IDs from already-sent messages.
+   * This pre-flight guard catches manual/out-of-band applications before the
+   * apply loop can send to the same exposé again.
+   */
+  async scrapeNachrichtenExposeIds() {
+    this.page = await this._ensurePage();
+    await this._navigate(IS24_NACHRICHTEN_URL, { timeout: 30000 });
+    await jitter(800, 1800);
+
+    if (await this._isBlocked()) {
+      return { ok: false, reason: 'PERIMETER_CAPTCHA (AWS WAF — solve in browser to continue)', exposeIds: [] };
+    }
+    if (await this._isNachrichtenLoggedOut()) {
+      return { ok: false, reason: 'SESSION_EXPIRED (IS24 login required — Nachrichten unavailable)', exposeIds: [] };
+    }
+
+    const exposeIds = new Set();
+    let pagesScanned = 0;
+    for (let pageNo = 0; pageNo < 20; pageNo++) {
+      pagesScanned++;
+      for (const id of await this._extractExposeIdsFromCurrentPage()) exposeIds.add(id);
+      const advanced = await this._advanceNachrichtenPage();
+      if (!advanced) break;
+      await jitter(500, 1200);
+      if (await this._isNachrichtenLoggedOut()) {
+        return { ok: false, reason: 'SESSION_EXPIRED (IS24 login required — Nachrichten unavailable)', exposeIds: [...exposeIds], pagesScanned };
+      }
+    }
+
+    return { ok: true, exposeIds: [...exposeIds], pagesScanned };
+  }
+
+  async _isNachrichtenLoggedOut() {
+    try {
+      const currentUrl = this.page.url();
+      if (currentUrl.includes('/login') || currentUrl.includes('/registrierung') || currentUrl.includes('sso.immobilienscout24')) return true;
+      return await this.page.evaluate(() => {
+        const text = document.body?.innerText || '';
+        const hasLoginText = /\b(Anmelden|Einloggen|Jetzt einloggen|Login)\b/i.test(text);
+        const hasInboxText = /(Nachrichten|Posteingang|Gesendet|Konversation|Kontaktanfrage|Bewerbung)/i.test(text);
+        const wrapper = document.querySelector('.sso-login');
+        const headerText = wrapper?.innerText || '';
+        if (/\bAnmelden\b/i.test(headerText) && !/angemeldet\s+als/i.test(headerText)) return true;
+        return hasLoginText && !hasInboxText;
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  async _extractExposeIdsFromCurrentPage() {
+    try {
+      const snapshot = await this.page.evaluate(() => ({
+        hrefs: Array.from(document.querySelectorAll('a[href]')).map((a) => a.href),
+        text: document.body?.innerText || '',
+        html: document.documentElement?.innerHTML || '',
+      }));
+      return extractExposeIdsFromText(...(snapshot.hrefs || []), snapshot.text, snapshot.html);
+    } catch {
+      return [];
+    }
+  }
+
+  async _advanceNachrichtenPage() {
+    try {
+      return await this.page.evaluate(() => {
+        const visible = (el) => {
+          if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        };
+        const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter(visible);
+        const next = candidates.find((el) => /^(Mehr anzeigen|Weitere Nachrichten|Ältere Nachrichten|Mehr laden|Weiter)$/i.test((el.textContent || '').trim()));
+        if (!next) return false;
+        next.click();
+        return true;
+      });
+    } catch {
+      return false;
+    }
   }
 
   /** Check whether the IS24 header on the current page indicates the user is logged in. */

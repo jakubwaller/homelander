@@ -219,6 +219,63 @@ let cdpFailCount = 0;
 // Mutable config — all fields hot-reload without restart
 let currentConfig = null;
 
+// Nachrichten pre-flight runs before apply work on every daemon run/resume.
+let nachrichtenSyncDone = false;
+let nachrichtenSyncInFlight = false;
+
+async function ensureNachrichtenSync(db) {
+  if (nachrichtenSyncDone) return true;
+  if (nachrichtenSyncInFlight) return false;
+  if (!contactor || !contactor.browser || !contactor.browser.isConnected()) return false;
+
+  nachrichtenSyncInFlight = true;
+  try {
+    log('Nachrichten pre-flight: checking already-sent applications...');
+    const result = await contactor.scrapeNachrichtenExposeIds();
+    const ids = Array.isArray(result.exposeIds) ? result.exposeIds : [];
+    let changed = 0;
+    for (const exposeId of ids) {
+      const mark = db.markAlreadyApplied(exposeId);
+      if (mark.changed || !mark.found) changed++;
+    }
+
+    if (!result.ok) {
+      const reason = result.reason || 'Nachrichten sync failed';
+      const reasonLower = reason.toLowerCase();
+      if (reasonLower.includes('session_expired')) {
+        log('*** IS24 SESSION EXPIRED — Nachrichten pre-flight requires login ***');
+        emit({ type: 'session_expired', reason });
+        applyPaused = true;
+        pauseResumeTime = null;
+        writePauseFlag('session_expired');
+        return false;
+      }
+      if (reasonLower.includes('perimeter_captcha')) {
+        log('*** AWS WAF PERIMETER CAPTCHA — Nachrichten pre-flight paused ***');
+        emit({ type: 'perimeter_captcha', reason });
+        applyPaused = true;
+        pauseResumeTime = null;
+        writePauseFlag('perimeter_captcha');
+        try { await contactor.page?.bringToFront(); } catch (err) { swallow(err, 'nachrichten/perimeter-captcha-bring-to-front'); }
+        return false;
+      }
+      log(`Nachrichten pre-flight warning: ${reason}`);
+    }
+
+    nachrichtenSyncDone = true;
+    log(`Nachrichten pre-flight complete — ${ids.length} expose IDs seen, ${changed} newly protected`);
+    emit({ type: 'nachrichten_sync_complete', seen: ids.length, protected: changed, pages: result.pagesScanned || 0 });
+    return true;
+  } catch (err) {
+    log(`Nachrichten pre-flight error: ${err.message}`);
+    emit({ type: 'nachrichten_sync_error', error: err.message });
+    // Fail closed: do not apply until a later loop/resume can complete the sync.
+    return false;
+  } finally {
+    nachrichtenSyncInFlight = false;
+  }
+}
+
 // ── Apply one listing ──────────────────────────────────────────
 
 async function applyOne(listing, filterId, db) {
@@ -484,6 +541,14 @@ async function applyLoop(db) {
           continue;
         }
       }
+    }
+
+    // Block applying until the Nachrichten pre-flight has protected all
+    // already-sent expose IDs for this run/resume. Polling may continue, but
+    // the apply loop fails closed to avoid duplicate applications.
+    if (!(await ensureNachrichtenSync(db))) {
+      await sleep(2000);
+      continue;
     }
 
     // ── Gather pending listings (round‑robin across filters) ─
@@ -811,6 +876,7 @@ function setupIpc(db) {
       log('Apply resumed by user');
       applyPaused = false;
       consecutiveCaptchas = 0;
+      nachrichtenSyncDone = false;
       removePauseFlag();
       emit({ type: 'resumed' });
     }
