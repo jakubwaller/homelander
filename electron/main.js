@@ -75,7 +75,7 @@ const APP_ICON_PNG = process.resourcesPath
 
 let mainWindow = null;
 let daemonProcess = null;
-let daemonStatus = 'stopped'; // stopped | running | paused | restarting | session_expired
+let daemonStatus = 'stopped'; // stopped | running | paused | restarting | session_expired | perimeter_captcha
 let daemonStartedAt = 0;      // timestamp of last startDaemon() call
 let _powerSaveBlockerId = null; // macOS App Nap prevention
 let latestNextPollAt = null;  // last future next_poll_at emitted by daemon poll loop
@@ -662,7 +662,7 @@ function daemonAlive() {
 function effectiveDaemonStatus() {
   if (daemonStopping) return 'stopped';
   if (!daemonAlive()) return 'stopped';
-  if (daemonStatus === 'paused' || daemonStatus === 'session_expired' || daemonStatus === 'restarting') return daemonStatus;
+  if (daemonStatus === 'paused' || daemonStatus === 'session_expired' || daemonStatus === 'perimeter_captcha' || daemonStatus === 'restarting') return daemonStatus;
   return 'running';
 }
 
@@ -946,70 +946,58 @@ function registerIpcHandlers() {
 
   ipcMain.handle('daemon:poll-now', async (_event, filterId) => {
     try {
-            const { fetchListings } = await import('../engine/url-translator.js');
-      try {
-        const filter = db().getFilter(filterId);
-        if (!filter) return { ok: false, error: 'Suche nicht gefunden' };
-        if (!filter.enabled) return { ok: false, error: 'Suche ist pausiert' };
+      const filter = db().getFilter(filterId);
+      if (!filter) return { ok: false, error: 'Suche nicht gefunden' };
+      if (!filter.enabled || filter.archived) return { ok: false, error: 'Suche ist pausiert' };
 
-        // A manual card poll is intentionally scoped to this one search. Push the
-        // daemon's automatic all-search poll deadline away before fetching, so an
-        // old sleeping deadline does not wake up and poll every enabled search
-        // right after the user clicked one card.
+      // If the daemon is alive, it is the single writer for poll operations.
+      // This avoids racing Electron main against the daemon poll loop.
+      if (daemonProcess && daemonProcess.connected && daemonStatus !== 'stopped') {
         resetDaemonPollSchedule('manual_poll_started');
-
-        // Multi-page: fetch up to 5 pages, stop when page < 20 or 0 new
-        const MAX_PAGES = 5, PAGE_SIZE = 20;
-        let allInserted = 0, allFetched = 0;
-        for (let page = 1; page <= MAX_PAGES; page++) {
-          const { listings, error } = await fetchListings(filter.web_url, page);
-          if (error) break;
-          const filteredListings = (config.polling?.exclude_tauschwohnungen ?? true)
-            ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
-            : listings;
-          // Skip listings already marked as manually applied
-          const alreadyManualMain = new Set(
-            db().db.prepare(
-              `SELECT expose_id FROM listings WHERE outcome = 'MANUAL' AND filter_id = ?`
-            ).all(filter.id).map(r => r.expose_id)
-          );
-          const dedupedListings = filteredListings.filter(
-            (l) => !alreadyManualMain.has(String(l.expose_id))
-          );
-          allFetched += dedupedListings.length;
-          const firstPollLimit = 10;
-          const listingsToInsert = filter.last_polled_at
-            ? dedupedListings
-            : dedupedListings.slice(0, Math.max(0, firstPollLimit - allInserted));
-          const inserted = db().insertListings(listingsToInsert, filter.id);
-          allInserted += inserted;
-          if (!filter.last_polled_at && allInserted >= firstPollLimit) break;
-          if (listings.length < PAGE_SIZE) break;
-          if (inserted === 0) break;
-        }
-
-        db().updateFilter(filter.id, {
-          last_polled_at: new Date().toISOString(),
-          total_seen: (filter.total_seen || 0) + allInserted,
-        });
-
-        const nextPollAt = setNextPollFromNow('manual_poll');
-        resetDaemonPollSchedule('manual_poll_finished');
-        const stats = { ...db().getTodayStats(), nextPollAt, next_poll_at: nextPollAt };
-        broadcastStats(stats);
-        if (mainWindow) {
-          if (allInserted > 0) {
-            mainWindow.webContents.send('homelander:event', {
-              type: 'poll_complete',
-              filter_id: filter.id,
-              inserted: allInserted,
-            });
-          }
-        }
-
-        return { ok: true, inserted: allInserted, fetched: allFetched };
-      } finally {
+        daemonProcess.send({ type: 'poll_now', filterId });
+        return { ok: true, pending: true };
       }
+
+      const { fetchListings } = await import('../engine/url-translator.js');
+      const MAX_PAGES = 5, PAGE_SIZE = 20;
+      let allInserted = 0, allFetched = 0;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const { listings, error } = await fetchListings(filter.web_url, page);
+        if (error) break;
+        const filteredListings = (config.polling?.exclude_tauschwohnungen ?? true)
+          ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
+          : listings;
+        const dedupedListings = filteredListings.filter(
+          (l) => !db().isManuallyApplied(l.expose_id)
+        );
+        allFetched += dedupedListings.length;
+        const firstPollLimit = 10;
+        const isFirstPoll = !filter.first_poll_done;
+        const listingsToInsert = isFirstPoll
+          ? dedupedListings.slice(0, Math.max(0, firstPollLimit - allInserted))
+          : dedupedListings;
+        const inserted = db().insertListings(listingsToInsert, filter.id);
+        allInserted += inserted;
+        if (isFirstPoll && allInserted >= firstPollLimit) break;
+        if (listings.length < PAGE_SIZE) break;
+        if (inserted === 0) break;
+      }
+
+      db().incrementFilterSeen(filter.id, allInserted);
+
+      const nextPollAt = setNextPollFromNow('manual_poll');
+      resetDaemonPollSchedule('manual_poll_finished');
+      const stats = { ...db().getTodayStats(), nextPollAt, next_poll_at: nextPollAt };
+      broadcastStats(stats);
+      if (mainWindow && allInserted > 0) {
+        mainWindow.webContents.send('homelander:event', {
+          type: 'poll_complete',
+          filter_id: filter.id,
+          inserted: allInserted,
+        });
+      }
+
+      return { ok: true, inserted: allInserted, fetched: allFetched };
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:poll-now', err, { code: 'SEARCH_POLL_FAILED' }) };
     }
@@ -1032,14 +1020,14 @@ function registerIpcHandlers() {
   ipcMain.handle('daemon:retry-listing', async (_event, exposeId) => {
     if (daemonProcess && daemonProcess.connected) {
       daemonProcess.send({ type: 'retry_listing', exposeId });
-      return { ok: true };
+      return { ok: true, pending: true };
     }
     // Fallback: direct DB access when daemon not running
     try {
             try {
         const result = db().retryListing(exposeId);
         if (result.error) return { ok: false, ...gracefulFailure('daemon:retry-listing', new Error(result.error), { code: 'LISTING_RETRY_FAILED', exposeId }) };
-        return { ok: true, error: null };
+        return { ok: true, queued: !result.already_seen, error: null };
       } finally { }
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:retry-listing', err, { code: 'LISTING_RETRY_FAILED', exposeId }) };

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -22,7 +22,13 @@ CREATE TABLE IF NOT EXISTS filters (
   archived INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   last_polled_at TEXT,
-  total_seen INTEGER DEFAULT 0
+  total_seen INTEGER DEFAULT 0,
+  first_poll_done INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS manual_skips (
+  expose_id TEXT PRIMARY KEY,
+  created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS listings (
@@ -66,6 +72,7 @@ export class HomelanderDB {
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
+    this.db.pragma('busy_timeout = 5000');
     this.db.pragma('foreign_keys = ON');
     this._migrate();
   }
@@ -89,8 +96,28 @@ export class HomelanderDB {
           // Column already exists (first-run via SCHEMA) — ignore
         }
       }
+      if (version && version.version < 4) {
+        try {
+          this.db.exec('ALTER TABLE filters ADD COLUMN first_poll_done INTEGER NOT NULL DEFAULT 0');
+        } catch {
+          // Column already exists (first-run via SCHEMA) — ignore
+        }
+      }
       this.db.exec(SCHEMA);
-      this.db.prepare('INSERT OR REPLACE INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+      if (version && version.version < 4) {
+        this.db.exec(`
+          UPDATE filters
+          SET first_poll_done = 1
+          WHERE last_polled_at IS NOT NULL AND last_polled_at != '';
+
+          INSERT OR IGNORE INTO manual_skips (expose_id)
+          SELECT DISTINCT expose_id
+          FROM listings
+          WHERE outcome = 'MANUAL' AND expose_id IS NOT NULL AND expose_id != '';
+        `);
+      }
+      this.db.exec('DELETE FROM schema_version');
+      this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
     }
   }
 
@@ -111,12 +138,18 @@ export class HomelanderDB {
     return this.db.prepare(`
       SELECT f.*,
         (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'seen') as new_count,
-        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'sent') as sent_count,
-        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND date(sent_at, 'localtime') = date('now', 'localtime')) as processed_count,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'sent' AND outcome != 'MANUAL') as sent_count,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND outcome != 'MANUAL' AND date(sent_at, 'localtime') = date('now', 'localtime')) as processed_count,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status IN ('sent', 'failed') AND outcome != 'MANUAL') as processed_all_time,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND status = 'seen' AND date(discovered_at, 'localtime') = date('now', 'localtime')) as today_pending,
         (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND (
-          (status IN ('sent', 'failed') AND date(sent_at, 'localtime') = date('now', 'localtime'))
+          (status IN ('sent', 'failed') AND outcome != 'MANUAL' AND date(sent_at, 'localtime') = date('now', 'localtime'))
           OR (status = 'seen' AND date(discovered_at, 'localtime') = date('now', 'localtime'))
-        )) as today_seen
+        )) as today_seen,
+        (SELECT COUNT(*) FROM listings WHERE filter_id = f.id AND (
+          (status IN ('sent', 'failed') AND outcome != 'MANUAL' AND date(sent_at, 'localtime') = date('now', 'localtime'))
+          OR (status = 'seen' AND date(discovered_at, 'localtime') = date('now', 'localtime'))
+        )) as today_total
       FROM filters f
       WHERE f.archived = 0
       ORDER BY f.created_at DESC, f.rowid DESC
@@ -130,7 +163,7 @@ export class HomelanderDB {
   updateFilter(id, patch) {
     const ALLOWED = new Set([
       'name', 'web_url', 'mobile_params', 'enabled',
-      'last_polled_at', 'total_seen',
+      'last_polled_at', 'total_seen', 'first_poll_done',
     ]);
     const sets = [];
     const vals = [];
@@ -143,6 +176,16 @@ export class HomelanderDB {
     if (sets.length === 0) return;
     vals.push(id);
     this.db.prepare(`UPDATE filters SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  incrementFilterSeen(id, delta) {
+    this.db.prepare(`
+      UPDATE filters
+      SET last_polled_at = ?,
+          total_seen = COALESCE(total_seen, 0) + ?,
+          first_poll_done = 1
+      WHERE id = ?
+    `).run(new Date().toISOString(), delta || 0, id);
   }
 
   removeFilter(id) {
@@ -160,11 +203,11 @@ export class HomelanderDB {
 
   insertListing(listing) {
     const hash = HomelanderDB.hashListing(listing.expose_id, listing.price);
-    // Stubs use price 0, so their hash may differ from the later real listing.
-    // Guard by expose ID to ensure manually-applied listings stay skipped.
+    // Manual skips are tracked separately from history so users can block
+    // future auto-apply without rewriting real SENT/FAIL/PREMIUM outcomes.
     const manuallyApplied = this.db.prepare(`
-      SELECT 1 FROM listings WHERE expose_id = ? AND outcome = 'MANUAL' LIMIT 1
-    `).get(listing.expose_id);
+      SELECT 1 FROM manual_skips WHERE expose_id = ? LIMIT 1
+    `).get(String(listing.expose_id));
     if (manuallyApplied) return { changes: 0, skipped: true };
     try {
       return this.db.prepare(`
@@ -216,7 +259,7 @@ export class HomelanderDB {
 
   isManuallyApplied(exposeId) {
     return !!this.db.prepare(
-      "SELECT 1 FROM listings WHERE expose_id = ? AND outcome = 'MANUAL' LIMIT 1"
+      "SELECT 1 FROM manual_skips WHERE expose_id = ? LIMIT 1"
     ).get(String(exposeId));
   }
 
@@ -230,26 +273,31 @@ export class HomelanderDB {
 
   markAlreadyApplied(exposeId) {
     const id = String(exposeId);
-    const found = !!this.db.prepare(
-      'SELECT 1 FROM listings WHERE expose_id = ? LIMIT 1'
+    const existing = this.db.prepare(
+      'SELECT hash, status, outcome FROM listings WHERE expose_id = ? ORDER BY rowid DESC LIMIT 1'
     ).get(id);
 
-    if (found) {
+    const txn = this.db.transaction(() => {
+      this.db.prepare('INSERT OR IGNORE INTO manual_skips (expose_id) VALUES (?)').run(id);
+      // Only remove pending queue rows from automation. Do not rewrite real
+      // history rows (SENT/FAIL/PREMIUM/DEACTIVATED), otherwise stats/history lie.
       this.db.prepare(`
         UPDATE listings
         SET status = 'sent', outcome = 'MANUAL', detail = 'applied manually',
-          sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE expose_id = ? AND status != 'processing'
+          sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), failure_reason = NULL
+        WHERE expose_id = ? AND status = 'seen'
       `).run(id);
-    } else {
-      const hash = HomelanderDB.hashListing(id, 0);
-      this.db.prepare(`
-        INSERT INTO listings (hash, expose_id, price, status, outcome, detail, sent_at)
-        VALUES (?, ?, 0, 'sent', 'MANUAL', 'applied manually', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-      `).run(hash, id);
-    }
+    });
+    txn();
 
-    return { found, exposeId: id };
+    const row = this.db.prepare('SELECT hash, status, outcome FROM listings WHERE expose_id = ? ORDER BY rowid DESC LIMIT 1').get(id);
+    return {
+      found: !!existing,
+      exposeId: id,
+      changed: row && row.outcome === 'MANUAL' ? 1 : 0,
+      processing: existing?.status === 'processing',
+      skipped: true,
+    };
   }
 
   markSent(hash, outcome, detail, failureReason = '') {

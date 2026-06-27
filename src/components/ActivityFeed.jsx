@@ -129,9 +129,14 @@ export default function ActivityFeed() {
     if (!window.homelander) return;
     setRetrying(prev => new Set(prev).add(exposeId));
     try {
-      await window.homelander.retryListing(exposeId);
-      // Show queued feedback immediately (daemon also confirms via event)
-      window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId } }));
+      const result = await window.homelander.retryListing(exposeId);
+      if (!result?.ok) {
+        throw new Error(result?.error || t('history.retryFailed', 'Retry failed'));
+      }
+      if (result.queued) {
+        window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId } }));
+      }
+      // Running daemon confirms asynchronously via retry_queued event.
     } catch (err) { swallow(err, 'renderer/retry-queue-event'); }
     setTimeout(() => setRetrying(prev => {
       const next = new Set(prev);

@@ -6,6 +6,10 @@
 
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import Database from 'better-sqlite3';
 import { HomelanderDB } from '../engine/db.js';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +62,7 @@ describe('HomelanderDB constructor', () => {
       .all()
       .map((t) => t.name)
       .sort();
-    assert.deepEqual(tables, ['filters', 'listings', 'results', 'schema_version']);
+    assert.deepEqual(tables, ['filters', 'listings', 'manual_skips', 'results', 'schema_version']);
     db.close();
   });
 
@@ -84,8 +88,133 @@ describe('HomelanderDB constructor', () => {
   it('records schema version', () => {
     const db = freshDB();
     const row = db.db.prepare('SELECT version FROM schema_version').get();
-    assert.equal(row.version, 3);
+    assert.equal(row.version, 4);
     db.close();
+  });
+
+  it('migrates v3 filters with last_polled_at to first_poll_done', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'homelander-db-migration-'));
+    const file = join(dir, 'homelander.db');
+    try {
+      const old = new Database(file);
+      old.exec(`
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+        INSERT INTO schema_version (version) VALUES (3);
+        CREATE TABLE filters (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          web_url TEXT NOT NULL,
+          mobile_params TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          last_polled_at TEXT,
+          total_seen INTEGER DEFAULT 0
+        );
+        CREATE TABLE listings (
+          hash TEXT PRIMARY KEY,
+          expose_id TEXT NOT NULL,
+          title TEXT,
+          price INTEGER,
+          size REAL,
+          rooms REAL,
+          address TEXT,
+          image_url TEXT,
+          filter_id TEXT,
+          status TEXT NOT NULL DEFAULT 'seen',
+          discovered_at TEXT DEFAULT (datetime('now')),
+          sent_at TEXT,
+          outcome TEXT,
+          detail TEXT,
+          failure_reason TEXT DEFAULT '',
+          FOREIGN KEY(filter_id) REFERENCES filters(id) ON DELETE CASCADE
+        );
+        CREATE TABLE results (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          listing_hash TEXT NOT NULL,
+          filter_id TEXT,
+          outcome TEXT NOT NULL,
+          detail TEXT,
+          timestamp TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY(listing_hash) REFERENCES listings(hash) ON DELETE CASCADE
+        );
+        INSERT INTO filters (id, name, web_url, mobile_params, last_polled_at, total_seen)
+        VALUES ('old-polled', 'Old', 'https://example.com', '{}', '2026-01-01T00:00:00.000Z', 12);
+        INSERT INTO filters (id, name, web_url, mobile_params, last_polled_at, total_seen)
+        VALUES ('old-new', 'New', 'https://example.com', '{}', NULL, 0);
+      `);
+      old.close();
+
+      const db = new HomelanderDB(file);
+      assert.equal(db.getFilter('old-polled').first_poll_done, 1);
+      assert.equal(db.getFilter('old-new').first_poll_done, 0);
+      assert.equal(db.db.prepare('SELECT version FROM schema_version').get().version, 4);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates v3 MANUAL listing stubs into manual_skips', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'homelander-db-migration-'));
+    const file = join(dir, 'homelander.db');
+    try {
+      const old = new Database(file);
+      old.exec(`
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+        INSERT INTO schema_version (version) VALUES (3);
+        CREATE TABLE filters (
+          id TEXT PRIMARY KEY,
+          name TEXT,
+          web_url TEXT NOT NULL,
+          mobile_params TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          last_polled_at TEXT,
+          total_seen INTEGER DEFAULT 0
+        );
+        CREATE TABLE listings (
+          hash TEXT PRIMARY KEY,
+          expose_id TEXT NOT NULL,
+          title TEXT,
+          price INTEGER,
+          size REAL,
+          rooms REAL,
+          address TEXT,
+          image_url TEXT,
+          filter_id TEXT,
+          status TEXT NOT NULL DEFAULT 'seen',
+          discovered_at TEXT DEFAULT (datetime('now')),
+          sent_at TEXT,
+          outcome TEXT,
+          detail TEXT,
+          failure_reason TEXT DEFAULT '',
+          FOREIGN KEY(filter_id) REFERENCES filters(id) ON DELETE CASCADE
+        );
+        CREATE TABLE results (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          listing_hash TEXT NOT NULL,
+          filter_id TEXT,
+          outcome TEXT NOT NULL,
+          detail TEXT,
+          timestamp TEXT DEFAULT (datetime('now')),
+          FOREIGN KEY(listing_hash) REFERENCES listings(hash) ON DELETE CASCADE
+        );
+        INSERT INTO listings (hash, expose_id, price, status, outcome, detail)
+        VALUES ('h-manual', 'old-manual', 0, 'sent', 'MANUAL', 'applied manually');
+      `);
+      old.close();
+
+      const db = new HomelanderDB(file);
+      assert.equal(db.isManuallyApplied('old-manual'), true);
+      const insert = db.insertListing({ expose_id: 'old-manual', price: 1200, title: 'Should stay skipped', filter_id: 'f1' });
+      assert.equal(insert.changes, 0);
+      assert.equal(insert.skipped, true);
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -289,6 +418,15 @@ describe('updateFilter', () => {
     const saved = db.getFilter('f1');
     assert.equal(saved.last_polled_at, '2025-01-15T10:00:00');
   });
+
+  it('atomically increments total_seen and marks first poll done', () => {
+    db.incrementFilterSeen('f1', 3);
+    db.incrementFilterSeen('f1', 2);
+    const saved = db.getFilter('f1');
+    assert.equal(saved.total_seen, 5);
+    assert.equal(saved.first_poll_done, 1);
+    assert.ok(saved.last_polled_at);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -380,6 +518,18 @@ describe('insertListing', () => {
     const row = db.db.prepare('SELECT * FROM listings WHERE expose_id = ?').get('free');
     assert.equal(row.price, 0);
     assert.equal(row.status, 'seen');
+  });
+
+  it('skips future inserts for expose IDs in manual_skips', () => {
+    const mark = db.markAlreadyApplied('skip-future');
+    assert.equal(mark.found, false);
+    assert.equal(db.isManuallyApplied('skip-future'), true);
+
+    const result = db.insertListing({ expose_id: 'skip-future', price: 1200, title: 'Skip me', filter_id: 'f1' });
+    assert.equal(result.changes, 0);
+    assert.equal(result.skipped, true);
+    const row = db.db.prepare('SELECT * FROM listings WHERE expose_id = ?').get('skip-future');
+    assert.equal(row, undefined);
   });
 });
 
@@ -553,6 +703,38 @@ describe('markSent', () => {
     db.markSent(hash, 'FAIL', 'some detail');
     const row = db.db.prepare('SELECT * FROM listings WHERE hash = ?').get(hash);
     assert.equal(row.failure_reason, '');
+  });
+  it('does not rewrite processed history when marking an expose as already applied', () => {
+    const db = seededDB();
+    const hash = seedListing(db, { expose_id: 'manual-sent', price: 500 });
+    db.markSent(hash, 'SENT', 'modal ✓');
+
+    const result = db.markAlreadyApplied('manual-sent');
+    assert.equal(result.found, true);
+    assert.equal(result.skipped, true);
+
+    const row = db.db.prepare('SELECT status, outcome, detail FROM listings WHERE hash = ?').get(hash);
+    assert.equal(row.status, 'sent');
+    assert.equal(row.outcome, 'SENT');
+    assert.equal(row.detail, 'modal ✓');
+    assert.equal(db.isManuallyApplied('manual-sent'), true);
+    assert.equal(db.getHistory().some((l) => l.expose_id === 'manual-sent'), true);
+  });
+
+  it('marks only pending queue rows as MANUAL for skip without touching processed rows', () => {
+    const db = seededDB();
+    const hash = seedListing(db, { expose_id: 'manual-seen', price: 500 });
+
+    const result = db.markAlreadyApplied('manual-seen');
+    assert.equal(result.found, true);
+    assert.equal(result.changed, 1);
+
+    const row = db.db.prepare('SELECT status, outcome, detail FROM listings WHERE hash = ?').get(hash);
+    assert.equal(row.status, 'sent');
+    assert.equal(row.outcome, 'MANUAL');
+    assert.equal(row.detail, 'applied manually');
+    assert.deepEqual(db.getSeenListings('f1'), []);
+    assert.deepEqual(db.getHistory(), []);
   });
 });
 

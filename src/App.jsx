@@ -49,7 +49,7 @@ function AppInner() {
       if (!error) {
         setStats(normalizeStats(stats));
         if (recent) {
-          for (const item of recent) {
+          for (const item of [...recent].reverse()) {
             addActivity({
               outcome: item.outcome,
               exposeId: item.expose_id || item.exposeId,

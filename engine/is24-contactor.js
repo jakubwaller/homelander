@@ -284,7 +284,7 @@ export class IS24Contactor {
    * Navigate to an IS24 expose contact form, fill it, and submit.
    * Returns rich metadata for logging.
    */
-  async apply(exposeId, message, captchaApiKey, maxTabs = 5) {
+  async apply(exposeId, message, captchaApiKey, maxTabs = 5, options = {}) {
     const url = `${IS24_EXPOSE_URL}/${exposeId}#/basicContact/email`;
     const tStart = Date.now();
     const timing = {};
@@ -434,6 +434,14 @@ export class IS24Contactor {
         };
       }
 
+      if (await options.shouldAbort?.()) {
+        return {
+          success: false, reason: 'ABORTED (listing skipped or search disabled before submit)',
+          timing_ms: Date.now() - tStart, timing, captcha, form_state: 'aborted_before_submit',
+          fields_typed: fieldCount, field_retries: fieldRetries,
+        };
+      }
+
       await this._clickAbschicken();
 
       const tVerify = Date.now();
@@ -466,6 +474,13 @@ export class IS24Contactor {
           fillResult = await this._fillForm(message);
           fieldCount += fillResult.filled;
           fieldRetries += fillResult.retries;
+          if (await options.shouldAbort?.()) {
+            return {
+              success: false, reason: 'ABORTED (listing skipped or search disabled before retry submit)',
+              timing_ms: Date.now() - tStart, timing, captcha, form_state: 'aborted_before_retry_submit',
+              fields_typed: fieldCount, field_retries: fieldRetries,
+            };
+          }
           await this._clickAbschicken();
         } else {
           break;

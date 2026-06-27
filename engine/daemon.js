@@ -188,7 +188,7 @@ function removePauseFlag() {
 
 function filterIsStillEnabled(db, filterId) {
   const current = db.getFilter(filterId);
-  return !!current?.enabled;
+  return !!current?.enabled && !current?.archived;
 }
 
 // ── Config loading ─────────────────────────────────────────────
@@ -248,7 +248,8 @@ async function applyOne(listing, filterId, db) {
       listing.expose_id,
       message,
       currentConfig.captcha?.api_key || '',
-      currentConfig.browser?.max_tabs || 5
+      currentConfig.browser?.max_tabs || 5,
+      { shouldAbort: () => db.isManuallyApplied(listing.expose_id) || !filterIsStillEnabled(db, filterId) }
     );
 
     if (result.success) {
@@ -269,6 +270,17 @@ async function applyOne(listing, filterId, db) {
       });
     } else {
       const reason = result.reason || '';
+      if (reason.startsWith('ABORTED')) {
+        if (db.isManuallyApplied(listing.expose_id)) {
+          log(`  ◌ SKIPPED | ${listing.expose_id} | ${reason}`);
+          db.deleteByHash(listing.hash);
+        } else {
+          log(`  ◌ REQUEUED | ${listing.expose_id} | ${reason}`);
+          db.db.prepare("UPDATE listings SET status = 'seen' WHERE hash = ? AND status = 'processing'").run(listing.hash);
+        }
+        emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: new Date(nextPollDueAt).toISOString() });
+        return;
+      }
       const reasonLower = reason.toLowerCase();
       const isDeactivated = reasonLower.includes('deactivated');
       const isPremium = reasonLower.includes('premium') || reasonLower.includes('suchen+');
@@ -331,22 +343,31 @@ async function applyOne(listing, filterId, db) {
   } catch (err) {
     const errMsg = err?.message || String(err);
     log(`  ERROR | ${listing.expose_id} | ${errMsg}`);
+
+    // CDP/browser infrastructure failures before confirmed submit are transient.
+    // Put the listing back in the queue instead of burning it as a terminal FAIL.
+    const cdpFatal = /Target closed|Session closed|Protocol error|WebSocket is not open|Connection closed|Detached from target|Browser has been disconnected|timed out|protocolTimeout/i;
+    const isCdpFatal = cdpFatal.test(errMsg) || (contactor?.browser && !contactor.browser.isConnected());
+    if (isCdpFatal) {
+      log('  CDP connection lost — re-queueing listing and nulling contactor for reconnect');
+      db.db.prepare(`
+        UPDATE listings
+        SET status = 'seen', outcome = NULL, detail = NULL,
+          failure_reason = NULL, sent_at = NULL
+        WHERE hash = ? AND status = 'processing'
+      `).run(listing.hash);
+      contactor = null;
+      emit({
+        type: 'transient_apply_error',
+        exposeId: listing.expose_id,
+        title: listing.title,
+        detail: errMsg,
+      });
+      return;
+    }
+
     db.markSent(listing.hash, 'FAIL', `ERROR: ${errMsg}`, 'error');
     consecutiveCaptchas = 0;
-
-    // CDP-level errors mean the browser connection is toast — null the
-    // contactor so the next loop iteration forces a full reconnect. IS24
-    // form-fill errors (TypeError, timeout loading page) are left alone.
-    //
-    // "timed out" / "protocolTimeout" catches the macOS GPU compositor
-    // deadlock (zombie renderer): CDP commands queue forever while the
-    // WebSocket stays open, so we must null the contactor and let
-    // ensureCDPHealthy() kill + respawn Chrome.
-    const cdpFatal = /Target closed|Session closed|Protocol error|WebSocket is not open|Connection closed|Detached from target|Browser has been disconnected|timed out|protocolTimeout/i;
-    if (cdpFatal.test(errMsg) || (contactor?.browser && !contactor.browser.isConnected())) {
-      log('  CDP connection lost — nulling contactor for reconnect');
-      contactor = null;
-    }
 
     emit({
       type: 'listing',
@@ -541,6 +562,11 @@ async function applyLoop(db) {
           continue;
         }
       }
+      if (applyPaused || checkPauseFlag() || !filterIsStillEnabled(db, filter.id)) {
+        log(`Apply skipped after claim — filter paused/deleted: ${filter.name || filter.id}`);
+        db.db.prepare("UPDATE listings SET status = 'seen' WHERE hash = ? AND status = 'processing'").run(listing.hash);
+        continue;
+      }
       // Belt-and-suspenders: skip manually-applied listings even if they
       // slipped past the poll filter (retry, race, etc.)
       if (db.isManuallyApplied(listing.expose_id)) {
@@ -550,6 +576,7 @@ async function applyLoop(db) {
       }
       log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
       await applyOne(listing, filter.id, db);
+      emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: new Date(nextPollDueAt).toISOString() });
       didWork = true;
 
       // If CDP died inside applyOne (contactor nulled), break the filter
@@ -626,23 +653,19 @@ async function pollLoop(db) {
           const filteredListings = (currentConfig.polling?.exclude_tauschwohnungen ?? true)
             ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
             : listings;
-          // Skip listings already marked as manually applied
-          const alreadyManual = new Set(
-            db.db.prepare(
-              `SELECT expose_id FROM listings WHERE outcome = 'MANUAL' AND filter_id = ?`
-            ).all(filter.id).map(r => r.expose_id)
-          );
           const dedupedListings = filteredListings.filter(
-            (l) => !alreadyManual.has(String(l.expose_id))
+            (l) => !db.isManuallyApplied(l.expose_id)
           );
           filterFetched += dedupedListings.length;
           const firstPollLimit = 10;
-          const listingsToInsert = filter.last_polled_at
-            ? dedupedListings
-            : dedupedListings.slice(0, Math.max(0, firstPollLimit - filterNew));
+          const isFirstPoll = !filter.first_poll_done;
+          const listingsToInsert = isFirstPoll
+            ? dedupedListings.slice(0, Math.max(0, firstPollLimit - filterNew))
+            : dedupedListings;
+          if (!filterIsStillEnabled(db, filter.id)) break;
           const inserted = db.insertListings(listingsToInsert, filter.id);
           filterNew += inserted;
-          if (!filter.last_polled_at && filterNew >= firstPollLimit) break;
+          if (isFirstPoll && filterNew >= firstPollLimit) break;
           if (listings.length < PAGE_SIZE) break;
           if (inserted === 0) break;
         }
@@ -653,10 +676,7 @@ async function pollLoop(db) {
         }
 
         if (filterIsStillEnabled(db, filter.id)) {
-          db.updateFilter(filter.id, {
-            last_polled_at: new Date().toISOString(),
-            total_seen: (filter.total_seen || 0) + filterNew,
-          });
+          db.incrementFilterSeen(filter.id, filterNew);
         }
       } catch (err) {
         log(`Poll error [${filter.id}]: ${err.message}`);
@@ -689,7 +709,7 @@ function setupIpc(db) {
       try {
         const filter = db.getFilter(msg.filterId);
         if (!filter) { log(`Poll-now: filter ${msg.filterId} not found`); return; }
-        if (!filter.enabled) { log(`Poll-now skipped — filter paused/disabled: ${filter.name || filter.id}`); return; }
+        if (!filterIsStillEnabled(db, filter.id)) { log(`Poll-now skipped — filter paused/deleted: ${filter.name || filter.id}`); return; }
         log(`Manual poll for: ${filter.name || filter.id}`);
 
         const MAX_PAGES = 5, PAGE_SIZE = 20;
@@ -706,31 +726,26 @@ function setupIpc(db) {
           const filteredListings = (currentConfig.polling?.exclude_tauschwohnungen ?? true)
             ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
             : listings;
-          // Skip listings already marked as manually applied
-          const alreadyManualPn = new Set(
-            db.db.prepare(
-              `SELECT expose_id FROM listings WHERE outcome = 'MANUAL' AND filter_id = ?`
-            ).all(filter.id).map(r => r.expose_id)
-          );
           const dedupedPn = filteredListings.filter(
-            (l) => !alreadyManualPn.has(String(l.expose_id))
+            (l) => !db.isManuallyApplied(l.expose_id)
           );
           allFetched += dedupedPn.length;
           const firstPollLimit = 10;
-          const listingsToInsert = filter.last_polled_at
-            ? dedupedPn
-            : dedupedPn.slice(0, Math.max(0, firstPollLimit - allInserted));
+          const isFirstPoll = !filter.first_poll_done;
+          const listingsToInsert = isFirstPoll
+            ? dedupedPn.slice(0, Math.max(0, firstPollLimit - allInserted))
+            : dedupedPn;
+          if (!filterIsStillEnabled(db, filter.id)) break;
           const inserted = db.insertListings(listingsToInsert, filter.id);
           allInserted += inserted;
-          if (!filter.last_polled_at && allInserted >= firstPollLimit) break;
+          if (isFirstPoll && allInserted >= firstPollLimit) break;
           if (listings.length < PAGE_SIZE) break;
           if (inserted === 0) break;
         }
         if (allInserted > 0) log(`  ${filter.name || filter.id}: ${allInserted} new listings (${allFetched} fetched across pages)`);
-        db.updateFilter(filter.id, {
-          last_polled_at: new Date().toISOString(),
-          total_seen: (filter.total_seen || 0) + allInserted,
-        });
+        if (filterIsStillEnabled(db, filter.id)) {
+          db.incrementFilterSeen(filter.id, allInserted);
+        }
         const nextPollAt = resetNextPollDue();
         emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
         if (allInserted > 0) {
@@ -888,12 +903,8 @@ async function main() {
   ).run().changes;
   if (staleCount > 0) log(`Reset ${staleCount} stale processing listing(s) to seen`);
 
-  // Reset first-poll cap for all filters — each app launch gets a fresh
-  // first poll so returning filters don't backfill their entire history.
-  const resetFilters = db.db.prepare(
-    "UPDATE filters SET last_polled_at = NULL"
-  ).run().changes;
-  if (resetFilters > 0) log(`Reset first-poll cap for ${resetFilters} filter(s)`);
+  // First-poll state is persisted per filter. Do not reset it on daemon
+  // startup; otherwise a crash/restart repeatedly reapplies the startup cap.
 
   // Connect to Chrome
   try {

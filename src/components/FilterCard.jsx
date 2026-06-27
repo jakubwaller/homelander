@@ -38,6 +38,8 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
       const result = await (onPollNow ? onPollNow(filter.id) : window.homelander.pollNow(filter.id));
       if (result?.error) {
         setPollMessage({ type: 'error', text: result.error });
+      } else if (result?.pending) {
+        setPollMessage({ type: 'muted', text: t('search.pollStarted', 'Prüfung gestartet…') });
       } else if ((result?.inserted || 0) > 0) {
         setPollMessage({ type: 'success', text: t('search.pollAdded', '{{count}} neue Inserate gefunden.').replace('{{count}}', result.inserted) });
       } else {
@@ -84,7 +86,8 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
 
           {/* Stats row */}
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{(filter.today_seen ?? filter.total_seen) || 0}</strong></span>
+            <span>{t('search.today', 'Heute')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
+            <span>{t('search.total', 'Gesamt')} <strong style={{ color: 'var(--text-secondary)' }}>{filter.processed_all_time || 0}/{filter.total_seen || 0}</strong></span>
             {filter.new_count > 0 && (
               <span className="badge badge-accent">+{filter.new_count} {t('search.pending', 'pending')}</span>
             )}
