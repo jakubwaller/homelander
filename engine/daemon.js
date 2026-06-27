@@ -49,10 +49,6 @@ const DAEMON_LOG = join(dirname(DB_PATH), 'daemon.log');
 let pollIntervalSec = parseInt(args['poll-interval'], 10);
 let nextPollDueAt = 0; // ms timestamp; reset by settings save and manual poll
 
-// Page lock — prevents Nachrichten scraper from stealing the CDP page
-// while the apply loop is filling a form.
-let pageTaskRunning = false;
-
 // Elevate OS scheduling priority so the daemon's event loop stays responsive
 // even when the parent Electron window is occluded or on another desktop.
 // Windows: SetPriorityClass(ABOVE_NORMAL) — prevents EcoQoS starvation.
@@ -365,68 +361,6 @@ async function applyOne(listing, filterId, db) {
   }
 }
 
-// ── Nachrichten sync: scrape sent-message listing IDs to skip already-applied ─
-
-/** Runs once per daemon startup (after a delay), scraping the user's IS24
- *  "Nachrichten" page for expose IDs of listings they already contacted.
- *  Inserts MANUAL exclusion stubs so the apply loop never touches them. */
-async function syncAlreadyAppliedFromSentMessages(db) {
-  if (!contactor) {
-    log('Nachrichten sync skipped: no CDP connection');
-    return;
-  }
-
-  // Don't steal the page while the apply loop is filling a form.
-  if (pageTaskRunning) {
-    log('Nachrichten sync skipped: page busy (apply loop active)');
-    return;
-  }
-
-  pageTaskRunning = true;
-  try {
-    log('Nachrichten sync: scraping sent messages...');
-
-    const result = await contactor.scrapeSentMessageExposeIds({
-      maxPages: 10,
-      delayMs: 1500,
-      timeoutMs: 30000,
-    });
-
-    if (!result.ok) {
-      log(`Nachrichten sync skipped: ${result.reason}`);
-      return;
-    }
-
-    let inserted = 0;
-    let skipped = 0;
-
-    for (const exposeId of result.exposeIds) {
-      // Check if already in DB (any status/outcome).
-      const existing = db.db.prepare(
-        'SELECT 1 FROM listings WHERE expose_id = ? LIMIT 1'
-      ).get(exposeId);
-
-      if (existing) {
-        skipped++;
-        continue;
-      }
-
-      // Insert MANUAL stub so the poll + apply loops skip it.
-      db.markAlreadyApplied(exposeId);
-      inserted++;
-    }
-
-    log(
-      `Nachrichten sync complete: ${inserted} inserted, ${skipped} already known, ` +
-      `${result.exposeIds.length} discovered, ${result.pagesVisited} pages visited`
-    );
-  } catch (err) {
-    log(`Nachrichten sync failed: ${err.message}`);
-  } finally {
-    pageTaskRunning = false;
-  }
-}
-
 // ── Apply loop ─────────────────────────────────────────────────
 // Runs continuously, processing one listing per enabled filter per round.
 // Respects applyPaused / captcha wall / session expiry / pendingRestart.
@@ -615,9 +549,7 @@ async function applyLoop(db) {
         continue;
       }
       log(`Applying to ${listing.expose_id} — ${(listing.title || '').slice(0, 60)}`);
-      pageTaskRunning = true;
       await applyOne(listing, filter.id, db);
-      pageTaskRunning = false;
       didWork = true;
 
       // If CDP died inside applyOne (contactor nulled), break the filter
@@ -982,14 +914,6 @@ async function main() {
 
   // Set up IPC from Electron parent
   setupIpc(db);
-
-  // ── Nachrichten sync: scrape sent messages to skip already-applied listings ─
-  // Runs after a 30s delay to let CDP settle and login state stabilise.
-  setTimeout(() => {
-    syncAlreadyAppliedFromSentMessages(db).catch(err =>
-      log(`Nachrichten sync error: ${err.message}`)
-    );
-  }, 30_000);
 
   // ── Check for persisted pause flag ─────────────────────────
   if (checkPauseFlag()) {
