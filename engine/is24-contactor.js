@@ -665,6 +665,7 @@ export class IS24Contactor {
               resp = await fetch(url.toString(), {
                 credentials: 'include',
                 headers: { accept: 'application/json' },
+                cache: 'no-cache',
               });
               text = await resp.text();
               break;
