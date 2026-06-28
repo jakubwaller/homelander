@@ -16,6 +16,12 @@
   <img src="https://img.shields.io/badge/electron-42-47848f" alt="Electron 42">
 </p>
 
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=udNWQz3WNBI"><b>▶ Watch the demo</b></a> (1:41)
+  &nbsp;·&nbsp;
+  <a href="https://www.youtube.com/watch?v=tihX4nCKdwQ"><b>macOS install guide</b></a>
+</p>
+
 ## 📸 Screenshots
 
 <p align="center">
@@ -63,6 +69,8 @@ Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 
 Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
 
+📺 Prefer video? **[Watch the macOS install walkthrough](https://www.youtube.com/watch?v=tihX4nCKdwQ)** — download, Gatekeeper, and first launch.
+
 | Platform | Package |
 |----------|---------|
 | macOS (Apple Silicon) | `Homelander-*.arm64.dmg` |
@@ -77,7 +85,7 @@ macOS may block the app because it's not notarized. After moving to Applications
 xattr -cr /Applications/Homelander.app
 ```
 
-Then launch from Applications or Spotlight.
+Then launch from Applications or Spotlight. ([See this step in the video](https://www.youtube.com/watch?v=tihX4nCKdwQ&t=53s))
 
 ### Windows
 
