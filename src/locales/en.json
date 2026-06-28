@@ -390,7 +390,7 @@
     "duplicateFailedHelper": "Will check automatically after login.",
     "duplicateFailedTip": "Homelander checks Nachrichten automatically before sending.",
     "duplicateReadyHelper": "Homelander checks your IS24 Nachrichten before sending.",
-    "duplicateNoDuplicatesTip": "Checks your IS24 Nachrichten when Homelander starts or resumes. Manual applications you made while Homelander was stopped or paused are detected and skipped.",
+    "duplicateNoDuplicatesTip": "Applications you made manually are detected and skipped — every time you start or unpause Homelander.",
     "lastMessengerCheck": "{{protected}} protected · {{time}}",
     "lastMessengerCheckNew": "{{protected}} protected · {{new}} new · {{time}}",
     "lastMessengerCheckSplit": "Last Nachrichten check: {{count}} checked · {{pending}} protected · {{new}} new · {{time}}",
