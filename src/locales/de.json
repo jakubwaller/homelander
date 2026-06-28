@@ -394,7 +394,7 @@
     "lastMessengerCheck": "{{protected}} geschützt · {{time}}",
     "lastMessengerCheckNew": "{{new}} neu · {{protected}} insgesamt · {{time}}",
     "lastMessengerCheckSplit": "Letzte Nachrichten-Prüfung: {{count}} geprüft · {{pending}} geschützt · {{new}} neu · {{time}}",
-    "lastMessengerCheckNone": "Letzte Prüfung: {{time}}",
+    "lastMessengerCheckNone": "0 geschützt · {{time}}",
     "noListings": "Keine Einträge gefunden",
     "selectAll": "Alle auswählen",
     "clearSelection": "Leeren",

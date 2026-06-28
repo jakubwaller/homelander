@@ -286,7 +286,7 @@ export default function SearchTab() {
               .replace('{{protected}}', protectedCount)
               .replace('{{new}}', newCount)
               .replace('{{time}}', lastMessengerCheckedAt)
-          : t('search.lastMessengerCheckNone', 'Letzte Prüfung: {{time}}')
+          : t('search.lastMessengerCheckNone', '0 geschützt · {{time}}')
               .replace('{{time}}', lastMessengerCheckedAt))
         : t('search.duplicateReadyHelper', 'Homelander prüft vor dem Versand deine IS24 Nachrichten.');
 
