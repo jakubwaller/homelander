@@ -390,7 +390,7 @@
     "duplicateFailedHelper": "Wird nach dem Login automatisch geprüft.",
     "duplicateFailedTip": "Homelander prüft Nachrichten automatisch vor dem Versand.",
     "duplicateReadyHelper": "Homelander prüft vor dem Versand deine IS24 Nachrichten.",
-    "duplicateNoDuplicatesTip": "Bewerbungen, die du manuell gemacht hast, werden erkannt und übersprungen — jedes Mal wenn du Homelander startest oder unpausierst.",
+    "duplicateNoDuplicatesTip": "Bewerbungen, die du manuell gemacht hast, werden erkannt und übersprungen — jedes Mal wenn du Homelander startest oder unpausierst, damit du dich nie doppelt auf dasselbe Inserat bewirbst.",
     "lastMessengerCheck": "{{protected}} geschützt · {{time}}",
     "lastMessengerCheckNew": "{{protected}} geschützt · {{new}} neu · {{time}}",
     "lastMessengerCheckSplit": "Letzte Nachrichten-Prüfung: {{count}} geprüft · {{pending}} geschützt · {{new}} neu · {{time}}",
