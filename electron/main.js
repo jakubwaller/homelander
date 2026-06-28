@@ -79,6 +79,7 @@ let daemonStatus = 'stopped'; // stopped | running | paused | restarting | sessi
 let daemonStartedAt = 0;      // timestamp of last startDaemon() call
 let _powerSaveBlockerId = null; // macOS App Nap prevention
 let latestNextPollAt = null;  // last future next_poll_at emitted by daemon poll loop
+let latestNachrichtenSync = { duplicateProtectionStatus: 'ready' };
 let daemonStopping = false;   // true only during an explicit user stop/SIGTERM window
 let _stopKillTimer = null;    // SIGKILL timeout handle — cleared on start to prevent cross-fire
 
@@ -691,6 +692,7 @@ function broadcastStats(stats = {}) {
   const nextPollAt = stats.nextPollAt || stats.next_poll_at || latestNextPollAt || null;
   const payload = {
     ...stats,
+    ...latestNachrichtenSync,
     type: 'stats',
     daemonStatus: effectiveDaemonStatus(),
     next_poll_at: nextPollAt,
@@ -752,6 +754,13 @@ function handleDaemonEvent(event) {
       break;
     case 'perimeter_captcha':
       daemonStatus = 'perimeter_captcha';
+      if (latestNachrichtenSync.duplicateProtectionStatus === 'checking') {
+        latestNachrichtenSync = {
+          ...latestNachrichtenSync,
+          duplicateProtectionStatus: 'failed',
+          messengerSyncError: event.reason || 'PERIMETER_CAPTCHA',
+        };
+      }
       try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'perimeter_captcha' }), 'utf8'); } catch (err) { swallow(err, 'main/write-pause-flag'); }
       mainWindow.webContents.send('homelander:event', {
         type: 'perimeter_captcha',
@@ -768,6 +777,13 @@ function handleDaemonEvent(event) {
       break;
     case 'session_expired':
       daemonStatus = 'session_expired';
+      if (latestNachrichtenSync.duplicateProtectionStatus === 'checking') {
+        latestNachrichtenSync = {
+          ...latestNachrichtenSync,
+          duplicateProtectionStatus: 'failed',
+          messengerSyncError: event.reason || 'SESSION_EXPIRED',
+        };
+      }
       try { writeFileSync(PAUSE_FLAG, JSON.stringify({ paused_at: new Date().toISOString(), reason: 'session_expired' }), 'utf8'); } catch (err) { swallow(err, 'main/write-pause-flag'); }
       mainWindow.webContents.send('homelander:event', {
         type: 'session_expired',
@@ -781,6 +797,40 @@ function handleDaemonEvent(event) {
           icon: APP_ICON_PNG,
         }).show();
       }
+      break;
+    case 'nachrichten_sync_checking':
+      latestNachrichtenSync = {
+        ...latestNachrichtenSync,
+        duplicateProtectionStatus: 'checking',
+        messengerSyncError: null,
+      };
+      mainWindow.webContents.send('homelander:event', event);
+      try { broadcastStats(db().getTodayStats()); } catch (err) { swallow(err, 'main/nachrichten-sync-stats'); }
+      break;
+    case 'nachrichten_sync_complete':
+      latestNachrichtenSync = {
+        duplicateProtectionStatus: 'active',
+        messengerCheckedAt: new Date().toISOString(),
+        messengerExposeIdsSeen: event.seen || 0,
+        messengerConversationsChecked: event.seen || 0,
+        messengerPendingRowsProtected: event.protected || 0,
+        messengerNewFutureSkips: event.future_skips || 0,
+        messengerPagesScanned: event.pages || 0,
+        messengerSource: event.source || 'api',
+        messengerSyncError: null,
+      };
+      mainWindow.webContents.send('homelander:event', event);
+      try { broadcastStats(db().getTodayStats()); } catch (err) { swallow(err, 'main/nachrichten-sync-stats'); }
+      break;
+    case 'nachrichten_sync_error':
+      latestNachrichtenSync = {
+        ...latestNachrichtenSync,
+        duplicateProtectionStatus: 'failed',
+        messengerCheckedAt: new Date().toISOString(),
+        messengerSyncError: event.error || event.reason || 'Nachrichten sync failed',
+      };
+      mainWindow.webContents.send('homelander:event', event);
+      try { broadcastStats(db().getTodayStats()); } catch (err) { swallow(err, 'main/nachrichten-sync-stats'); }
       break;
     case 'error': {
       const supportId = logRawError('daemon event', new Error(event.message || 'Daemon error'), { type: event.type });
@@ -955,12 +1005,12 @@ function registerIpcHandlers() {
       if (daemonProcess && daemonProcess.connected && daemonStatus !== 'stopped') {
         resetDaemonPollSchedule('manual_poll_started');
         daemonProcess.send({ type: 'poll_now', filterId });
-        return { ok: true, pending: true };
+        return { ok: true, pending: true, ...latestNachrichtenSync };
       }
 
       const { fetchListings } = await import('../engine/url-translator.js');
       const MAX_PAGES = 5, PAGE_SIZE = 20;
-      let allInserted = 0, allFetched = 0;
+      let allInserted = 0, allFetched = 0, duplicateProtected = 0;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const { listings, error } = await fetchListings(filter.web_url, page);
         if (error) break;
@@ -970,6 +1020,7 @@ function registerIpcHandlers() {
         const dedupedListings = filteredListings.filter(
           (l) => !db().isManuallyApplied(l.expose_id)
         );
+        duplicateProtected += Math.max(0, filteredListings.length - dedupedListings.length);
         allFetched += dedupedListings.length;
         const firstPollLimit = 10;
         const isFirstPoll = !filter.first_poll_done;
@@ -994,10 +1045,11 @@ function registerIpcHandlers() {
           type: 'poll_complete',
           filter_id: filter.id,
           inserted: allInserted,
+          duplicate_protected: duplicateProtected,
         });
       }
 
-      return { ok: true, inserted: allInserted, fetched: allFetched };
+      return { ok: true, inserted: allInserted, fetched: allFetched, duplicate_protected: duplicateProtected, ...latestNachrichtenSync };
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:poll-now', err, { code: 'SEARCH_POLL_FAILED' }) };
     }
@@ -1156,7 +1208,7 @@ function registerIpcHandlers() {
             const stats = db().getStats(filterId || null);
       const recent = db().getRecentActivity(20);
       const nextPollAt = getNextPollAt(db);
-      return { stats: { ...stats, nextPollAt }, recent, error: null };
+      return { stats: { ...stats, ...latestNachrichtenSync, nextPollAt }, recent, error: null };
     } catch (err) {
       return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, recent: [], ...gracefulFailure('listings:stats', err, { code: 'DATABASE_ERROR' }) };
     }
@@ -1166,7 +1218,7 @@ function registerIpcHandlers() {
     try {
             const stats = db().getTodayStats(filterId || null);
       const nextPollAt = getNextPollAt(db);
-      return { stats: { ...stats, nextPollAt }, error: null };
+      return { stats: { ...stats, ...latestNachrichtenSync, nextPollAt }, error: null };
     } catch (err) {
       return { stats: { total: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null }, ...gracefulFailure('listings:todayStats', err, { code: 'DATABASE_ERROR' }) };
     }

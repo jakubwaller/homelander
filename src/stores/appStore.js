@@ -22,7 +22,26 @@ export const useStore = create((set, get) => ({
   setFilters: (filters) => set({ filters }),
 
   // ── Stats ──────────────────────────────────────────────────
-  stats: { seen: 0, sent: 0, failed: 0, deactivated: 0, premium: 0, captcha: 0, seen_unapplied: 0, today: 0, nextPollAt: null },
+  stats: {
+    seen: 0,
+    sent: 0,
+    failed: 0,
+    deactivated: 0,
+    premium: 0,
+    captcha: 0,
+    seen_unapplied: 0,
+    today: 0,
+    nextPollAt: null,
+    duplicateProtectionStatus: 'ready',
+    messengerCheckedAt: null,
+    messengerExposeIdsSeen: 0,
+    messengerConversationsChecked: 0,
+    messengerPendingRowsProtected: 0,
+    messengerNewFutureSkips: 0,
+    messengerPagesScanned: 0,
+    messengerSource: null,
+    messengerSyncError: null,
+  },
   setStats: (stats) => set({ stats }),
 
   // ── Activity feed ──────────────────────────────────────────

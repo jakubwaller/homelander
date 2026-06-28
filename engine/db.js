@@ -277,24 +277,30 @@ export class HomelanderDB {
       'SELECT hash, status, outcome FROM listings WHERE expose_id = ? ORDER BY rowid DESC LIMIT 1'
     ).get(id);
 
+    let manualSkipInserted = 0;
+    let pendingRowsProtected = 0;
     const txn = this.db.transaction(() => {
-      this.db.prepare('INSERT OR IGNORE INTO manual_skips (expose_id) VALUES (?)').run(id);
+      manualSkipInserted = this.db.prepare(
+        'INSERT OR IGNORE INTO manual_skips (expose_id) VALUES (?)'
+      ).run(id).changes;
       // Only remove pending queue rows from automation. Do not rewrite real
       // history rows (SENT/FAIL/PREMIUM/DEACTIVATED), otherwise stats/history lie.
-      this.db.prepare(`
+      pendingRowsProtected = this.db.prepare(`
         UPDATE listings
         SET status = 'sent', outcome = 'MANUAL', detail = 'applied manually',
           sent_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), failure_reason = NULL
         WHERE expose_id = ? AND status = 'seen'
-      `).run(id);
+      `).run(id).changes;
     });
     txn();
 
-    const row = this.db.prepare('SELECT hash, status, outcome FROM listings WHERE expose_id = ? ORDER BY rowid DESC LIMIT 1').get(id);
     return {
       found: !!existing,
       exposeId: id,
-      changed: row && row.outcome === 'MANUAL' ? 1 : 0,
+      changed: pendingRowsProtected + manualSkipInserted,
+      manualSkipInserted,
+      pendingRowsProtected,
+      alreadyProtected: manualSkipInserted === 0 && pendingRowsProtected === 0,
       processing: existing?.status === 'processing',
       skipped: true,
     };

@@ -110,8 +110,44 @@ function AppInner() {
       if (data.type === 'paused') setDaemonStatus('paused');
       if (data.type === 'resumed') setDaemonStatus('running');
       if (data.type === 'daemon_stopped') setDaemonStatus('stopped');
-      if (data.type === 'session_expired') setDaemonStatus('session_expired');
-      if (data.type === 'perimeter_captcha') setDaemonStatus('perimeter_captcha');
+      if (data.type === 'session_expired') {
+        setDaemonStatus('session_expired');
+        if (useStore.getState().stats.duplicateProtectionStatus === 'checking') {
+          setStats(normalizeStats({ ...useStore.getState().stats, duplicateProtectionStatus: 'failed', messengerSyncError: data.reason || 'SESSION_EXPIRED' }));
+        }
+      }
+      if (data.type === 'perimeter_captcha') {
+        setDaemonStatus('perimeter_captcha');
+        if (useStore.getState().stats.duplicateProtectionStatus === 'checking') {
+          setStats(normalizeStats({ ...useStore.getState().stats, duplicateProtectionStatus: 'failed', messengerSyncError: data.reason || 'PERIMETER_CAPTCHA' }));
+        }
+      }
+      if (data.type === 'nachrichten_sync_checking') {
+        setStats(normalizeStats({ ...useStore.getState().stats, duplicateProtectionStatus: 'checking', messengerSyncError: null }));
+      }
+      if (data.type === 'nachrichten_sync_complete') {
+        setStats(normalizeStats({
+          ...useStore.getState().stats,
+          duplicateProtectionStatus: 'active',
+          messengerCheckedAt: new Date().toISOString(),
+          messengerExposeIdsSeen: data.seen || 0,
+          messengerConversationsChecked: data.seen || 0,
+          messengerPendingRowsProtected: data.protected || 0,
+          messengerNewFutureSkips: data.future_skips || 0,
+          messengerPagesScanned: data.pages || 0,
+          messengerSource: data.source || 'api',
+          messengerSyncError: null,
+        }));
+        window.dispatchEvent(new CustomEvent('homelander:nachrichten-sync-complete', { detail: data }));
+      }
+      if (data.type === 'nachrichten_sync_error') {
+        setStats(normalizeStats({
+          ...useStore.getState().stats,
+          duplicateProtectionStatus: 'failed',
+          messengerCheckedAt: new Date().toISOString(),
+          messengerSyncError: data.error || data.reason,
+        }));
+      }
       if (data.type === 'config_applied') {
         if (data.daemonStatus) setDaemonStatus(data.daemonStatus);
         // Brief flash — clears after animation

@@ -47,8 +47,6 @@ export default function SearchTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [tip, setTip] = useState(null);
-  const [manualUrl, setManualUrl] = useState('');
-  const [manualResult, setManualResult] = useState(null);
   const activeTipTargetRef = useRef(null);
 
   const hideTip = useCallback(() => {
@@ -242,30 +240,6 @@ export default function SearchTab() {
     }
   }, [setFilters, setStats, setPollError, clearPollError]);
 
-  const handleMarkApplied = useCallback(async (event) => {
-    event.preventDefault();
-    const url = manualUrl.trim();
-    if (!url || !window.homelander?.markApplied) {
-      setManualResult({ ok: false });
-      setTimeout(() => setManualResult(null), 2500);
-      return;
-    }
-
-    setManualResult(null);
-    try {
-      const result = await window.homelander.markApplied(url);
-      if (result?.ok) {
-        setManualUrl('');
-        setManualResult({ ok: true });
-      } else {
-        setManualResult({ ok: false });
-      }
-    } catch {
-      setManualResult({ ok: false });
-    }
-    setTimeout(() => setManualResult(null), 2500);
-  }, [manualUrl]);
-
   // ── Countdown for next auto-poll ──────────────────────────────
   const [nextPollCountdown, setNextPollCountdown] = useState('');
   const [configAppliedFlash, setConfigAppliedFlash] = useState(false);
@@ -294,6 +268,24 @@ export default function SearchTab() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [stats.nextPollAt, daemonStatus]);
+
+  const lastMessengerCheckedAt = stats.messengerCheckedAt
+    ? new Date(stats.messengerCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null;
+  const checkedCount = stats.messengerConversationsChecked || stats.messengerExposeIdsSeen || 0;
+  const protectedCount = (stats.messengerPendingRowsProtected || 0) + (stats.messengerNewFutureSkips || 0);
+  const duplicateSummary = stats.duplicateProtectionStatus === 'checking'
+    ? t('search.duplicateCheckingHelper', 'Bereits kontaktierte Anzeigen werden erkannt.')
+    : stats.duplicateProtectionStatus === 'failed'
+      ? t('search.duplicateFailedHelper', 'Wird nach dem Login automatisch geprüft.')
+      : lastMessengerCheckedAt
+        ? (stats.messengerNewFutureSkips > 0
+          ? t('search.lastMessengerCheckNew', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} neu geschützt · {{time}}')
+          : t('search.lastMessengerCheck', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} geschützt · {{time}}'))
+            .replace('{{count}}', checkedCount)
+            .replace('{{protected}}', protectedCount)
+            .replace('{{time}}', lastMessengerCheckedAt)
+        : t('search.duplicateReadyHelper', 'Homelander prüft vor dem Versand deine IS24 Nachrichten.');
 
   // ── Render ─────────────────────────────────────────────────────
   return (
@@ -388,44 +380,22 @@ export default function SearchTab() {
             ))}
           </div>
         )}
-      </section>
-
-      {/* ── Mark as already applied ──────────────────────────── */}
-      <section>
-        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-          {t("search.markAppliedLabel", "Skip exposés you've already applied to manually:")}
-        </p>
-        <form onSubmit={handleMarkApplied} className="flex items-center gap-2">
-          <input
-            className="input text-xs py-1.5"
-            style={{ maxWidth: 360 }}
-            type="text"
-            inputMode="url"
-            placeholder={t('search.markAppliedPlaceholder', 'Paste exposé URL…')}
-            value={manualUrl}
-            onChange={(event) => {
-              setManualUrl(event.target.value);
-              setManualResult(null);
+        {filters.length > 0 && (
+          <p
+            className="flex items-center gap-1.5 mt-2 pt-1.5 text-xs cursor-default"
+            style={{
+              color: 'var(--text-muted)',
+              margin: 0,
+              borderTop: '1px solid var(--border)',
             }}
-          />
-          <button
-            type="submit"
-            className="btn btn-ghost text-xs px-3 py-1.5"
-            disabled={!manualUrl.trim()}
+            onMouseEnter={(e) => showTip(t('search.duplicateNoDuplicatesTip', 'Prüft deine IS24 Nachrichten, wenn Homelander startet oder fortgesetzt wird. Bewerbungen, die du manuell gemacht hast, während Homelander pausiert oder gestoppt war, werden erkannt und übersprungen.'), e)}
+            onMouseMove={moveTip}
+            onMouseLeave={hideTip}
           >
-            ✓
-          </button>
-          {manualResult && (
-            <span
-              className="text-xs font-medium"
-              style={{ color: manualResult.ok ? 'var(--success)' : 'var(--danger)' }}
-            >
-              {manualResult.ok
-                ? t('search.markedApplied', '✓ Bereits beworben')
-                : t('search.markAppliedInvalid', 'Invalid exposé URL')}
-            </span>
-          )}
-        </form>
+            <span>🛡</span>
+            <span>{duplicateSummary}</span>
+          </p>
+        )}
       </section>
 
       {/* ── Add search dialog ─────────────────────────────────── */}

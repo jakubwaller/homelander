@@ -13,6 +13,7 @@ function mockContactor() {
     evaluate: async () => ({}),  // overridden per-test
     screenshot: async () => {},
     close: async () => {},
+    isClosed: () => false,
     title: async () => '',
   };
   return c;
@@ -40,6 +41,190 @@ describe('extractExposeIdsFromText() — Nachrichten sync', () => {
       'duplicate https://www.immobilienscout24.de/expose/123456789',
     ).sort();
     assert.deepEqual(ids, ['112233445', '123456789', '987654321']);
+  });
+
+  it('extracts expose IDs from the IS24 messenger conversations HTML shape', () => {
+    const html = `
+      <div data-testid="conversations-list">
+        <div data-testid="conversation">
+          <p data-testid="previewMsg">Sehr geehrte Frau Neumann, vielen Dank für Ihre Anfrage bezüglich der Immobilie in 81673 München: https://www.immobilienscout24.de/expose/168891969</p>
+        </div>
+        <div data-testid="conversation">
+          <p data-testid="previewMsg">Ihre Anfrage für https://www.immobilienscout24.de/expose/168839069 wurde empfangen.</p>
+        </div>
+      </div>
+    `;
+    const ids = extractExposeIdsFromText(html).sort();
+    assert.deepEqual(ids, ['168839069', '168891969']);
+  });
+});
+
+describe('Messenger API expose ID extraction — Nachrichten sync', () => {
+  function withBrowserFetch(c, fetchImpl) {
+    const originalWindow = globalThis.window;
+    const originalFetch = globalThis.fetch;
+    c.page.evaluate = async (fn, arg) => {
+      globalThis.window = { location: { origin: 'https://www.immobilienscout24.de' } };
+      globalThis.fetch = fetchImpl;
+      return await fn(arg);
+    };
+    return () => {
+      globalThis.window = originalWindow;
+      globalThis.fetch = originalFetch;
+    };
+  }
+
+  function jsonResponse(body, status = 200, headers = { 'content-type': 'application/json' }) {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (key) => headers[key.toLowerCase()] || headers[key] || '' },
+      text: async () => JSON.stringify(body),
+    };
+  }
+
+  it('paginates with timestampOfLastConversationPaginated and deduplicates IDs', async () => {
+    const c = mockContactor();
+    const calls = [];
+    const restore = withBrowserFetch(c, async (url) => {
+      const parsed = new URL(url);
+      calls.push(parsed.pathname + parsed.search);
+      const page2 = parsed.searchParams.get('timestampOfLastConversationPaginated') === '2026-06-28T12:00:00Z';
+      const conversations = page2
+        ? [{ referenceId: '333333333', lastUpdateDateTime: '2026-06-28T11:00:00Z' }]
+        : Array.from({ length: 20 }, (_, i) => ({
+            referenceId: i === 19 ? '222222222' : '111111111',
+            lastUpdateDateTime: i === 19 ? '2026-06-28T12:00:00Z' : `2026-06-28T12:${String(59 - i).padStart(2, '0')}:00Z`,
+          }));
+      return jsonResponse({ conversations });
+    });
+
+    try {
+      const result = await c._fetchMessengerApiExposeIds();
+      assert.equal(result.ok, true);
+      assert.equal(result.source, 'api');
+      assert.equal(result.pagesScanned, 2);
+      assert.deepEqual(result.exposeIds.sort(), ['111111111', '222222222', '333333333']);
+      assert.deepEqual(calls, [
+        '/nachrichten-manager/api/seeker/conversations',
+        '/nachrichten-manager/api/seeker/conversations?timestampOfLastConversationPaginated=2026-06-28T12%3A00%3A00Z',
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it('marks API 401/403 as fail-closed session expiry', async () => {
+    const c = mockContactor();
+    const restore = withBrowserFetch(c, async () => jsonResponse({ error: 'unauthorized' }, 401));
+
+    try {
+      const result = await c._fetchMessengerApiExposeIds();
+      assert.equal(result.ok, false);
+      assert.equal(result.failClosed, true);
+      assert.match(result.reason, /SESSION_EXPIRED/);
+    } finally {
+      restore();
+    }
+  });
+
+  it('fails closed on non-JSON challenge pages instead of falling back to DOM', async () => {
+    const c = mockContactor();
+    const restore = withBrowserFetch(c, async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'text/html' },
+      text: async () => '<html><title>Sicherheitsprüfung</title><body>AWSWAF challenge</body></html>',
+    }));
+
+    try {
+      const result = await c._fetchMessengerApiExposeIds();
+      assert.equal(result.ok, false);
+      assert.equal(result.failClosed, true);
+      assert.match(result.reason, /PERIMETER_CAPTCHA|non-JSON|invalid response/);
+      assert.deepEqual(result.exposeIds, []);
+    } finally {
+      restore();
+    }
+  });
+
+  it('scrapeNachrichtenExposeIds reuses an existing same-origin IS24 page without navigating to Messenger', async () => {
+    const c = mockContactor();
+    let navigated = false;
+    c.page.url = () => 'https://www.immobilienscout24.de/expose/168894172#/basicContact/email';
+    c.page.title = async () => 'IS24';
+    c.page.evaluate = async (fn, arg) => {
+      if (typeof arg === 'string') {
+        navigated = true;
+        return undefined;
+      }
+      globalThis.window = { location: { origin: 'https://www.immobilienscout24.de' } };
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => jsonResponse({ conversations: [{ referenceId: '168894172', lastUpdateDateTime: '2026-06-28T12:00:00Z' }] });
+      try { return await fn(arg); }
+      finally { globalThis.fetch = originalFetch; delete globalThis.window; }
+    };
+
+    const result = await c.scrapeNachrichtenExposeIds();
+    assert.equal(result.ok, true);
+    assert.equal(navigated, false);
+    assert.deepEqual(result.exposeIds, ['168894172']);
+  });
+});
+
+// ============================================================================
+// _waitForCaptchaSubmitResult() tests
+// ============================================================================
+describe('_waitForCaptchaSubmitResult() — captcha submit waits', () => {
+  it('waits through loading and returns accepted on success', async () => {
+    const c = mockContactor();
+    let calls = 0;
+    c.page.evaluate = async () => {
+      calls++;
+      if (calls === 1) {
+        return {
+          hasCaptchaInput: true,
+          hasCaptchaText: true,
+          success: false,
+          serverError: false,
+          validationText: false,
+          loading: true,
+          imgSrc: 'captcha-a',
+          imgLoaded: true,
+        };
+      }
+      return {
+        hasCaptchaInput: false,
+        hasCaptchaText: false,
+        success: true,
+        serverError: false,
+        validationText: false,
+        loading: false,
+        imgSrc: '',
+        imgLoaded: false,
+      };
+    };
+
+    const result = await c._waitForCaptchaSubmitResult({ src: 'captcha-a' }, 2_000);
+    assert.equal(result, 'accepted');
+    assert.ok(calls >= 2);
+  });
+
+  it('does not immediately retry the same still-visible captcha after submit', async () => {
+    const c = mockContactor();
+    c.page.evaluate = async () => ({
+      hasCaptchaInput: true,
+      hasCaptchaText: true,
+      success: false,
+      serverError: false,
+      validationText: false,
+      loading: false,
+      imgSrc: 'captcha-a',
+      imgLoaded: true,
+    });
+
+    const result = await c._waitForCaptchaSubmitResult({ src: 'captcha-a' }, 5);
+    assert.equal(result, 'same_challenge_timeout');
   });
 });
 

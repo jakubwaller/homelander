@@ -2,12 +2,14 @@
 // Also shows a "Poll now" button.
 
 import React, { useState } from 'react';
+import { useStore } from '../stores/appStore';
 import { useLocale } from '../locales/LocaleContext';
 import StatusDot from './StatusDot';
 import { userErrorText } from '../shared/userErrors';
 
 export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollError }) {
   const { t } = useLocale();
+  const stats = useStore((s) => s.stats);
   const [confirming, setConfirming] = useState(false);
   const [polling, setPolling] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -30,6 +32,19 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
     }
   };
 
+  const duplicateProtectionSuffix = (result = {}) => {
+    const protectedCount = result.duplicate_protected || result.messengerPendingRowsProtected || 0;
+    if (protectedCount > 0) {
+      return t('search.pollDuplicateProtected', '{{count}} bereits kontaktierte geschützt').replace('{{count}}', protectedCount);
+    }
+    const lastCheck = stats.messengerCheckedAt || result.messengerCheckedAt;
+    if (lastCheck) {
+      const time = new Date(lastCheck).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return t('search.lastProtectionCheck', 'Letzte Prüfung: {{time}}').replace('{{time}}', time);
+    }
+    return null;
+  };
+
   const handlePollNow = async () => {
     if (!window.homelander || polling) return;
     setPolling(true);
@@ -39,11 +54,17 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
       if (result?.error) {
         setPollMessage({ type: 'error', text: result.error });
       } else if (result?.pending) {
-        setPollMessage({ type: 'muted', text: t('search.pollStarted', 'Poll started…') });
+        const suffix = duplicateProtectionSuffix(result);
+        setPollMessage({ type: 'muted', text: suffix ? `${t('search.pollStarted', 'Poll started…')} · ${suffix}` : t('search.pollStarted', 'Poll started…') });
       } else if ((result?.inserted || 0) > 0) {
-        setPollMessage({ type: 'success', text: t('search.pollAdded', '{{count}} new listings found.').replace('{{count}}', result.inserted) });
+        const suffix = duplicateProtectionSuffix(result);
+        setPollMessage({
+          type: 'success',
+          text: suffix ? `${t('search.pollAdded', '{{count}} new listings found.').replace('{{count}}', result.inserted)} · ${suffix}` : t('search.pollAdded', '{{count}} new listings found.').replace('{{count}}', result.inserted),
+        });
       } else {
-        setPollMessage({ type: 'muted', text: t('search.noNewListings', 'No new listings.') });
+        const suffix = duplicateProtectionSuffix(result);
+        setPollMessage({ type: 'muted', text: suffix ? `${t('search.noNewListings', 'No new listings.')} · ${suffix}` : t('search.noNewListings', 'No new listings.') });
       }
     } catch (err) {
       setPollMessage({ type: 'error', text: userErrorText(err.userError || err, { operation: 'poll search' }, t) });

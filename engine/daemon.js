@@ -231,12 +231,15 @@ async function ensureNachrichtenSync(db) {
   nachrichtenSyncInFlight = true;
   try {
     log('Nachrichten pre-flight: checking already-sent applications...');
+    emit({ type: 'nachrichten_sync_checking' });
     const result = await contactor.scrapeNachrichtenExposeIds();
     const ids = Array.isArray(result.exposeIds) ? result.exposeIds : [];
-    let changed = 0;
+    let pendingRowsProtected = 0;
+    let newFutureSkips = 0;
     for (const exposeId of ids) {
       const mark = db.markAlreadyApplied(exposeId);
-      if (mark.changed || !mark.found) changed++;
+      pendingRowsProtected += mark.pendingRowsProtected || 0;
+      newFutureSkips += mark.manualSkipInserted || 0;
     }
 
     if (!result.ok) {
@@ -263,8 +266,15 @@ async function ensureNachrichtenSync(db) {
     }
 
     nachrichtenSyncDone = true;
-    log(`Nachrichten pre-flight complete — ${ids.length} expose IDs seen, ${changed} newly protected`);
-    emit({ type: 'nachrichten_sync_complete', seen: ids.length, protected: changed, pages: result.pagesScanned || 0 });
+    log(`Nachrichten pre-flight complete — ${ids.length} expose IDs seen, ${pendingRowsProtected} pending queue row(s) protected, ${newFutureSkips} new future skip(s) recorded`);
+    emit({
+      type: 'nachrichten_sync_complete',
+      seen: ids.length,
+      protected: pendingRowsProtected,
+      future_skips: newFutureSkips,
+      pages: result.pagesScanned || 0,
+      source: result.source || 'api',
+    });
     return true;
   } catch (err) {
     log(`Nachrichten pre-flight error: ${err.message}`);
@@ -778,7 +788,7 @@ function setupIpc(db) {
         log(`Manual poll for: ${filter.name || filter.id}`);
 
         const MAX_PAGES = 5, PAGE_SIZE = 20;
-        let allInserted = 0, allFetched = 0;
+        let allInserted = 0, allFetched = 0, duplicateProtected = 0;
         for (let page = 1; page <= MAX_PAGES; page++) {
           const { listings, error } = await fetchListings(filter.web_url, page);
           if (error) {
@@ -794,6 +804,7 @@ function setupIpc(db) {
           const dedupedPn = filteredListings.filter(
             (l) => !db.isManuallyApplied(l.expose_id)
           );
+          duplicateProtected += Math.max(0, filteredListings.length - dedupedPn.length);
           allFetched += dedupedPn.length;
           const firstPollLimit = 10;
           const isFirstPoll = !filter.first_poll_done;
@@ -813,9 +824,7 @@ function setupIpc(db) {
         }
         const nextPollAt = resetNextPollDue();
         emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
-        if (allInserted > 0) {
-          emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted });
-        }
+        emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted, duplicate_protected: duplicateProtected });
       } catch (err) {
         log(`Poll-now error [${msg.filterId}]: ${err.message}`);
         emit({ type: 'poll_error', filter_id: msg.filterId, error: err.message });

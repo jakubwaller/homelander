@@ -712,6 +712,8 @@ describe('markSent', () => {
     const result = db.markAlreadyApplied('manual-sent');
     assert.equal(result.found, true);
     assert.equal(result.skipped, true);
+    assert.equal(result.manualSkipInserted, 1);
+    assert.equal(result.pendingRowsProtected, 0);
 
     const row = db.db.prepare('SELECT status, outcome, detail FROM listings WHERE hash = ?').get(hash);
     assert.equal(row.status, 'sent');
@@ -727,7 +729,9 @@ describe('markSent', () => {
 
     const result = db.markAlreadyApplied('manual-seen');
     assert.equal(result.found, true);
-    assert.equal(result.changed, 1);
+    assert.equal(result.changed, 2);
+    assert.equal(result.manualSkipInserted, 1);
+    assert.equal(result.pendingRowsProtected, 1);
 
     const row = db.db.prepare('SELECT status, outcome, detail FROM listings WHERE hash = ?').get(hash);
     assert.equal(row.status, 'sent');
@@ -735,6 +739,23 @@ describe('markSent', () => {
     assert.equal(row.detail, 'applied manually');
     assert.deepEqual(db.getSeenListings('f1'), []);
     assert.deepEqual(db.getHistory(), []);
+  });
+
+  it('reports new future skips separately from pending queue protection', () => {
+    const db = seededDB();
+    const first = db.markAlreadyApplied('manual-future-only');
+    assert.equal(first.found, false);
+    assert.equal(first.manualSkipInserted, 1);
+    assert.equal(first.pendingRowsProtected, 0);
+    assert.equal(first.changed, 1);
+
+    const second = db.markAlreadyApplied('manual-future-only');
+    assert.equal(second.found, false);
+    assert.equal(second.manualSkipInserted, 0);
+    assert.equal(second.pendingRowsProtected, 0);
+    assert.equal(second.changed, 0);
+    assert.equal(second.alreadyProtected, true);
+    db.close();
   });
 });
 

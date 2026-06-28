@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const IS24_EXPOSE_URL = 'https://www.immobilienscout24.de/expose';
-const IS24_NACHRICHTEN_URL = 'https://www.immobilienscout24.de/meinkonto/nachrichten';
+const IS24_ORIGIN = 'https://www.immobilienscout24.de';
+const IS24_MESSENGER_CONVERSATIONS_API = '/nachrichten-manager/api/seeker/conversations';
 const DEBUG_DIR = process.env.HOMELANDER_DEBUG_DIR || join(__dirname, '..', 'debug');
 const DEFAULT_WINDOW = { windowState: 'normal', left: 80, top: 60, width: 1200, height: 850 };
 
@@ -589,87 +590,132 @@ export class IS24Contactor {
   }
 
   /**
-   * Open IS24 Nachrichten and scrape expose IDs from already-sent messages.
+   * Fetch IS24 Messenger conversations and extract expose IDs from already-sent messages.
    * This pre-flight guard catches manual/out-of-band applications before the
-   * apply loop can send to the same exposé again.
+   * apply loop can send to the same exposé again. The Messenger API is the
+   * authoritative source; if it is unavailable, fail closed instead of trusting
+   * incomplete DOM scraping.
    */
   async scrapeNachrichtenExposeIds() {
     this.page = await this._ensurePage();
-    await this._navigate(IS24_NACHRICHTEN_URL, { timeout: 30000 });
-    await jitter(800, 1800);
+    await this._ensureIS24ApiContext();
+    await jitter(300, 800);
 
     if (await this._isBlocked()) {
       return { ok: false, reason: 'PERIMETER_CAPTCHA (AWS WAF — solve in browser to continue)', exposeIds: [] };
     }
-    if (await this._isNachrichtenLoggedOut()) {
-      return { ok: false, reason: 'SESSION_EXPIRED (IS24 login required — Nachrichten unavailable)', exposeIds: [] };
+    if (this._currentUrlShowsLogin()) {
+      return { ok: false, reason: 'SESSION_EXPIRED (IS24 login required — Messenger API unavailable)', exposeIds: [] };
     }
 
-    const exposeIds = new Set();
-    let pagesScanned = 0;
-    for (let pageNo = 0; pageNo < 20; pageNo++) {
-      pagesScanned++;
-      for (const id of await this._extractExposeIdsFromCurrentPage()) exposeIds.add(id);
-      const advanced = await this._advanceNachrichtenPage();
-      if (!advanced) break;
-      await jitter(500, 1200);
-      if (await this._isNachrichtenLoggedOut()) {
-        return { ok: false, reason: 'SESSION_EXPIRED (IS24 login required — Nachrichten unavailable)', exposeIds: [...exposeIds], pagesScanned };
-      }
-    }
-
-    return { ok: true, exposeIds: [...exposeIds], pagesScanned };
+    return await this._fetchMessengerApiExposeIds();
   }
 
-  async _isNachrichtenLoggedOut() {
-    try {
-      const currentUrl = this.page.url();
-      if (currentUrl.includes('/login') || currentUrl.includes('/registrierung') || currentUrl.includes('sso.immobilienscout24')) return true;
-      return await this.page.evaluate(() => {
-        const text = document.body?.innerText || '';
-        const hasLoginText = /\b(Anmelden|Einloggen|Jetzt einloggen|Login)\b/i.test(text);
-        const hasInboxText = /(Nachrichten|Posteingang|Gesendet|Konversation|Kontaktanfrage|Bewerbung)/i.test(text);
-        const wrapper = document.querySelector('.sso-login');
-        const headerText = wrapper?.innerText || '';
-        if (/\bAnmelden\b/i.test(headerText) && !/angemeldet\s+als/i.test(headerText)) return true;
-        return hasLoginText && !hasInboxText;
-      });
-    } catch {
-      return false;
-    }
+  async _ensureIS24ApiContext() {
+    const currentUrl = this.page?.url?.() || '';
+    if (currentUrl.startsWith(`${IS24_ORIGIN}/`) && !this._currentUrlShowsLogin()) return;
+    await this._navigate(IS24_ORIGIN, { timeout: 30000 });
   }
 
-  async _extractExposeIdsFromCurrentPage() {
-    try {
-      const snapshot = await this.page.evaluate(() => ({
-        hrefs: Array.from(document.querySelectorAll('a[href]')).map((a) => a.href),
-        text: document.body?.innerText || '',
-        html: document.documentElement?.innerHTML || '',
-      }));
-      return extractExposeIdsFromText(...(snapshot.hrefs || []), snapshot.text, snapshot.html);
-    } catch {
-      return [];
-    }
+  _currentUrlShowsLogin() {
+    const currentUrl = this.page?.url?.() || '';
+    return currentUrl.includes('/login')
+      || currentUrl.includes('/registrierung')
+      || currentUrl.includes('sso.immobilienscout24');
   }
 
-  async _advanceNachrichtenPage() {
+  async _fetchMessengerApiExposeIds(maxPages = 50) {
     try {
-      return await this.page.evaluate(() => {
-        const visible = (el) => {
-          if (!el) return false;
-          const style = window.getComputedStyle(el);
-          if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
-          const rect = el.getBoundingClientRect();
-          return rect.width > 0 && rect.height > 0;
+      const result = await this.page.evaluate(async ({ endpoint, maxPages }) => {
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const ids = [];
+        let pagesScanned = 0;
+        let timestampOfLastConversationPaginated = null;
+        let lastStatus = 0;
+        let lastUrl = '';
+
+        const classifyTextFailure = (status, contentType, text) => {
+          const haystack = `${contentType || ''}\n${text || ''}`;
+          if (status === 401 || status === 403) {
+            return `SESSION_EXPIRED (Messenger API HTTP ${status})`;
+          }
+          if (/awswaf|captcha|challenge|roboter|sicherheitsprüfung|sicherheitsabfrage/i.test(haystack)) {
+            return 'PERIMETER_CAPTCHA (Messenger API returned challenge page)';
+          }
+          if (/login|einloggen|anmelden|sso\.immobilienscout24/i.test(haystack)) {
+            return `SESSION_EXPIRED (Messenger API returned login page, HTTP ${status})`;
+          }
+          if (contentType && !/json/i.test(contentType)) {
+            return `Messenger API returned non-JSON content (${contentType}, HTTP ${status})`;
+          }
+          return `Messenger API invalid response (HTTP ${status})`;
         };
-        const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]')).filter(visible);
-        const next = candidates.find((el) => /^(Mehr anzeigen|Weitere Nachrichten|Ältere Nachrichten|Mehr laden|Weiter)$/i.test((el.textContent || '').trim()));
-        if (!next) return false;
-        next.click();
-        return true;
-      });
-    } catch {
-      return false;
+
+        for (let page = 0; page < maxPages; page++) {
+          const url = new URL(endpoint, window.location.origin);
+          if (timestampOfLastConversationPaginated) {
+            url.searchParams.set('timestampOfLastConversationPaginated', timestampOfLastConversationPaginated);
+          }
+          lastUrl = url.pathname + url.search;
+
+          let resp = null;
+          let text = '';
+          for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+              resp = await fetch(url.toString(), {
+                credentials: 'include',
+                headers: { accept: 'application/json' },
+              });
+              text = await resp.text();
+              break;
+            } catch (err) {
+              if (attempt === 1) {
+                return { ok: false, reason: `Messenger API fetch failed: ${err.message}`, exposeIds: ids, pagesScanned, lastStatus, lastUrl };
+              }
+              await sleep(250);
+            }
+          }
+
+          lastStatus = resp.status;
+          const contentType = resp.headers?.get?.('content-type') || '';
+          if (!resp.ok) {
+            return { ok: false, reason: classifyTextFailure(resp.status, contentType, text), exposeIds: ids, pagesScanned, lastStatus, lastUrl };
+          }
+
+          let payload;
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            return { ok: false, reason: classifyTextFailure(resp.status, contentType, text), exposeIds: ids, pagesScanned, lastStatus, lastUrl };
+          }
+
+          const conversations = Array.isArray(payload?.conversations) ? payload.conversations : null;
+          if (!conversations) {
+            return { ok: false, reason: 'Messenger API response missing conversations[]', exposeIds: ids, pagesScanned, lastStatus, lastUrl };
+          }
+          pagesScanned++;
+
+          for (const conversation of conversations) {
+            const referenceId = String(conversation?.referenceId || '').trim();
+            if (/^\d{5,}$/.test(referenceId)) ids.push(referenceId);
+          }
+
+          if (conversations.length < 20) break;
+          const last = conversations[conversations.length - 1];
+          const nextTimestamp = last?.lastUpdateDateTime;
+          if (!nextTimestamp || nextTimestamp === timestampOfLastConversationPaginated) break;
+          timestampOfLastConversationPaginated = nextTimestamp;
+        }
+
+        return { ok: true, exposeIds: ids, pagesScanned, lastStatus, lastUrl };
+      }, { endpoint: IS24_MESSENGER_CONVERSATIONS_API, maxPages });
+
+      const exposeIds = [...new Set((result.exposeIds || []).map(String).filter((id) => /^\d{5,}$/.test(id)))];
+      const reason = result.reason || (result.ok ? null : 'Messenger API failed');
+      const failClosed = !result.ok;
+      return { ...result, ok: Boolean(result.ok), failClosed, reason, exposeIds, source: 'api' };
+    } catch (err) {
+      return { ok: false, failClosed: true, reason: `Messenger API fetch failed: ${err.message}`, exposeIds: [], pagesScanned: 0, source: 'api' };
     }
   }
 
@@ -1547,12 +1593,16 @@ export class IS24Contactor {
         return !!succeeded;
       }
 
+      const challengeBeforeSubmit = await this._captchaChallengeFingerprint();
       await this.page.click('#userAnswer');
       await jitter(100, 300);
       await this.page.evaluate(() => { document.querySelector('#userAnswer').value = ''; });
       await this.page.type('#userAnswer', solution, { delay: 30 });
       await jitter(300, 600);
       await this.page.click('[data-testid="contact-form"] button[type="submit"]');
+
+      const submitResult = await this._waitForCaptchaSubmitResult(challengeBeforeSubmit);
+      if (submitResult === 'same_challenge_timeout') return false;
       return true;
     } catch (e) {
       try {
@@ -1563,6 +1613,74 @@ export class IS24Contactor {
       } catch (err) { swallow(err, 'captcha/check-solved'); }
       return false;
     }
+  }
+
+  async _captchaChallengeFingerprint() {
+    try {
+      return await this.page.evaluate(() => {
+        const img = document.querySelector('.captcha-image-container img');
+        if (!img) return null;
+        return {
+          src: img.currentSrc || img.src || '',
+          naturalWidth: img.naturalWidth || 0,
+          complete: !!img.complete,
+        };
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async _waitForCaptchaSubmitResult(previousChallenge, timeoutMs = 20_000) {
+    const deadline = Date.now() + timeoutMs;
+    let sawLoading = false;
+    while (Date.now() < deadline) {
+      const state = await this.page.evaluate(() => {
+        const allText = document.body?.innerText || '';
+        const input = document.querySelector('#userAnswer');
+        const img = document.querySelector('.captcha-image-container img');
+        const submit = document.querySelector('[data-testid="contact-form"] button[type="submit"]');
+        const buttonText = submit?.textContent || '';
+        const imgSrc = img?.currentSrc || img?.src || '';
+        const loading = !!(
+          input?.disabled
+          || submit?.disabled
+          || /lade|lädt|loading|bitte warten/i.test(allText)
+          || /loading|lade|lädt/i.test(buttonText)
+          || (img && (!img.complete || img.naturalWidth === 0))
+        );
+        return {
+          hasCaptchaInput: !!input,
+          hasCaptchaText: /Roboter|Sicherheitsprüfung|Sicherheitsabfrage|Zeichen aus dem Bild/i.test(allText),
+          success: /Kontaktanfrage.{0,80}(gesendet|verschickt|erfolgreich)|Nachricht.{0,80}(gesendet|verschickt)|Vielen Dank.{0,120}(Nachricht|Kontaktanfrage)/i.test(allText)
+            || !!document.querySelector('[class*="StatusMessage_status-confirm"]'),
+          serverError: /Es ist ein Fehler aufgetreten/i.test(allText),
+          validationText: /(Bitte füllen|Pflichtfeld|fehlerhaft|korrigieren|benötigt)/i.test(allText),
+          loading,
+          imgSrc,
+          imgLoaded: !!img && img.complete && img.naturalWidth > 0,
+        };
+      });
+
+      if (state.success) return 'accepted';
+      if (!state.hasCaptchaInput && !state.hasCaptchaText) return 'captcha_gone';
+      if (state.serverError || state.validationText) return 'rejected_with_error';
+      if (state.loading) {
+        sawLoading = true;
+        await jitter(500, 900);
+        continue;
+      }
+
+      const previousSrc = previousChallenge?.src || '';
+      if (previousSrc && state.imgLoaded && state.imgSrc && state.imgSrc !== previousSrc) {
+        return 'new_challenge';
+      }
+
+      // If the same challenge is still visible after a submit, wait longer.
+      // IS24 can leave the modal in a loading-ish state without setting disabled.
+      await jitter(sawLoading ? 700 : 500, sawLoading ? 1200 : 900);
+    }
+    return 'same_challenge_timeout';
   }
 
   async _solveWith2captcha(screenshot, apiKey, captchaStats) {
