@@ -299,6 +299,7 @@ async function applyOne(listing, filterId, db) {
     log(`  [DRY RUN] Would apply to: ${listing.title} (${listing.expose_id})`);
     emit({
       type: 'listing',
+      sentAt: new Date().toISOString(),
       outcome: 'DRY_RUN',
       exposeId: listing.expose_id,
       title: listing.title,
@@ -326,6 +327,7 @@ async function applyOne(listing, filterId, db) {
       log(`  ✓ SENT | ${listing.expose_id} | ${listing.title} | ${result.detail || ''}${captchaSolved ? ' (captcha solved)' : ''}`);
       emit({
         type: 'listing',
+        sentAt: new Date().toISOString(),
         outcome: 'SENT',
         exposeId: listing.expose_id,
         title: listing.title,
@@ -397,6 +399,7 @@ async function applyOne(listing, filterId, db) {
 
       emit({
         type: 'listing',
+        sentAt: new Date().toISOString(),
         outcome,
         exposeId: listing.expose_id,
         title: listing.title,
@@ -788,7 +791,7 @@ function setupIpc(db) {
         log(`Manual poll for: ${filter.name || filter.id}`);
 
         const MAX_PAGES = 5, PAGE_SIZE = 20;
-        let allInserted = 0, allFetched = 0, duplicateProtected = 0;
+        let allInserted = 0, allFetched = 0, duplicateProtected = 0, tauschExcluded = 0, firstPollCapped = false;
         for (let page = 1; page <= MAX_PAGES; page++) {
           const { listings, error } = await fetchListings(filter.web_url, page);
           if (error) {
@@ -798,9 +801,13 @@ function setupIpc(db) {
             }
             break;
           }
-          const filteredListings = (currentConfig.polling?.exclude_tauschwohnungen ?? true)
+          const excludeTausch = currentConfig.polling?.exclude_tauschwohnungen ?? true;
+          const filteredListings = excludeTausch
             ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
             : listings;
+          if (excludeTausch) {
+            tauschExcluded += Math.max(0, listings.length - filteredListings.length);
+          }
           const dedupedPn = filteredListings.filter(
             (l) => !db.isManuallyApplied(l.expose_id)
           );
@@ -811,6 +818,7 @@ function setupIpc(db) {
           const listingsToInsert = isFirstPoll
             ? dedupedPn.slice(0, Math.max(0, firstPollLimit - allInserted))
             : dedupedPn;
+          if (isFirstPoll && dedupedPn.length > firstPollLimit) firstPollCapped = true;
           if (!filterIsStillEnabled(db, filter.id)) break;
           const inserted = db.insertListings(listingsToInsert, filter.id);
           allInserted += inserted;
@@ -824,7 +832,7 @@ function setupIpc(db) {
         }
         const nextPollAt = resetNextPollDue();
         emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
-        emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted, duplicate_protected: duplicateProtected });
+        emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted, fetched: allFetched, duplicate_protected: duplicateProtected, tauschwohnungen_excluded: tauschExcluded, first_poll_capped: firstPollCapped });
       } catch (err) {
         log(`Poll-now error [${msg.filterId}]: ${err.message}`);
         emit({ type: 'poll_error', filter_id: msg.filterId, error: err.message });

@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('homelander', {
   // ── App lifecycle ───────────────────────────────────────────
   quit: () => ipcRenderer.invoke('app:quit'),
   cleanData: (email) => ipcRenderer.invoke('data:clean', email),
+  resetApplications: (email) => ipcRenderer.invoke('data:reset-applications', email),
   openExternal: (url) => {
     // Allowlist: only https and mailto URLs
     try {

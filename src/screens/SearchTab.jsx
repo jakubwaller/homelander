@@ -279,12 +279,16 @@ export default function SearchTab() {
     : stats.duplicateProtectionStatus === 'failed'
       ? t('search.duplicateFailedHelper', 'Wird nach dem Login automatisch geprüft.')
       : lastMessengerCheckedAt
-        ? (stats.messengerNewFutureSkips > 0
-          ? t('search.lastMessengerCheckNew', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} neu geschützt · {{time}}')
-          : t('search.lastMessengerCheck', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} geschützt · {{time}}'))
-            .replace('{{count}}', checkedCount)
-            .replace('{{protected}}', protectedCount)
-            .replace('{{time}}', lastMessengerCheckedAt)
+        ? (protectedCount > 0
+          ? (stats.messengerNewFutureSkips > 0
+            ? t('search.lastMessengerCheckNew', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} neu geschützt · {{time}}')
+            : t('search.lastMessengerCheck', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} geschützt · {{time}}'))
+              .replace('{{count}}', checkedCount)
+              .replace('{{protected}}', protectedCount)
+              .replace('{{time}}', lastMessengerCheckedAt)
+          : t('search.lastMessengerCheckNone', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{time}}')
+              .replace('{{count}}', checkedCount)
+              .replace('{{time}}', lastMessengerCheckedAt))
         : t('search.duplicateReadyHelper', 'Homelander prüft vor dem Versand deine IS24 Nachrichten.');
 
   // ── Render ─────────────────────────────────────────────────────

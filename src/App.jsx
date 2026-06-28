@@ -45,10 +45,14 @@ function AppInner() {
         setSetupComplete(true);
       }
 
-      const { stats, recent, error } = await window.homelander.getStats();
-      if (!error) {
-        setStats(normalizeStats(stats));
-        if (recent) {
+      const [{ stats: allTimeStats, recent, error }, { stats: todayStats }] = await Promise.all([
+        window.homelander.getStats(),
+        window.homelander.getTodayStats(),
+      ]);
+      if (!error && todayStats) {
+        setStats(normalizeStats(todayStats));
+      }
+      if (!error && recent) {
           for (const item of [...recent].reverse()) {
             addActivity({
               outcome: item.outcome,
@@ -62,7 +66,6 @@ function AppInner() {
               imageUrl: item.image_url,
             });
           }
-        }
       }
 
       const { filters } = await window.homelander.getFilters();
@@ -99,7 +102,7 @@ function AppInner() {
         address: data.address,
         detail: data.detail,
         failureReason: data.failureReason,
-        time: new Date().toISOString(),
+        time: data.sentAt || new Date().toISOString(),
         imageUrl: data.imageUrl,
       });
     }));
@@ -155,6 +158,9 @@ function AppInner() {
       }
       if (data.type === 'retry_queued') {
         window.dispatchEvent(new CustomEvent('homelander:retry-queued', { detail: { exposeId: data.exposeId } }));
+      }
+      if (data.type === 'poll_complete') {
+        window.dispatchEvent(new CustomEvent('homelander:poll-complete', { detail: data }));
       }
     }));
 

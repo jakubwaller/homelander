@@ -63,6 +63,9 @@ export default function SettingsTab() {
   const [cleanupStep, setCleanupStep] = useState(null); // null | 'confirm' | 'purging'
   const [cleanupEmail, setCleanupEmail] = useState('');
   const [cleanupError, setCleanupError] = useState(null);
+  const [appResetStep, setAppResetStep] = useState(null); // null | 'confirm' | 'purging'
+  const [appResetEmail, setAppResetEmail] = useState('');
+  const [appResetError, setAppResetError] = useState(null);
   const [supportBusy, setSupportBusy] = useState(false);
   const [feedback, setFeedback] = useState(null); // { type: 'success'|'error', msg }
   const [feedbackVisible, setFeedbackVisible] = useState(false);
@@ -240,6 +243,37 @@ export default function SettingsTab() {
       if (res?.error) {
         setCleanupStep('confirm');
         setCleanupError(userErrorText(res.userError || res, { operation: 'data cleanup' }, t));
+      }
+      // On success, app relaunches — no state update needed
+    }
+  };
+
+  // ── Reset Applications Only ────────────────────────────────────
+
+  const handleResetApps = () => {
+    setAppResetStep('confirm');
+    setAppResetEmail('');
+    setAppResetError(null);
+  };
+
+  const handleCancelResetApps = () => {
+    setAppResetStep(null);
+    setAppResetEmail('');
+    setAppResetError(null);
+  };
+
+  const handleConfirmResetApps = async () => {
+    if (!appResetEmail.trim()) {
+      setAppResetError(t('settings.resetApps.emailRequired', 'Enter your email to confirm.'));
+      return;
+    }
+    setAppResetStep('purging');
+    setAppResetError(null);
+    if (window.homelander?.resetApplications) {
+      const res = await window.homelander.resetApplications(appResetEmail.trim());
+      if (res?.error) {
+        setAppResetStep('confirm');
+        setAppResetError(userErrorText(res.userError || res, { operation: 'app data reset' }, t));
       }
       // On success, app relaunches — no state update needed
     }
@@ -619,6 +653,57 @@ export default function SettingsTab() {
         ) : (
           <button className="btn btn-danger text-sm w-full" disabled>
             {t('settings.purgingAll', 'Purging all data…')}
+          </button>
+        )}
+      </div>
+
+      {/* ── 9. Reset Application Data ──────────────────────────── */}
+      <div className="pt-2">
+        {appResetStep === null ? (
+          <button
+            className="btn text-sm w-full"
+            onClick={handleResetApps}
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
+          >
+            {t('settings.resetApplications', 'Reset Application Data')}
+          </button>
+        ) : appResetStep === 'confirm' ? (
+          <div className="p-4 rounded-lg" style={{ border: '1px solid var(--warning)', background: 'rgba(245,158,11,0.06)' }}>
+            <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>
+              {t('settings.resetAppsConfirm', 'Removes all listings, searches, and history. Your settings and IS24 login are kept. Type your email to confirm.')}
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                className="input text-sm flex-1"
+                type="email"
+                placeholder={config?.persona?.email || 'your@email.com'}
+                value={appResetEmail}
+                onChange={(e) => { setAppResetEmail(e.target.value); setAppResetError(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleConfirmResetApps(); }}
+              />
+              <button
+                className="btn text-xs"
+                onClick={handleConfirmResetApps}
+                disabled={appResetStep === 'purging'}
+                style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--warning)', border: '1px solid rgba(245,158,11,0.3)' }}
+              >
+                {appResetStep === 'purging' ? t('settings.purging', 'Purging…') : t('settings.continue', 'Continue')}
+              </button>
+              <button className="btn btn-ghost text-xs" onClick={handleCancelResetApps}>
+                {t('settings.cancel', 'Cancel')}
+              </button>
+            </div>
+            {appResetError && (
+              <p className="text-xs mt-2" style={{ color: 'var(--danger)' }}>{appResetError}</p>
+            )}
+          </div>
+        ) : (
+          <button
+            className="btn text-sm w-full"
+            disabled
+            style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}
+          >
+            {t('settings.purgingApps', 'Purging application data…')}
           </button>
         )}
       </div>

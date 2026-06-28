@@ -832,6 +832,10 @@ function handleDaemonEvent(event) {
       mainWindow.webContents.send('homelander:event', event);
       try { broadcastStats(db().getTodayStats()); } catch (err) { swallow(err, 'main/nachrichten-sync-stats'); }
       break;
+    case 'poll_complete':
+      mainWindow.webContents.send('homelander:event', event);
+      try { broadcastStats(db().getTodayStats()); } catch (err) { swallow(err, 'main/poll-complete-stats'); }
+      break;
     case 'error': {
       const supportId = logRawError('daemon event', new Error(event.message || 'Daemon error'), { type: event.type });
       const userError = toUserError(event.message || event, { operation: 'daemon', supportId });
@@ -1010,13 +1014,17 @@ function registerIpcHandlers() {
 
       const { fetchListings } = await import('../engine/url-translator.js');
       const MAX_PAGES = 5, PAGE_SIZE = 20;
-      let allInserted = 0, allFetched = 0, duplicateProtected = 0;
+      let allInserted = 0, allFetched = 0, duplicateProtected = 0, tauschExcluded = 0, firstPollCapped = false;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const { listings, error } = await fetchListings(filter.web_url, page);
         if (error) break;
-        const filteredListings = (config.polling?.exclude_tauschwohnungen ?? true)
+        const excludeTausch = config.polling?.exclude_tauschwohnungen ?? true;
+        const filteredListings = excludeTausch
           ? listings.filter((listing) => !String(listing.title || '').toLowerCase().includes('tauschwohnung'))
           : listings;
+        if (excludeTausch) {
+          tauschExcluded += Math.max(0, listings.length - filteredListings.length);
+        }
         const dedupedListings = filteredListings.filter(
           (l) => !db().isManuallyApplied(l.expose_id)
         );
@@ -1027,6 +1035,7 @@ function registerIpcHandlers() {
         const listingsToInsert = isFirstPoll
           ? dedupedListings.slice(0, Math.max(0, firstPollLimit - allInserted))
           : dedupedListings;
+        if (isFirstPoll && dedupedListings.length > firstPollLimit) firstPollCapped = true;
         const inserted = db().insertListings(listingsToInsert, filter.id);
         allInserted += inserted;
         if (isFirstPoll && allInserted >= firstPollLimit) break;
@@ -1040,16 +1049,19 @@ function registerIpcHandlers() {
       resetDaemonPollSchedule('manual_poll_finished');
       const stats = { ...db().getTodayStats(), nextPollAt, next_poll_at: nextPollAt };
       broadcastStats(stats);
-      if (mainWindow && allInserted > 0) {
+      if (mainWindow && (allInserted > 0 || allFetched > 0)) {
         mainWindow.webContents.send('homelander:event', {
           type: 'poll_complete',
           filter_id: filter.id,
           inserted: allInserted,
+          fetched: allFetched,
           duplicate_protected: duplicateProtected,
+          tauschwohnungen_excluded: tauschExcluded,
+          first_poll_capped: firstPollCapped,
         });
       }
 
-      return { ok: true, inserted: allInserted, fetched: allFetched, duplicate_protected: duplicateProtected, ...latestNachrichtenSync };
+      return { ok: true, inserted: allInserted, fetched: allFetched, duplicate_protected: duplicateProtected, tauschwohnungen_excluded: tauschExcluded, first_poll_capped: firstPollCapped, ...latestNachrichtenSync };
     } catch (err) {
       return { ok: false, ...gracefulFailure('daemon:poll-now', err, { code: 'SEARCH_POLL_FAILED' }) };
     }
@@ -1440,6 +1452,40 @@ function registerIpcHandlers() {
     try { rmSync(DEBUG_DIR, { recursive: true, force: true }); } catch (err) { swallow(err, 'main/clean-debug-dir'); }
 
     // Relaunch fresh — config will be recreated with defaults
+    app.relaunch();
+    app.exit(0);
+    return { ok: true };
+  });
+
+  // ── Reset application data only (keep config + chrome profiles) ─
+  ipcMain.handle('data:reset-applications', async (_event, confirmEmail) => {
+    const configuredEmail = config?.persona?.email || config?.is24?.email || '';
+    if (!configuredEmail || confirmEmail !== configuredEmail) {
+      return gracefulFailure('data:reset-applications confirm', new Error('Email does not match.'), { code: 'CLEANUP_CONFIRMATION_FAILED' });
+    }
+
+    // Stop daemon first
+    daemonStatus = 'stopped';
+    latestNextPollAt = null;
+    try { unlinkSync(PAUSE_FLAG); } catch (err) { swallow(err, 'main/unlink-pause-flag'); }
+    await stopDaemon();
+
+    // Close main-process DB handle before unlinking
+    closeSharedDb();
+
+    // Small grace period for OS to release file handles
+    await new Promise(r => setTimeout(r, 500));
+
+    // Delete only the database — config and chrome profiles stay
+    try { unlinkSync(DB_PATH); } catch (err) { logRawError('data:reset-applications db delete', err, { code: 'DATABASE_ERROR' }); }
+    // Also clean up SQLite WAL/SHM companion files
+    try { unlinkSync(DB_PATH + '-wal'); } catch (_) {}
+    try { unlinkSync(DB_PATH + '-shm'); } catch (_) {}
+
+    // Delete daemon log (will be recreated on next start)
+    try { unlinkSync(DAEMON_LOG); } catch (err) { swallow(err, 'main/reset-daemon-log'); }
+
+    // Relaunch — config is intact, fresh DB will be created on start
     app.relaunch();
     app.exit(0);
     return { ok: true };
