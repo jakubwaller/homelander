@@ -272,22 +272,21 @@ export default function SearchTab() {
   const lastMessengerCheckedAt = stats.messengerCheckedAt
     ? new Date(stats.messengerCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     : null;
-  const checkedCount = stats.messengerConversationsChecked || stats.messengerExposeIdsSeen || 0;
   const protectedCount = (stats.messengerPendingRowsProtected || 0) + (stats.messengerNewFutureSkips || 0);
+  const newCount = stats.messengerNewFutureSkips || 0;
   const duplicateSummary = stats.duplicateProtectionStatus === 'checking'
     ? t('search.duplicateCheckingHelper', 'Bereits kontaktierte Anzeigen werden erkannt.')
     : stats.duplicateProtectionStatus === 'failed'
       ? t('search.duplicateFailedHelper', 'Wird nach dem Login automatisch geprüft.')
       : lastMessengerCheckedAt
         ? (protectedCount > 0
-          ? (stats.messengerNewFutureSkips > 0
-            ? t('search.lastMessengerCheckNew', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} neu geschützt · {{time}}')
-            : t('search.lastMessengerCheck', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{protected}} geschützt · {{time}}'))
-              .replace('{{count}}', checkedCount)
+          ? (newCount > 0
+            ? t('search.lastMessengerCheckNew', '{{protected}} geschützt · {{new}} neu · {{time}}')
+            : t('search.lastMessengerCheck', '{{protected}} geschützt · {{time}}'))
               .replace('{{protected}}', protectedCount)
+              .replace('{{new}}', newCount)
               .replace('{{time}}', lastMessengerCheckedAt)
-          : t('search.lastMessengerCheckNone', 'Letzte Nachrichten-Prüfung: {{count}} geprüft · {{time}}')
-              .replace('{{count}}', checkedCount)
+          : t('search.lastMessengerCheckNone', 'Letzte Prüfung: {{time}}')
               .replace('{{time}}', lastMessengerCheckedAt))
         : t('search.duplicateReadyHelper', 'Homelander prüft vor dem Versand deine IS24 Nachrichten.');
 

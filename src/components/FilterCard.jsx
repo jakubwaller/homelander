@@ -50,7 +50,10 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
       parts.push(t('search.noNewListings', 'No new listings.'));
     }
 
-    if (result.tauschwohnungen_excluded > 0) {
+    // Only show tausch count when NOT the first poll for this filter.
+    // On the first poll the multi-page scan may fetch far more listings
+    // than the 10-listing insert cap, making the count misleading.
+    if (result.tauschwohnungen_excluded > 0 && !result.first_poll_capped && filter.first_poll_done) {
       parts.push(t('search.tauschExcluded', '{{count}} swap apartments filtered').replace('{{count}}', result.tauschwohnungen_excluded));
     }
 
@@ -144,8 +147,7 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
 
           {/* Stats row */}
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>{t('search.today', 'Today')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
-            <span>{t('search.total', 'Total')} <strong style={{ color: 'var(--text-secondary)' }}>{filter.processed_all_time || 0}/{filter.total_seen || 0}</strong></span>
+            <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
             {filter.new_count > 0 && (
               <span className="badge badge-accent">+{filter.new_count} {t('search.pending', 'pending')}</span>
             )}
