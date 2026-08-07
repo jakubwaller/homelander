@@ -26,11 +26,13 @@ extraResources:
 
 mac:
   category: public.app-category.productivity
+  # Arch is set by the CLI (--arm64 / --x64), never listed here. With
+  # npmRebuild:false, listing both arches would pack the build host's native
+  # modules into every arch's bundle — that shipped an arm64 better_sqlite3.node
+  # inside the x64 app in v1.5.0. CI builds each arch on its own native runner.
   target:
-    - target: dmg
-      arch: [arm64, x64]
-    - target: zip
-      arch: [arm64, x64]
+    - dmg
+    - zip
   icon: resources/icon.icns
   hardenedRuntime: false
   entitlements: build/entitlements.mac.plist

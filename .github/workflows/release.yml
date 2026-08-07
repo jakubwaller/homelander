@@ -25,12 +25,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Each mac arch builds on its own native runner. Do NOT collapse these
+          # into one job: npmRebuild is false, so a single runner would pack its
+          # own arch's better_sqlite3.node (and Chrome) into both bundles.
           - os: macos-latest
             platform: mac
+            arch: arm64
+            archFlag: '--arm64'
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+            archFlag: '--x64'
           # - os: ubuntu-latest
           #   platform: linux
           - os: windows-latest
             platform: win
+            arch: x64
+            archFlag: ''
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -75,15 +86,51 @@ jobs:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
 
       - name: Verify native module arch
-        if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
-        run: file node_modules/better-sqlite3/build/Release/better_sqlite3.node
+        if: ${{ runner.os == 'macOS' && (github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform) }}
+        run: |
+          set -euo pipefail
+          EXPECT=$([ "${{ matrix.arch }}" = "arm64" ] && echo arm64 || echo x86_64)
+          INFO=$(file -b node_modules/better-sqlite3/build/Release/better_sqlite3.node)
+          echo "better_sqlite3.node: $INFO (expecting $EXPECT)"
+          case "$INFO" in
+            *"$EXPECT"*) echo "OK" ;;
+            *) echo "::error::better_sqlite3.node is not $EXPECT — refusing to package a cross-arch build"; exit 1 ;;
+          esac
 
       - name: Build
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}
-        run: npm run dist:${{ matrix.platform }}
+        run: npm run dist:${{ matrix.platform }} -- ${{ matrix.archFlag }}
         env:
           PUPPETEER_SKIP_DOWNLOAD: 'true'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The invariant that actually matters: everything inside the shipped .app
+      # is the target arch. v1.5.0's x64 dmg carried an arm64 better_sqlite3.node
+      # and an arm64 Chromium, and nothing caught it before release.
+      - name: Verify packaged app arch
+        if: ${{ runner.os == 'macOS' && (github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform) }}
+        run: |
+          set -uo pipefail
+          EXPECT=$([ "${{ matrix.arch }}" = "arm64" ] && echo arm64 || echo x86_64)
+          APP=$(find release -maxdepth 2 -name 'Homelander.app' -print -quit)
+          if [ -z "$APP" ]; then echo "::error::no packaged .app found under release/"; exit 1; fi
+          echo "Checking $APP (expecting $EXPECT)"
+          FAIL=0
+          check() {
+            if [ -z "$2" ] || [ ! -e "$2" ]; then
+              echo "::error::$1 missing (looked for: ${2:-<not found>})"; FAIL=1; return
+            fi
+            INFO=$(file -b "$2")
+            echo "  $1: $INFO"
+            case "$INFO" in
+              *"$EXPECT"*) ;;
+              *) echo "::error::$1 is not $EXPECT"; FAIL=1 ;;
+            esac
+          }
+          check "electron binary" "$APP/Contents/MacOS/Homelander"
+          check "better_sqlite3.node" "$APP/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          check "bundled Chrome" "$(find "$APP/Contents/Resources/chrome-bin" -type f -name 'Google Chrome for Testing' -print -quit 2>/dev/null)"
+          exit $FAIL
 
       - name: Upload to release
         if: ${{ github.event.inputs.platforms == 'all' || github.event.inputs.platforms == matrix.platform }}

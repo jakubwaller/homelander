@@ -73,9 +73,11 @@ Download the latest version from the **[Releases](https://github.com/B1Z0N/homel
 
 | Platform | Package |
 |----------|---------|
-| macOS (Apple Silicon) | `Homelander-*.arm64.dmg` |
-| macOS (Intel) | `Homelander-*.dmg` |
-| Windows | `Homelander-*.exe` |
+| macOS (Apple Silicon — M1 and newer) | `Homelander-<version>-arm64.dmg` |
+| macOS (Intel) | `Homelander-<version>.dmg` — the one *without* `-arm64` |
+| Windows | `Homelander.Setup.<version>.exe` |
+
+Not sure which Mac you have? **Apple menu → About This Mac**: "Apple M…" means Apple Silicon, "Intel" means Intel.
 
 ### macOS — first run
 
