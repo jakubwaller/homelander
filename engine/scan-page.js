@@ -98,7 +98,7 @@ export function renderScanPage() {
       <option value="7">Letzte 7 Tage</option>
       <option value="30">Letzte 30 Tage</option>
     </select>
-    <label class="chk"><input type="checkbox" id="f-hideseen" checked> Gesehene ausblenden</label>
+    <label class="chk"><input type="checkbox" id="f-hideseen"> Gesehene ausblenden</label>
   </div>
 </header>
 <div id="layout">
@@ -112,6 +112,7 @@ export function renderScanPage() {
   'use strict';
   var all = [];
   var markers = {};
+  var cards = {};
   var markerLayer = null;
   var map = null;
   var activeHash = null;
@@ -180,6 +181,12 @@ export function renderScanPage() {
     return source === 'kleinanzeigen' ? '#059669' : source === 'neubaukompass' ? '#dc2626' : '#7c3aed';
   }
 
+  function markerStyle(l) {
+    return l.seen
+      ? { radius: 7, weight: 2, color: '#ffffff', fillColor: '#94a3b8', fillOpacity: 0.6 }
+      : { radius: 7, weight: 2, color: '#ffffff', fillColor: sourceColor(l.source), fillOpacity: 0.9 };
+  }
+
   function filtered() {
     var fid = document.getElementById('f-filter').value;
     var q = document.getElementById('f-q').value.trim().toLowerCase();
@@ -233,13 +240,23 @@ export function renderScanPage() {
       '<button class="seen-btn" title="' + (l.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren') + '">✓</button>';
   }
 
-  function toggleSeen(l) {
-    var next = !l.seen;
+  // inPlace restyles the existing card + marker instead of re-rendering,
+  // so the map popup a click just opened stays open.
+  function setSeen(l, next, inPlace) {
     fetch('/api/scan/seen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hash: l.hash, seen: next })
-    }).then(function () { l.seen = next ? 1 : 0; render(); }).catch(function () {});
+    }).then(function () {
+      l.seen = next ? 1 : 0;
+      if (!inPlace) return render();
+      if (markers[l.hash]) markers[l.hash].setStyle(markerStyle(l));
+      if (cards[l.hash]) cards[l.hash].classList.toggle('seen', !!l.seen);
+    }).catch(function () {});
+  }
+
+  function toggleSeen(l) {
+    setSeen(l, !l.seen);
   }
 
   function render() {
@@ -253,6 +270,7 @@ export function renderScanPage() {
     }
     markerLayer.clearLayers();
     markers = {};
+    cards = {};
     var bounds = [];
     rows.forEach(function (l) {
       var card = document.createElement('div');
@@ -264,10 +282,11 @@ export function renderScanPage() {
         toggleSeen(l);
       });
       list.appendChild(card);
+      cards[l.hash] = card;
       if (l.lat != null && l.lng != null) {
-        var m = L.circleMarker([l.lat, l.lng], {
-          radius: 7, weight: 2, color: '#ffffff',
-          fillColor: sourceColor(l.source), fillOpacity: 0.9
+        var m = L.circleMarker([l.lat, l.lng], markerStyle(l));
+        m.on('click', function () {
+          if (!l.seen) setSeen(l, true, true);
         });
         m.bindPopup(
           '<strong>' + esc(l.title || '') + '</strong><br>' + euro(l.price) +

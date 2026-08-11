@@ -533,7 +533,7 @@ export class HomelanderDB {
       FROM listings l
       JOIN filters f ON f.id = l.filter_id
       LEFT JOIN scan_seen ss ON ss.hash = l.hash
-      WHERE f.mode = 'scan'
+      WHERE f.mode = 'scan' AND f.archived = 0
     `;
     const params = [];
     if (filterId) { sql += ' AND l.filter_id = ?'; params.push(filterId); }
