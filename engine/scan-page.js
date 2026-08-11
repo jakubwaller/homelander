@@ -127,8 +127,10 @@ export function renderScanPage() {
     markerLayer = L.layerGroup().addTo(map);
   }
 
+  // Marker fills need to be dark and saturated: the pastel badge colours wash
+  // out on the light OSM tiles.
   function sourceColor(source) {
-    return source === 'kleinanzeigen' ? '#86efac' : source === 'neubaukompass' ? '#fca5a5' : '#7dd3fc';
+    return source === 'kleinanzeigen' ? '#059669' : source === 'neubaukompass' ? '#dc2626' : '#7c3aed';
   }
 
   function filtered() {
@@ -201,8 +203,8 @@ export function renderScanPage() {
       list.appendChild(card);
       if (l.lat != null && l.lng != null) {
         var m = L.circleMarker([l.lat, l.lng], {
-          radius: 7, weight: 2, color: sourceColor(l.source),
-          fillColor: sourceColor(l.source), fillOpacity: 0.5
+          radius: 7, weight: 2, color: '#ffffff',
+          fillColor: sourceColor(l.source), fillOpacity: 0.9
         });
         m.bindPopup(
           '<strong>' + esc(l.title || '') + '</strong><br>' + euro(l.price) +
