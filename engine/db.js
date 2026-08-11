@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS geo_cache (
   resolved_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS scan_seen (
+  hash TEXT PRIMARY KEY,
+  seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   listing_hash TEXT,
@@ -118,6 +123,8 @@ export class HomelanderDB {
           // Column already exists (first-run via SCHEMA) — ignore
         }
       }
+      // v5 → v6: scan_seen table (Kaufradar "gesehen" flag) — created by the
+      // SCHEMA exec below, no ALTER needed.
       // v4 → v5: scan mode (analysis-only buy searches), multi-source
       // listings, geo columns for the map view.
       if (version && version.version < 5) {
@@ -521,9 +528,11 @@ export class HomelanderDB {
   /** Listings belonging to scan-mode filters, newest first. */
   getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null } = {}) {
     let sql = `
-      SELECT l.*, f.name AS filter_name, f.web_url AS filter_url
+      SELECT l.*, f.name AS filter_name, f.web_url AS filter_url,
+             (ss.hash IS NOT NULL) AS seen
       FROM listings l
       JOIN filters f ON f.id = l.filter_id
+      LEFT JOIN scan_seen ss ON ss.hash = l.hash
       WHERE f.mode = 'scan'
     `;
     const params = [];
@@ -532,6 +541,14 @@ export class HomelanderDB {
     sql += ' ORDER BY l.discovered_at DESC, l.rowid DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
     return this.db.prepare(sql).all(...params);
+  }
+
+  /** Kaufradar "gesehen" flag — checked off listings the user is done with. */
+  setListingSeen(hash, seen) {
+    if (seen) {
+      return this.db.prepare('INSERT OR IGNORE INTO scan_seen (hash) VALUES (?)').run(hash);
+    }
+    return this.db.prepare('DELETE FROM scan_seen WHERE hash = ?').run(hash);
   }
 
   /** Attach enrichment data (coordinates, expose details) to a listing. */

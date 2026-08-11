@@ -365,6 +365,7 @@ export async function fetchIs24ExposeDetails(exposeId) {
     let addressLine = '';
     const attributeGroups = [];
     const texts = [];
+    const media = [];
 
     for (const section of sections) {
       if (section?.type === 'MAP') {
@@ -384,13 +385,24 @@ export async function fetchIs24ExposeDetails(exposeId) {
         if (items.length) attributeGroups.push({ title: section.title || '', items });
       } else if (section?.type === 'TEXT_AREA' && section.text) {
         texts.push({ title: section.title || '', text: String(section.text) });
+      } else if (section?.type === 'MEDIA') {
+        for (const m of section.media || []) {
+          const url = m.fullImageUrl || m.previewImageUrl || '';
+          if (!url) continue;
+          media.push({
+            type: String(m.type || 'PICTURE'),
+            caption: String(m.caption || ''),
+            url,
+            floorplan: /floor|plan/i.test(m.type || '') || /grundriss/i.test(m.caption || ''),
+          });
+        }
       }
     }
 
     return {
       lat,
       lng,
-      details: { address: addressLine, attributeGroups, texts },
+      details: { address: addressLine, attributeGroups, texts, media },
       error: null,
     };
   } catch (err) {

@@ -6,6 +6,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fetchIs24ExposeDetails, geocodePostcode } from './sources.js';
+import { downloadMediaBatch } from './media.js';
 import { maybeSendWeeklyReport } from './report.js';
 
 function sleep(ms) {
@@ -79,6 +80,12 @@ export function createScanCycle({ log = () => {} } = {}) {
       if (enriched > 0) log(`Scan enrichment: ${enriched} listing(s) updated`);
     } catch (err) {
       log(`[scan-cycle] enrichment cycle failed: ${err?.message || err}`);
+    }
+    try {
+      const saved = await downloadMediaBatch(db, dataDir, { log });
+      if (saved > 0) log(`Media archive: ${saved} file(s) saved`);
+    } catch (err) {
+      log(`[scan-cycle] media download failed: ${err?.message || err}`);
     }
     try {
       exported = exportListings(db, dataDir);

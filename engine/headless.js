@@ -185,6 +185,9 @@ async function main() {
   while (running) {
     await pollScanFilters(db, config);
     await scanCycle.run(db, config, DATA_DIR);
+    // Cheap no-op while the cache is fresh; retries a failed Overpass fetch
+    // on the next cycle instead of waiting for a container restart.
+    if (!once) await ensureTransitLines(DATA_DIR, { log });
     if (once) break;
     await sleep(intervalSec * 1000);
   }

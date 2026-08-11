@@ -15,6 +15,7 @@ const BBOX = '53.25,9.35,53.95,10.45';
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
 ];
 
 // S-Bahn tagging varies (light_rail vs train), so match both and keep the
@@ -81,6 +82,11 @@ export async function ensureTransitLines(dataDir, { log = () => {} } = {}) {
     try {
       const resp = await fetch(endpoint, {
         method: 'POST',
+        headers: {
+          // overpass-api.de 406s the bare node fetch UA.
+          'User-Agent': 'homelander-kaufradar/1.0 (+https://github.com/jakubwaller/homelander)',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
         body: 'data=' + encodeURIComponent(QUERY),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

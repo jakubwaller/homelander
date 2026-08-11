@@ -45,6 +45,14 @@ export function renderScanPage() {
   .badge.kleinanzeigen { color:#86efac; border-color:#86efac44; }
   .badge.neubaukompass { color:#fca5a5; border-color:#fca5a544; }
   .badge.new { color:var(--green); border-color:#34d39944; }
+  .card.seen { opacity:.45; }
+  .seen-btn { background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:3px 9px; font-size:12px; cursor:pointer; flex-shrink:0; align-self:flex-start; }
+  .seen-btn:hover { border-color:var(--gold); color:var(--gold); }
+  .card.seen .seen-btn, .seen-btn.on { color:var(--green); border-color:#34d39944; }
+  label.chk { display:flex; gap:5px; align-items:center; font-size:13px; color:var(--text-dim); cursor:pointer; }
+  #detail .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin:10px 0; }
+  #detail .gallery img { width:100%; height:104px; object-fit:cover; border-radius:8px; background:var(--bg-elevated); }
+  #detail .gallery img.fp { outline:2px solid var(--gold-dark); }
   #empty { color:var(--text-muted); text-align:center; padding:40px 10px; }
   /* Detail modal */
   #overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none; align-items:flex-start; justify-content:center; z-index:2000; overflow-y:auto; padding:5vh 16px; }
@@ -90,6 +98,7 @@ export function renderScanPage() {
       <option value="7">Letzte 7 Tage</option>
       <option value="30">Letzte 30 Tage</option>
     </select>
+    <label class="chk"><input type="checkbox" id="f-hideseen" checked> Gesehene ausblenden</label>
   </div>
 </header>
 <div id="layout">
@@ -179,7 +188,9 @@ export function renderScanPage() {
     var minSize = parseFloat(document.getElementById('f-minsize').value) || 0;
     var days = parseFloat(document.getElementById('f-days').value) || 0;
     var cutoff = days ? Date.now() - days * 24 * 3600 * 1000 : 0;
+    var hideSeen = document.getElementById('f-hideseen').checked;
     var rows = all.filter(function (l) {
+      if (hideSeen && l.seen) return false;
       if (fid && l.filter_id !== fid) return false;
       if (q && (String(l.title) + ' ' + String(l.address)).toLowerCase().indexOf(q) === -1) return false;
       if (maxPrice && !(l.price > 0 && l.price <= maxPrice)) return false;
@@ -218,7 +229,17 @@ export function renderScanPage() {
       (perSqm(l) ? '<span>' + perSqm(l) + '</span>' : '') +
       '<span class="badge ' + esc(l.source || 'is24') + '">' + esc(l.source || 'is24') + '</span>' +
       (isNew(l) ? '<span class="badge new">neu</span>' : '') +
-      '</div></div>';
+      '</div></div>' +
+      '<button class="seen-btn" title="' + (l.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren') + '">✓</button>';
+  }
+
+  function toggleSeen(l) {
+    var next = !l.seen;
+    fetch('/api/scan/seen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash: l.hash, seen: next })
+    }).then(function () { l.seen = next ? 1 : 0; render(); }).catch(function () {});
   }
 
   function render() {
@@ -235,9 +256,13 @@ export function renderScanPage() {
     var bounds = [];
     rows.forEach(function (l) {
       var card = document.createElement('div');
-      card.className = 'card' + (l.hash === activeHash ? ' active' : '');
+      card.className = 'card' + (l.hash === activeHash ? ' active' : '') + (l.seen ? ' seen' : '');
       card.innerHTML = cardHtml(l);
       card.addEventListener('click', function () { openDetail(l); });
+      card.querySelector('.seen-btn').addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        toggleSeen(l);
+      });
       list.appendChild(card);
       if (l.lat != null && l.lng != null) {
         var m = L.circleMarker([l.lat, l.lng], {
@@ -281,6 +306,8 @@ export function renderScanPage() {
     var el = document.getElementById('detail');
     el.innerHTML =
       '<button class="close" aria-label="close">×</button>' +
+      '<button class="seen-btn' + (l.seen ? ' on' : '') + '" id="detail-seen" style="position:absolute;top:12px;right:48px">' +
+      (l.seen ? '✓ gesehen' : 'als gesehen markieren') + '</button>' +
       '<h2>' + esc(l.title || l.expose_id) + '</h2>' +
       '<div class="addr" style="color:var(--text-dim)">' + esc(l.address || '') +
       (l.details && l.details.address ? ' · ' + esc(l.details.address) : '') + '</div>' +
@@ -292,9 +319,23 @@ export function renderScanPage() {
       '<div style="color:var(--text-muted);font-size:12px">Quelle: ' + esc(l.source || 'is24') +
       ' · gefunden ' + new Date(l.discovered_at + (String(l.discovered_at).endsWith('Z') ? '' : 'Z')).toLocaleString('de-DE') +
       (l.filter_name ? ' · Suche: ' + esc(l.filter_name) : '') + '</div>' +
+      '<div class="gallery" id="gallery"></div>' +
       detailTables(l.details) +
       (l.url ? '<a class="out" href="' + esc(l.url) + '" target="_blank" rel="noopener">Zum Original-Inserat ↗</a>' : '');
     el.querySelector('.close').addEventListener('click', closeDetail);
+    el.querySelector('#detail-seen').addEventListener('click', function () {
+      toggleSeen(l);
+      closeDetail();
+    });
+    fetch('/api/scan/media/' + l.hash).then(function (r) { return r.json(); }).then(function (m) {
+      var g = document.getElementById('gallery');
+      if (!g || !m.files || !m.files.length) return;
+      g.innerHTML = m.files.map(function (f) {
+        return '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">' +
+          '<img loading="lazy"' + (f.floorplan ? ' class="fp"' : '') + ' src="' + esc(f.url) + '"' +
+          ' title="' + esc(f.caption || (f.floorplan ? 'Grundriss' : '')) + '"></a>';
+      }).join('');
+    }).catch(function () { /* archive not there yet */ });
     document.getElementById('overlay').classList.add('open');
     if (l.lat != null && markers[l.hash]) {
       map.setView([l.lat, l.lng], Math.max(map.getZoom(), 13));
@@ -329,7 +370,7 @@ export function renderScanPage() {
     });
   }
 
-  ['f-filter', 'f-sort', 'f-days'].forEach(function (id) {
+  ['f-filter', 'f-sort', 'f-days', 'f-hideseen'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', render);
   });
   ['f-q', 'f-maxprice', 'f-minrooms', 'f-minsize'].forEach(function (id) {

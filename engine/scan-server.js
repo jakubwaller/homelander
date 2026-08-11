@@ -5,7 +5,7 @@
 // Started by the Electron main process; the daemon writes the data.
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { URL } from 'node:url';
 import { renderScanPage } from './scan-page.js';
@@ -53,7 +53,46 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       const url = new URL(req.url, `http://${host}`);
       const path = url.pathname;
 
+      if (req.method === 'POST' && path === '/api/scan/seen') {
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; if (body.length > 4096) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const { hash, seen } = JSON.parse(body || '{}');
+            if (!/^[a-f0-9]+$/.test(String(hash))) return json(res, 400, { error: 'bad hash' });
+            dbGetter().setListingSeen(hash, !!seen);
+            return json(res, 200, { hash, seen: !!seen });
+          } catch (err) {
+            return json(res, 400, { error: err.message });
+          }
+        });
+        return;
+      }
+
       if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
+
+      const mediaApi = path.match(/^\/api\/scan\/media\/([a-f0-9]+)$/);
+      if (mediaApi) {
+        if (!dataDir) return json(res, 200, { files: [] });
+        try {
+          const manifest = JSON.parse(readFileSync(join(dataDir, 'media', mediaApi[1], 'media.json'), 'utf8'));
+          const files = (manifest.files || []).map(f => ({ ...f, url: `/media/${mediaApi[1]}/${f.file}` }));
+          return json(res, 200, { saved_at: manifest.saved_at || null, files });
+        } catch {
+          return json(res, 200, { files: [] });
+        }
+      }
+
+      const mediaFile = path.match(/^\/media\/([a-f0-9]+)\/([\w][\w.-]*)$/);
+      if (mediaFile) {
+        const file = dataDir && join(dataDir, 'media', mediaFile[1], mediaFile[2]);
+        if (!file || !existsSync(file)) return json(res, 404, { error: 'not found' });
+        const type = { webp: 'image/webp', png: 'image/png' }[file.split('.').pop()] || 'image/jpeg';
+        // Archived listing media never changes once written.
+        res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'public, max-age=31536000, immutable' });
+        res.end(readFileSync(file));
+        return;
+      }
 
       if (path === '/' || path === '/index.html') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
