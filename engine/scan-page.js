@@ -18,8 +18,9 @@ export function renderScanPage() {
     --green: #34d399; --red: #f87171;
   }
   * { box-sizing: border-box; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 20px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:1100; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  header { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:14px 20px; border-bottom:1px solid var(--border); background:var(--bg); z-index:1100; }
   header h1 { font-size:17px; color:var(--gold); white-space:nowrap; }
   header .count { color:var(--text-dim); font-size:13px; }
   .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
@@ -29,7 +30,9 @@ export function renderScanPage() {
   }
   .controls input:focus, .controls select:focus { border-color:var(--gold); }
   .controls input[type=number] { width:96px; }
-  #layout { display:grid; grid-template-columns: minmax(360px, 46%) 1fr; height: calc(100vh - 63px); }
+  #filter-toggle { display:none; background:var(--bg-card); color:var(--text-dim); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:13px; cursor:pointer; margin-left:auto; }
+  #filter-toggle.on { border-color:var(--gold); color:var(--gold); }
+  #layout { display:grid; grid-template-columns: minmax(360px, 46%) 1fr; flex:1; min-height:0; }
   #list { overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
   #map { height:100%; }
   .card { display:flex; gap:12px; background:var(--bg-card); border:1px solid var(--border); border-radius:12px; padding:10px; cursor:pointer; transition:border-color .15s; }
@@ -72,6 +75,11 @@ export function renderScanPage() {
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--bg-elevated); color:var(--text); }
   @media (max-width: 900px) {
     #layout { grid-template-columns: 1fr; grid-template-rows: 45% 55%; }
+    #filter-toggle { display:block; }
+    .controls { display:none; width:100%; }
+    header.filters-open .controls { display:flex; }
+    /* 16px keeps iOS Safari from zooming the page on input focus */
+    .controls input, .controls select { font-size:16px; }
   }
 </style>
 </head>
@@ -79,7 +87,8 @@ export function renderScanPage() {
 <header>
   <h1>⌂ Kaufradar</h1>
   <span class="count" id="count">…</span>
-  <div class="controls">
+  <button id="filter-toggle" aria-expanded="false" aria-controls="controls">Filter</button>
+  <div class="controls" id="controls">
     <select id="f-filter"><option value="">Alle Suchen</option></select>
     <input id="f-q" type="search" placeholder="Suche in Titel/Adresse…">
     <input id="f-maxprice" type="number" placeholder="max €" step="10000">
@@ -139,6 +148,11 @@ export function renderScanPage() {
     // async fetches land.
     map.createPane('transit').style.zIndex = 350;
     markerLayer = L.layerGroup().addTo(map);
+    // The map pane resizes when the mobile filter panel opens/closes and when
+    // the mobile browser chrome collapses; Leaflet won't notice on its own.
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { map.invalidateSize(); }).observe(document.getElementById('map'));
+    }
     loadTransitLines();
     loadManualProjects();
   }
@@ -369,6 +383,12 @@ export function renderScanPage() {
     if (e.target === this) closeDetail();
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDetail(); });
+
+  document.getElementById('filter-toggle').addEventListener('click', function () {
+    var on = document.querySelector('header').classList.toggle('filters-open');
+    this.classList.toggle('on', on);
+    this.setAttribute('aria-expanded', on ? 'true' : 'false');
+  });
 
   function loadFilters() {
     return fetch('/api/scan/filters').then(function (r) { return r.json(); }).then(function (data) {
