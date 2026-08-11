@@ -5,6 +5,16 @@ All notable changes to Homelander are documented here. Format follows [Keep a Ch
 ## [Unreleased]
 
 ### Added
+- **Flat-purchase scanning (analysis-only)**: IS24 buy searches (`wohnung-kaufen`, `haus-kaufen`, `grundstueck-kaufen`) are now supported and automatically run in a new per-search `scan` mode — listings are collected and enriched but **never** auto-applied to
+- **Kaufradar**: local browse website (`http://127.0.0.1:8477`, bound to localhost) with listing grid, text/price/rooms/size filters, sorting, detail view (exposé attributes, descriptions) and an OpenStreetMap/Leaflet map of all scanned offers; "Kaufradar öffnen" button on the Searches tab
+- **Additional sources**: paste Kleinanzeigen search URLs (`kleinanzeigen.de/s-…`) or Neubaukompass project searches (`neubaukompass.de/neubau-immobilien/…`, for Neubau projects) into Add Search — both are scan-only sources
+- **Listing enrichment**: scanned IS24 listings get exposé details (costs, condition, energy, description texts) and map coordinates (exact location or postcode-area centroid); other sources are geocoded by postcode via Nominatim (cached in SQLite `geo_cache`)
+- **Local JSON export**: all scanned listings are written to `~/.homelander/scan-listings.json` after every poll
+- **Weekly e-mail report**: optional weekly summary of scanned flats via user-configured SMTP (Settings → Wochenbericht). Dependency-free SMTP client with SSL/STARTTLS/AUTH — works with Proton Mail Bridge (127.0.0.1:1025) and Proton Business SMTP tokens
+- DB schema v5: `filters.mode`/`filters.source`, listing `url`/`source`/`postcode`/`lat`/`lng`/`scan_json` columns, `geo_cache` table; existing buy filters migrate to scan mode
+- **Docker deployment (headless scanner)**: `Dockerfile` + `docker-compose.yml` run the analysis-only half (poll, enrich, export, Kaufradar, weekly report) via `engine/headless.js` — no Electron/Chromium, can never apply. Searches via `HOMELANDER_SCAN_URLS` env or `scan-searches.json` in the `/data` volume; `npm run scanner` runs the same entrypoint locally
+- **Env-configured report SMTP for Docker**: `HOMELANDER_SMTP_HOST/PORT/USER/PASSWORD` from `.env` (`env_file` in compose, `.env.example` committed, `.env` gitignored) — ProtonMail SMTP-token pattern (`smtp.protonmail.ch:587` STARTTLS, From = token address); the desktop app keeps its Settings-based SMTP config. Compose exposes the Kaufradar to the LAN by default (no auth — private networks only)
+
 - Screenshots section in README (Search, History, Settings)
 - Installation section in README with platform table, macOS `xattr -cr`, Windows SmartScreen note
 - Donation support: `.github/FUNDING.yml` (GitHub Sponsors, Buy Me a Coffee, Ko-fi)
@@ -20,6 +30,9 @@ All notable changes to Homelander are documented here. Format follows [Keep a Ch
 - Captcha wall auto-pause: removed `consecutiveCaptchas` counter, 5-failure pause, auto-resume, `captcha_wall` IPC emission
 
 ### Fixed
+- IS24 buy searches no longer send the `pricetype` parameter, which the mobile API rejects with HTTP 412 (buy searches always errored before)
+- Buy listing prices/sizes/rooms are parsed from the mobile API's label-less German-formatted attributes ("899.000 €" / "165 m²" / "5,5 Zi.")
+- Daemon no longer requires a running Chromium when only scan-mode searches are enabled (apply loop idles instead of killing the daemon, polling continues)
 - `{{name}}` template resolution now consistent between Settings preview, Setup wizard preview, and actual daemon messages
 
 ## [1.3.3] - 2026-06-25

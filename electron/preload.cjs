@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld('homelander', {
   checkIs24Login: () => ipcRenderer.invoke('chrome:checkIs24Login'),
   getIs24Email: () => ipcRenderer.invoke('chrome:getIs24Email'),
 
+  // ── Kaufradar (scan-mode browse site) ─────────────────────
+  openScanBrowser: () => ipcRenderer.invoke('scan:open'),
+  getScanStatus: () => ipcRenderer.invoke('scan:status'),
+
   // ── Setup ─────────────────────────────────────────────────
   getSetupComplete: () => ipcRenderer.invoke('setup:complete'),
   completeSetup: () => ipcRenderer.invoke('setup:done'),

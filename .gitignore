@@ -13,6 +13,9 @@ autoapply.log
 # Secrets
 config/autoapply.config.yaml
 *.bak
+.env
+.env.*
+!.env.example
 
 # Node
 node_modules/

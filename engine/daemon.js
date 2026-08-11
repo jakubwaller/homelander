@@ -92,7 +92,8 @@ if (process.platform === 'win32') {
 // Dynamic imports
 const { HomelanderDB } = await import('./db.js');
 const { IS24Contactor, DEBUG } = await import('./is24-contactor.js');
-const { fetchListings } = await import('./url-translator.js');
+const { fetchAnyListings } = await import('./sources.js');
+const { createScanCycle } = await import('./scan-cycle.js');
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -493,6 +494,15 @@ async function applyLoop(db) {
       continue;
     }
 
+    // ── Scan-only setups need no browser ─────────────────────
+    // Without any enabled apply-mode filter there is nothing to send, so
+    // skip all CDP/Chrome handling — otherwise a missing browser would
+    // stop the daemon and take the (browserless) poll loop down with it.
+    if (!db.getFilters().some(f => f.enabled && f.mode !== 'scan')) {
+      await sleep(5000);
+      continue;
+    }
+
     // ── Ensure contactor is connected ────────────────────────
     if (!contactor || !contactor.browser || !contactor.browser.isConnected()) {
       log(`CDP check — contactor=${!!contactor} browser=${!!contactor?.browser} connected=${!!contactor?.browser?.isConnected?.()}`);
@@ -565,7 +575,9 @@ async function applyLoop(db) {
     }
 
     // ── Gather pending listings (round‑robin across filters) ─
-    const filters = db.getFilters().filter(f => f.enabled);
+    // Scan-mode filters (flat purchases, external sources) are analysis-only:
+    // they must never reach the apply loop.
+    const filters = db.getFilters().filter(f => f.enabled && f.mode !== 'scan');
     if (filters.length === 0) {
       await sleep(5000);
       continue;
@@ -671,6 +683,20 @@ async function applyLoop(db) {
   }
 }
 
+// ── Scan-mode post-processing ──────────────────────────────────
+// After every poll cycle: enrich scanned listings (exposé details +
+// coordinates for the map), export everything to a local JSON file,
+// and send the weekly e-mail report when due. Shared with the headless
+// scanner (engine/headless.js) via engine/scan-cycle.js.
+
+const scanCycle = createScanCycle({ log });
+
+async function postScanCycle(db) {
+  await scanCycle.run(db, currentConfig, dirname(DB_PATH), {
+    onExported: (count) => emit({ type: 'scan_updated', count }),
+  });
+}
+
 // ── Poll loop ──────────────────────────────────────────────────
 
 async function pollLoop(db) {
@@ -705,14 +731,17 @@ async function pollLoop(db) {
         continue;
       }
       try {
-        const MAX_PAGES = 5, PAGE_SIZE = 20;
+        // Scan mode wants a deep backfill (browsing the whole market),
+        // apply mode intentionally caps the first poll to avoid mass-sends.
+        const isScan = filter.mode === 'scan';
+        const MAX_PAGES = isScan ? 10 : 5, PAGE_SIZE = 20;
         let filterNew = 0, filterFetched = 0;
         for (let page = 1; page <= MAX_PAGES; page++) {
           if (!filterIsStillEnabled(db, filter.id)) {
             log(`Poll stopped — filter paused/disabled: ${filter.name || filter.id}`);
             break;
           }
-          const { listings, error } = await fetchListings(filter.web_url, page);
+          const { listings, error } = await fetchAnyListings(filter.web_url, page);
           if (error) {
             if (page === 1) {
               log(`Poll error [${filter.id}]: ${error}`);
@@ -735,9 +764,9 @@ async function pollLoop(db) {
             (l) => !db.isManuallyApplied(l.expose_id)
           );
           filterFetched += dedupedListings.length;
-          const firstPollLimit = 10;
+          const firstPollLimit = isScan ? Infinity : 10;
           const isFirstPoll = !filter.first_poll_done;
-          const listingsToInsert = isFirstPoll
+          const listingsToInsert = (isFirstPoll && Number.isFinite(firstPollLimit))
             ? dedupedListings.slice(0, Math.max(0, firstPollLimit - filterNew))
             : dedupedListings;
           if (!filterIsStillEnabled(db, filter.id)) break;
@@ -763,6 +792,9 @@ async function pollLoop(db) {
     }
 
     log(`Poll complete — ${totalNew} new listings across ${filters.length} filters`);
+
+    // ── Scan-mode housekeeping (enrichment, JSON export, weekly report) ──
+    try { await postScanCycle(db); } catch (err) { swallow(err, 'poll/scan-post'); }
 
     // ── Emit stats with next_poll_at based on poll schedule ──
     const elapsed = Date.now() - cycleStart;
@@ -790,10 +822,11 @@ function setupIpc(db) {
         if (!filterIsStillEnabled(db, filter.id)) { log(`Poll-now skipped — filter paused/deleted: ${filter.name || filter.id}`); return; }
         log(`Manual poll for: ${filter.name || filter.id}`);
 
-        const MAX_PAGES = 5, PAGE_SIZE = 20;
+        const isScan = filter.mode === 'scan';
+        const MAX_PAGES = isScan ? 10 : 5, PAGE_SIZE = 20;
         let allInserted = 0, allFetched = 0, duplicateProtected = 0, tauschExcluded = 0, firstPollCapped = false;
         for (let page = 1; page <= MAX_PAGES; page++) {
-          const { listings, error } = await fetchListings(filter.web_url, page);
+          const { listings, error } = await fetchAnyListings(filter.web_url, page);
           if (error) {
             if (page === 1) {
               log(`Poll-now error [${filter.id}]: ${error}`);
@@ -813,9 +846,9 @@ function setupIpc(db) {
           );
           duplicateProtected += Math.max(0, filteredListings.length - dedupedPn.length);
           allFetched += dedupedPn.length;
-          const firstPollLimit = 10;
+          const firstPollLimit = isScan ? Infinity : 10;
           const isFirstPoll = !filter.first_poll_done;
-          const listingsToInsert = isFirstPoll
+          const listingsToInsert = (isFirstPoll && Number.isFinite(firstPollLimit))
             ? dedupedPn.slice(0, Math.max(0, firstPollLimit - allInserted))
             : dedupedPn;
           if (isFirstPoll && dedupedPn.length > firstPollLimit) firstPollCapped = true;
@@ -833,6 +866,9 @@ function setupIpc(db) {
         const nextPollAt = resetNextPollDue();
         emit({ type: 'stats', ...db.getTodayStats(), next_poll_at: nextPollAt });
         emit({ type: 'poll_complete', filter_id: filter.id, inserted: allInserted, fetched: allFetched, duplicate_protected: duplicateProtected, tauschwohnungen_excluded: tauschExcluded, first_poll_capped: firstPollCapped });
+        if (isScan) {
+          try { await postScanCycle(db); } catch (err) { swallow(err, 'poll-now/scan-post'); }
+        }
       } catch (err) {
         log(`Poll-now error [${msg.filterId}]: ${err.message}`);
         emit({ type: 'poll_error', filter_id: msg.filterId, error: err.message });
@@ -946,6 +982,11 @@ function setupIpc(db) {
         currentConfig.timing = msg.timing;
         if (contactor) contactor.updateTiming(msg.timing.speed || 'balanced', msg.timing.overrides || {});
         log('Config hot-reload: timing updated');
+        changed = true;
+      }
+      if (msg.report) {
+        currentConfig.report = msg.report;
+        log('Config hot-reload: scan report settings updated');
         changed = true;
       }
       if (changed) {

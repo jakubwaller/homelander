@@ -230,7 +230,8 @@ describe('translateUrl — Berlin', () => {
     );
     assert.equal(error, null);
     assert.ok(fullUrl.includes('realestatetype=apartmentbuy'));
-    assert.ok(fullUrl.includes('pricetype=purchaseprice'));
+    // Mobile API rejects pricetype for buy searches with 412 — must be omitted
+    assert.ok(!fullUrl.includes('pricetype='));
   });
 
   it('Berlin house buy', () => {
@@ -239,7 +240,7 @@ describe('translateUrl — Berlin', () => {
     );
     assert.equal(error, null);
     assert.ok(fullUrl.includes('realestatetype=housebuy'));
-    assert.ok(fullUrl.includes('pricetype=purchaseprice'));
+    assert.ok(!fullUrl.includes('pricetype='));
   });
 
   it('Berlin with multiple query params', () => {
@@ -1034,6 +1035,39 @@ describe('fetchListings', () => {
     assert.equal(listings[0].price, 250000);
     assert.equal(listings[0].size, 100);
     assert.equal(listings[0].rooms, 4);
+  });
+
+  it('parses label-less positional buy attributes (€ / m² / Zi.)', async () => {
+    // Live buy responses (2026-08) return attributes as { label: '', value }
+    // with German-formatted values — no `attribute` keys at all.
+    globalThis.fetch = async () => mockResponse({
+      resultListItems: [
+        {
+          item: {
+            id: '169899957',
+            title: 'Maisonette in Charlottenburg',
+            attributes: [
+              { label: '', value: '899.000 €' },
+              { label: '', value: '165 m²' },
+              { label: '', value: '5,5 Zi.' },
+            ],
+            address: { line: '14050 Berlin, Charlottenburg', postcode: '14050' },
+            realEstateType: 'apartmentbuy',
+          },
+        },
+      ],
+    });
+
+    const { listings, error } = await fetchListings(
+      'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-kaufen'
+    );
+    assert.equal(error, null);
+    assert.equal(listings[0].price, 899000);
+    assert.equal(listings[0].size, 165);
+    assert.equal(listings[0].rooms, 5.5);
+    assert.equal(listings[0].postcode, '14050');
+    assert.equal(listings[0].source, 'is24');
+    assert.equal(listings[0].url, 'https://www.immobilienscout24.de/expose/169899957');
   });
 
   it('returns empty listings for empty resultListItems', async () => {

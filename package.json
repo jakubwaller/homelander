@@ -38,6 +38,7 @@
     "smoke:db": "node test/smoke-db.mjs",
     "postsmoke:db": "npm run rebuild:electron",
     "start": "electron .",
+    "scanner": "node engine/headless.js",
     "predist": "npm run rebuild:electron",
     "dist": "vite build && electron-builder",
     "dist:mac": "vite build && electron-builder --mac",

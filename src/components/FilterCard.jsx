@@ -143,12 +143,25 @@ export default function FilterCard({ filter, onPause, onRemove, onPollNow, pollE
             <h3 className="text-sm font-medium truncate">
               {filter.name || t('search.unnamedSearch', 'Unnamed Search')}
             </h3>
+            {filter.mode === 'scan' && (
+              <span
+                className="badge"
+                style={{ color: 'var(--accent)', border: '1px solid var(--border)' }}
+                title={t('search.scanModeNote', 'Analyse-Modus: Angebote werden nur gesammelt und im Kaufradar angezeigt — es werden keine Bewerbungen versendet.')}
+              >
+                🔍 {t('search.scanBadge', 'Scan')}
+              </span>
+            )}
           </div>
 
           {/* Stats row */}
           <div className="flex gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-            <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
-            {filter.new_count > 0 && (
+            {filter.mode === 'scan' ? (
+              <span><strong style={{ color: 'var(--accent)' }}>{filter.total_seen || 0}</strong> {t('search.foundListings', 'gefunden')}</span>
+            ) : (
+              <span>{t('search.processed', 'Processed')} <strong style={{ color: 'var(--accent)' }}>{filter.processed_count || 0}/{filter.today_total || 0}</strong></span>
+            )}
+            {filter.mode !== 'scan' && filter.new_count > 0 && (
               <span className="badge badge-accent">+{filter.new_count} {t('search.pending', 'pending')}</span>
             )}
           </div>

@@ -82,11 +82,19 @@ homelander/
 │   ├── main.js           # App lifecycle, IPC handlers, daemon management, config
 │   ├── chrome.js         # ChromeManager — Puppeteer/Chromium lifecycle, CDP
 │   └── preload.cjs       # contextBridge (must be CommonJS): window.homelander.*
-├── engine/               # Daemon (forked child process)
-│   ├── daemon.js         # pollLoop + applyLoop, IPC, pause/captcha logic
-│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3, WAL mode
+├── engine/               # Daemon (forked child process) + shared engine modules
+│   ├── daemon.js         # pollLoop + applyLoop, IPC, pause/captcha logic, scan post-processing
+│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3, WAL mode (schema v5)
 │   ├── is24-contactor.js # IS24Contactor — CDP form filling, captcha solving
-│   └── url-translator.js # IS24 web URL → mobile API params + fetchListings()
+│   ├── url-translator.js # IS24 web URL → mobile API params + fetchListings()
+│   ├── sources.js        # Multi-source scan: IS24 buy / Kleinanzeigen / Neubaukompass, exposé enrichment, Nominatim geocoding
+│   ├── scan-cycle.js     # Shared scan post-processing (enrich + export + report), used by daemon and headless
+│   ├── headless.js       # Headless scanner entrypoint (Docker) — poll + Kaufradar, no Electron/Chromium
+│   ├── scan-server.js    # Kaufradar — localhost HTTP server (API + page), run by Electron main
+│   ├── scan-page.js      # Kaufradar single-page UI (inline HTML/CSS/JS + Leaflet map)
+│   ├── report.js         # Weekly scan report (HTML builder + due-date logic)
+│   ├── mailer.js         # Report delivery: Mailjet/Resend HTTP APIs (env creds) → SMTP fallback
+│   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH, Proton Bridge compatible)
 ├── src/                  # Renderer (React SPA)
 │   ├── main.jsx          # React entry point
 │   ├── App.jsx           # Tab nav, daemon controls, event listeners
@@ -137,6 +145,8 @@ Runtime config at `~/.homelander/config.json` — read/written by Electron main 
   "timing": { "speed": "balanced", "overrides": {} },
   "polling": { "interval_seconds": 600 },
   "browser": { "visibility": "hidden_unless_needed", "max_tabs": 5 },
+  "scan": { "port": 8477 },
+  "report": { "enabled": false, "to": "", "smtp": { "host": "127.0.0.1", "port": 1025, "secure": "starttls", "user": "", "pass": "", "from": "" } },
   "_setupComplete": false
 }
 ```
@@ -145,7 +155,9 @@ Config is **NOT** the old `autoapply.config.yaml` — that file in `config/` is 
 
 ## Data
 
-- **SQLite DB:** `~/.homelander/homelander.db` (WAL mode, `filters`, `listings`, `results` tables)
+- **SQLite DB:** `~/.homelander/homelander.db` (WAL mode, `filters`, `listings`, `results`, `manual_skips`, `geo_cache` tables)
+- **Scan export:** `~/.homelander/scan-listings.json` (rewritten after every poll when scan filters exist)
+- **Report state:** `~/.homelander/.last-scan-report` (weekly e-mail report timestamp)
 - **Config:** `~/.homelander/config.json`
 - **Daemon log:** `~/.homelander/daemon.log`
 - **Debug artifacts:** `~/.homelander/debug/{html,screenshots}/`
@@ -173,6 +185,9 @@ npm run test:unit              # Node test runner (HOMELANDER_TEST_FAST=1)
 npm run test:i18n              # Hardcoded string checker
 npm run smoke:db               # DB smoke test
 
+npm run scanner                # Headless scan-only mode (no Electron/Chromium)
+docker compose up -d           # Same, as a container (Kaufradar on 127.0.0.1:8477)
+
 npm run build                  # Vite production build
 npm run dist:mac               # macOS .dmg + .zip
 npm run dist:win               # Windows .exe
@@ -191,6 +206,10 @@ npm run dist:linux             # Linux .deb + .AppImage
 - **do not poll IS24 login pages** — login flow is bot-sensitive; use plain Chromium process without CDP
 - **Tauschwohnung listings immune to captcha wall** — recognized in URL translator, ideal for reliable sends
 - **Per-form login check** — daemon checks IS24 login state before each apply, not just at startup
+- **Scan mode is analysis-only** — filters with `mode='scan'` (all buy searches + all non-IS24 sources) are excluded from the apply loop; they only collect listings for the Kaufradar/export/report
+- **Buy searches must NOT send `pricetype`** — the IS24 mobile API rejects it with 412 for apartmentbuy/housebuy/plotbuy
+- **Kaufradar binds to 127.0.0.1 only** (default port 8477) — served by Electron main, data written by the daemon
+- **Nominatim geocoding is rate-limited to 1 req/s** and cached in the `geo_cache` table — never bypass the cache
 - **HTML snapshots are raw-copied in support bundles (no redaction)** — blocked on Electron main thread if regex-heavy
 
 ## Release Process

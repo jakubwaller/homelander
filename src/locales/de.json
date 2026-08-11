@@ -122,6 +122,21 @@
       "github": "GitHub Sponsor",
       "buymeacoffee": "Buy Me a Coffee",
       "kofi": "Ko-fi"
+    },
+    "report": {
+      "title": "Wochenbericht (Kaufradar)",
+      "desc": "Sendet wöchentlich eine E-Mail mit allen von Scan-Suchen gefundenen Wohnungen. Funktioniert mit jedem SMTP-Konto — für ProtonMail die lokale Proton Mail Bridge (127.0.0.1:1025) oder einen Proton-Business-SMTP-Token verwenden.",
+      "enabled": "Wöchentlichen E-Mail-Bericht senden",
+      "to": "Empfänger",
+      "host": "SMTP-Host",
+      "port": "Port",
+      "secure": "Verschlüsselung",
+      "secureSsl": "SSL/TLS (465)",
+      "secureStarttls": "STARTTLS (587/1025)",
+      "secureNone": "Keine (nur lokal)",
+      "user": "SMTP-Benutzer",
+      "pass": "SMTP-Passwort / Token",
+      "from": "Absenderadresse"
     }
   },
   "chromium": {
@@ -400,7 +415,12 @@
     "clearQueue": "Warteschlange leeren",
     "clearQueueFailed": "Warteschlange konnte nicht geleert werden.",
     "queueCleared": "Warteschlange geleert",
-    "openInBrowser": "Im Browser öffnen"
+    "openInBrowser": "Im Browser öffnen",
+    "scanBadge": "Scan",
+    "scanModeNote": "Analyse-Modus: Angebote werden nur gesammelt und im Kaufradar angezeigt — es werden keine Bewerbungen versendet.",
+    "multiSourceHint": "Unterstützt Such-URLs von IS24 (Miete & Kauf), Kleinanzeigen und Neubaukompass.",
+    "openScanBrowser": "Kaufradar öffnen",
+    "foundListings": "gefunden"
   },
   "errors": {
     "backendUnavailable": {

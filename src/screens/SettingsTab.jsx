@@ -60,6 +60,8 @@ export default function SettingsTab() {
   const [timingDraft, setTimingDraft] = useState({ speed: 'balanced', poll_interval: 10, exclude_tauschwohnungen: true });
   const [captchaDraft, setCaptchaDraft] = useState('');
   const [showCaptcha, setShowCaptcha] = useState(false);
+  const [reportDraft, setReportDraft] = useState({ enabled: false, to: '', host: '127.0.0.1', port: 1025, secure: 'starttls', user: '', pass: '', from: '' });
+  const [showSmtpPass, setShowSmtpPass] = useState(false);
   const [cleanupStep, setCleanupStep] = useState(null); // null | 'confirm' | 'purging'
   const [cleanupEmail, setCleanupEmail] = useState('');
   const [cleanupError, setCleanupError] = useState(null);
@@ -115,6 +117,18 @@ export default function SettingsTab() {
       exclude_tauschwohnungen: config.polling?.exclude_tauschwohnungen ?? true,
     });
     setCaptchaDraft(config.captcha?.api_key || '');
+    const report = config.report || {};
+    const smtp = report.smtp || {};
+    setReportDraft({
+      enabled: report.enabled ?? false,
+      to: report.to || '',
+      host: smtp.host || '127.0.0.1',
+      port: smtp.port ?? 1025,
+      secure: smtp.secure || 'starttls',
+      user: smtp.user || '',
+      pass: smtp.pass || '',
+      from: smtp.from || '',
+    });
   }, [config]);
 
   const save = async (patch) => {
@@ -199,6 +213,27 @@ export default function SettingsTab() {
   // ── Captcha handler ─────────────────────────────────────────────
 
   const saveCaptcha = () => save({ captcha: { api_key: captchaDraft } });
+
+  // ── Weekly scan report handlers ─────────────────────────────────
+
+  const updateReportField = (field, value) => {
+    setReportDraft((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const saveReport = () => save({
+    report: {
+      enabled: !!reportDraft.enabled,
+      to: reportDraft.to.trim(),
+      smtp: {
+        host: reportDraft.host.trim(),
+        port: parseInt(reportDraft.port, 10) || 1025,
+        secure: reportDraft.secure,
+        user: reportDraft.user.trim(),
+        pass: reportDraft.pass,
+        from: reportDraft.from.trim(),
+      },
+    },
+  });
 
   const handleExportSupportBundle = async () => {
     if (!window.homelander?.createSupportBundle) {
@@ -529,6 +564,67 @@ export default function SettingsTab() {
             {t('settings.showKey', 'Show')}
           </label>
           <button className="btn btn-primary text-xs" onClick={saveCaptcha}>
+            {t('settings.save', 'Save')}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── 4b. Weekly Report (Kaufradar) ─────────────────────────── */}
+      <Section title={t('settings.report.title', 'Wochenbericht (Kaufradar)')}>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+          {t('settings.report.desc')}
+        </p>
+        <label className="flex items-center gap-1.5 text-xs mb-3 cursor-pointer select-none" style={{ color: 'var(--text-secondary)' }}>
+          <input
+            type="checkbox"
+            checked={reportDraft.enabled}
+            onChange={(e) => updateReportField('enabled', e.target.checked)}
+            className="cursor-pointer"
+          />
+          {t('settings.report.enabled', 'Wöchentlichen E-Mail-Bericht senden')}
+        </label>
+        <div className="grid grid-cols-4 gap-3">
+          <div className="col-span-2">
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.to', 'Empfänger')}</label>
+            <input className="input text-sm" type="email" value={reportDraft.to} onChange={(e) => updateReportField('to', e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.from', 'Absenderadresse')}</label>
+            <input className="input text-sm" type="email" value={reportDraft.from} onChange={(e) => updateReportField('from', e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.host', 'SMTP-Host')}</label>
+            <input className="input text-sm" value={reportDraft.host} onChange={(e) => updateReportField('host', e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.port', 'Port')}</label>
+            <input className="input text-sm" type="number" value={reportDraft.port} onChange={(e) => updateReportField('port', e.target.value)} />
+          </div>
+          <div>
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.secure', 'Verschlüsselung')}</label>
+            <select className="select text-sm" value={reportDraft.secure} onChange={(e) => updateReportField('secure', e.target.value)}>
+              <option value="starttls">{t('settings.report.secureStarttls', 'STARTTLS (587/1025)')}</option>
+              <option value="ssl">{t('settings.report.secureSsl', 'SSL/TLS (465)')}</option>
+              <option value="none">{t('settings.report.secureNone', 'Keine (nur lokal)')}</option>
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.user', 'SMTP-Benutzer')}</label>
+            <input className="input text-sm" value={reportDraft.user} onChange={(e) => updateReportField('user', e.target.value)} />
+          </div>
+          <div className="col-span-2">
+            <label className="text-xs mb-1 block" style={{ color: 'var(--text-muted)' }}>{t('settings.report.pass', 'SMTP-Passwort / Token')}</label>
+            <div className="flex items-center gap-2">
+              <input className="input text-sm flex-1" type={showSmtpPass ? 'text' : 'password'} value={reportDraft.pass} onChange={(e) => updateReportField('pass', e.target.value)} />
+              <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none" style={{ color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked={showSmtpPass} onChange={(e) => setShowSmtpPass(e.target.checked)} className="cursor-pointer" />
+                {t('settings.showKey', 'Show')}
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className="pt-3">
+          <button className="btn btn-primary text-xs" onClick={saveReport}>
             {t('settings.save', 'Save')}
           </button>
         </div>

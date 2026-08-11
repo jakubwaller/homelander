@@ -93,6 +93,24 @@ Then launch from Applications or Spotlight. ([See this step in the video](https:
 
 Download the `.exe` and run it. Windows SmartScreen may show a warning — click **More info** → **Run anyway**.
 
+### Docker — headless Kaufradar scanner (analysis-only)
+
+The scan half of Homelander (flat-purchase monitoring, Kaufradar browse site, JSON export, weekly e-mail report) runs headless — no Electron, no Chromium, and it can never send applications. Deploy it on a home server / Raspberry Pi like any other compose project:
+
+```bash
+cp .env.example .env           # searches + optional mail provider keys
+docker compose up -d --build
+# Kaufradar: http://<host-address>:8477 from any device on your LAN
+```
+
+Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is published for `arm64` and `arm/v7`, and the only native module (`better-sqlite3`) uses a prebuilt binary when available and otherwise compiles during the build — expect the first `docker compose up -d --build` on a Pi to take a few minutes.
+
+Configure searches via `HOMELANDER_SCAN_URLS` in `.env` (comma-separated IS24 buy / Kleinanzeigen / Neubaukompass search URLs) or drop a `scan-searches.json` (array of URLs) into the `/data` volume. Data lives in the `homelander-data` volume: `homelander.db` and `scan-listings.json`.
+
+The weekly e-mail report sends via SMTP — set `HOMELANDER_REPORT_ENABLED=true`, `HOMELANDER_REPORT_TO`, and the `HOMELANDER_SMTP_*` variables in `.env`. For ProtonMail use `smtp.protonmail.ch:587` with a dedicated SMTP token (Unlimited plan or higher, paired with a custom-domain address; the From address must equal the token's address — it defaults to `HOMELANDER_SMTP_USER`). The desktop app configures the same thing under Settings → Wochenbericht.
+
+⚠️ The Kaufradar has no authentication — the provided compose file exposes it to your LAN. Only do that on a private network you trust; on shared networks bind it to `127.0.0.1:8477:8477` and tunnel in.
+
 ## ⚠️ Disclaimer
 
 Homelander is a **fun portfolio / hobby project** created for educational purposes. It is **not intended to be used on ImmobilienScout24** and is in no way a tool for submitting actual applications or interacting with the IS24 platform.

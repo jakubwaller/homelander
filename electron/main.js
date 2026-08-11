@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { ChromeManager } from './chrome.js';
 import { createSupportId, rawErrorText, redact, toUserError } from '../src/shared/userErrors.js';
 import { openSharedDb, closeSharedDb, db } from './db-service.js';
+import { startScanServer } from '../engine/scan-server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
@@ -98,6 +99,19 @@ process.on('exit', () => {
 let chromeManager = new ChromeManager();
 chromeManager._chromeLogPath = CHROME_LOG;
 
+let scanServer = null; // Kaufradar — local browse site for scan-mode listings
+
+async function ensureScanServer() {
+  if (scanServer) return scanServer;
+  try {
+    scanServer = await startScanServer(() => db(), { port: config?.scan?.port || 8477 });
+    console.log(`[main] Kaufradar running at ${scanServer.url}`);
+  } catch (err) {
+    swallow(err, 'main/scan-server-start');
+  }
+  return scanServer;
+}
+
 let config = null;
 let setupComplete = false;
 
@@ -139,16 +153,29 @@ function saveConfig() {
 
 const ENCRYPTED_PREFIX = '_safeStorage:';
 
+const SECRET_CONFIG_PATHS = [
+  ['captcha', 'api_key'],
+  ['is24', 'password'],
+  ['report', 'smtp', 'pass'],
+];
+
+function secretParent(cfg, path) {
+  let node = cfg;
+  for (const segment of path.slice(0, -1)) {
+    node = node?.[segment];
+    if (!node || typeof node !== 'object') return null;
+  }
+  return node;
+}
+
 function encryptConfigSecrets(cfg) {
-  const secretFields = [
-    ['captcha', 'api_key'],
-    ['is24', 'password'],
-  ];
-  for (const [section, key] of secretFields) {
-    const val = cfg[section]?.[key];
+  for (const path of SECRET_CONFIG_PATHS) {
+    const parent = secretParent(cfg, path);
+    const key = path.at(-1);
+    const val = parent?.[key];
     if (val && typeof val === 'string' && !val.startsWith(ENCRYPTED_PREFIX)) {
       try {
-        cfg[section][key] = ENCRYPTED_PREFIX + safeStorage.encryptString(val).toString('base64');
+        parent[key] = ENCRYPTED_PREFIX + safeStorage.encryptString(val).toString('base64');
       } catch (err) {
         swallow(err, 'config/encrypt-secret');
       }
@@ -157,19 +184,17 @@ function encryptConfigSecrets(cfg) {
 }
 
 function decryptConfigSecrets(cfg) {
-  const secretFields = [
-    ['captcha', 'api_key'],
-    ['is24', 'password'],
-  ];
-  for (const [section, key] of secretFields) {
-    const val = cfg[section]?.[key];
+  for (const path of SECRET_CONFIG_PATHS) {
+    const parent = secretParent(cfg, path);
+    const key = path.at(-1);
+    const val = parent?.[key];
     if (val && typeof val === 'string' && val.startsWith(ENCRYPTED_PREFIX)) {
       try {
         const buf = Buffer.from(val.slice(ENCRYPTED_PREFIX.length), 'base64');
-        cfg[section][key] = safeStorage.decryptString(buf);
+        parent[key] = safeStorage.decryptString(buf);
       } catch (err) {
         swallow(err, 'config/decrypt-secret');
-        cfg[section][key] = '';  // clear unrecoverable ciphertext
+        parent[key] = '';  // clear unrecoverable ciphertext
       }
     }
   }
@@ -478,6 +503,24 @@ function getDefaultConfig() {
     browser: {
       visibility: 'always_show',
       max_tabs: 5,
+    },
+    scan: {
+      port: 8477,
+    },
+    report: {
+      enabled: false,
+      to: '',
+      // Defaults match Proton Mail Bridge (runs locally on 127.0.0.1:1025);
+      // any SMTP submission endpoint works (e.g. smtp.protonmail.ch:587 with
+      // a Proton Business SMTP token).
+      smtp: {
+        host: '127.0.0.1',
+        port: 1025,
+        secure: 'starttls',
+        user: '',
+        pass: '',
+        from: '',
+      },
     },
     _setupComplete: false,
   };
@@ -1012,11 +1055,12 @@ function registerIpcHandlers() {
         return { ok: true, pending: true, ...latestNachrichtenSync };
       }
 
-      const { fetchListings } = await import('../engine/url-translator.js');
-      const MAX_PAGES = 5, PAGE_SIZE = 20;
+      const { fetchAnyListings } = await import('../engine/sources.js');
+      const isScan = filter.mode === 'scan';
+      const MAX_PAGES = isScan ? 10 : 5, PAGE_SIZE = 20;
       let allInserted = 0, allFetched = 0, duplicateProtected = 0, tauschExcluded = 0, firstPollCapped = false;
       for (let page = 1; page <= MAX_PAGES; page++) {
-        const { listings, error } = await fetchListings(filter.web_url, page);
+        const { listings, error } = await fetchAnyListings(filter.web_url, page);
         if (error) break;
         const excludeTausch = config.polling?.exclude_tauschwohnungen ?? true;
         const filteredListings = excludeTausch
@@ -1030,9 +1074,9 @@ function registerIpcHandlers() {
         );
         duplicateProtected += Math.max(0, filteredListings.length - dedupedListings.length);
         allFetched += dedupedListings.length;
-        const firstPollLimit = 10;
+        const firstPollLimit = isScan ? Infinity : 10;
         const isFirstPoll = !filter.first_poll_done;
-        const listingsToInsert = isFirstPoll
+        const listingsToInsert = (isFirstPoll && Number.isFinite(firstPollLimit))
           ? dedupedListings.slice(0, Math.max(0, firstPollLimit - allInserted))
           : dedupedListings;
         if (isFirstPoll && dedupedListings.length > firstPollLimit) firstPollCapped = true;
@@ -1134,8 +1178,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('filters:add', async (_e, webUrl, name) => {
     try {
-      const { validateSearchUrl } = await import('../engine/url-translator.js');
-      const validation = validateSearchUrl(webUrl);
+      const { validateAnySearchUrl } = await import('../engine/sources.js');
+      const validation = validateAnySearchUrl(webUrl);
       if (!validation.ok) {
         return {
           validation,
@@ -1148,7 +1192,9 @@ function registerIpcHandlers() {
         id,
         name: name || '',
         web_url: webUrl,
-        mobile_params: validation.mobileUrl,
+        mobile_params: validation.mobileUrl || '',
+        mode: validation.mode || 'apply',
+        source: validation.source || 'is24',
       });
       const filter = db().getFilter(id);
       return { filter, error: null };
@@ -1177,8 +1223,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('filters:test', async (_e, webUrl, locale = 'en') => {
     try {
-      const { getTotalResults } = await import('../engine/url-translator.js');
-      const result = await getTotalResults(webUrl, { locale });
+      const { getAnyTotalResults } = await import('../engine/sources.js');
+      const result = await getAnyTotalResults(webUrl, { locale });
       if (result.error) {
         return {
           total: 0,
@@ -1236,6 +1282,21 @@ function registerIpcHandlers() {
     }
   });
 
+  // Kaufradar — local browse site for scan-mode listings
+  ipcMain.handle('scan:open', async () => {
+    const server = await ensureScanServer();
+    if (!server) return { ok: false, error: 'Kaufradar server not running' };
+    shell.openExternal(server.url);
+    return { ok: true, url: server.url };
+  });
+
+  ipcMain.handle('scan:status', async () => {
+    const hasScanFilters = (() => {
+      try { return db().getScanFilters().length > 0; } catch { return false; }
+    })();
+    return { running: !!scanServer, url: scanServer?.url || null, hasScanFilters };
+  });
+
   // Support bundles
   ipcMain.handle('support:bundle', async (_event, payload) => {
     try {
@@ -1276,6 +1337,7 @@ function registerIpcHandlers() {
       if (patch.polling?.interval_seconds !== undefined) msg.poll_interval = config.polling.interval_seconds;
       if (patch.polling?.exclude_tauschwohnungen !== undefined) msg.exclude_tauschwohnungen = config.polling.exclude_tauschwohnungen;
       if (patch.browser) msg.browser = config.browser;
+      if (patch.report) msg.report = config.report;
 
       const personaChanged = patch.persona && Object.keys(patch.persona).length > 0;
       const timingChanged = patch.timing && Object.keys(patch.timing).length > 0;
@@ -1529,6 +1591,7 @@ app.whenReady().then(async () => {
 
   loadConfig();
   registerIpcHandlers();
+  ensureScanServer(); // fire-and-forget — Kaufradar is available while the app runs
   await createWindow();
 
   // Don't auto-launch Chrome or daemon — user clicks "Start" when ready
@@ -1549,6 +1612,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (scanServer) {
+    try { scanServer.close(); } catch (err) { swallow(err, 'main/scan-server-close'); }
+    scanServer = null;
+  }
   closeSharedDb();
   app.isQuitting = true;
 

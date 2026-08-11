@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS filters (
   created_at TEXT DEFAULT (datetime('now')),
   last_polled_at TEXT,
   total_seen INTEGER DEFAULT 0,
-  first_poll_done INTEGER NOT NULL DEFAULT 0
+  first_poll_done INTEGER NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL DEFAULT 'apply',
+  source TEXT NOT NULL DEFAULT 'is24'
 );
 
 CREATE TABLE IF NOT EXISTS manual_skips (
@@ -46,7 +48,20 @@ CREATE TABLE IF NOT EXISTS listings (
   sent_at TEXT,
   outcome TEXT,
   failure_reason TEXT,
-  detail TEXT
+  detail TEXT,
+  url TEXT,
+  source TEXT DEFAULT 'is24',
+  postcode TEXT,
+  lat REAL,
+  lng REAL,
+  scan_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS geo_cache (
+  postcode TEXT PRIMARY KEY,
+  lat REAL,
+  lng REAL,
+  resolved_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS results (
@@ -103,7 +118,34 @@ export class HomelanderDB {
           // Column already exists (first-run via SCHEMA) — ignore
         }
       }
+      // v4 → v5: scan mode (analysis-only buy searches), multi-source
+      // listings, geo columns for the map view.
+      if (version && version.version < 5) {
+        const v5Columns = [
+          "ALTER TABLE filters ADD COLUMN mode TEXT NOT NULL DEFAULT 'apply'",
+          "ALTER TABLE filters ADD COLUMN source TEXT NOT NULL DEFAULT 'is24'",
+          'ALTER TABLE listings ADD COLUMN url TEXT',
+          "ALTER TABLE listings ADD COLUMN source TEXT DEFAULT 'is24'",
+          'ALTER TABLE listings ADD COLUMN postcode TEXT',
+          'ALTER TABLE listings ADD COLUMN lat REAL',
+          'ALTER TABLE listings ADD COLUMN lng REAL',
+          'ALTER TABLE listings ADD COLUMN scan_json TEXT',
+        ];
+        for (const stmt of v5Columns) {
+          try { this.db.exec(stmt); } catch { /* column already exists */ }
+        }
+      }
       this.db.exec(SCHEMA);
+      if (version && version.version < 5) {
+        // Existing buy searches (previously broken by the pricetype 412 bug)
+        // become scan-only — they must never enter the apply loop.
+        this.db.exec(`
+          UPDATE filters SET mode = 'scan'
+          WHERE mobile_params LIKE '%realestatetype=apartmentbuy%'
+             OR mobile_params LIKE '%realestatetype=housebuy%'
+             OR mobile_params LIKE '%realestatetype=plotbuy%';
+        `);
+      }
       if (version && version.version < 4) {
         this.db.exec(`
           UPDATE filters
@@ -127,11 +169,11 @@ export class HomelanderDB {
 
   // ── Filters ──────────────────────────────────────────────────
 
-  addFilter({ id, name, web_url, mobile_params }) {
+  addFilter({ id, name, web_url, mobile_params, mode, source }) {
     return this.db.prepare(`
-      INSERT INTO filters (id, name, web_url, mobile_params)
-      VALUES (?, ?, ?, ?)
-    `).run(id, name || '', web_url, mobile_params);
+      INSERT INTO filters (id, name, web_url, mobile_params, mode, source)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, name || '', web_url, mobile_params, mode || 'apply', source || 'is24');
   }
 
   getFilters() {
@@ -211,12 +253,13 @@ export class HomelanderDB {
     if (manuallyApplied) return { changes: 0, skipped: true };
     try {
       return this.db.prepare(`
-        INSERT INTO listings (hash, expose_id, title, price, size, rooms, address, image_url, filter_id, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'seen')
+        INSERT INTO listings (hash, expose_id, title, price, size, rooms, address, image_url, filter_id, status, url, source, postcode)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'seen', ?, ?, ?)
       `).run(
         hash, listing.expose_id, listing.title, listing.price,
         listing.size, listing.rooms, listing.address, listing.image_url,
-        listing.filter_id
+        listing.filter_id,
+        listing.url || null, listing.source || 'is24', listing.postcode || null
       );
     } catch (err) {
       if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
@@ -464,6 +507,69 @@ export class HomelanderDB {
       ORDER BY COALESCE(sent_at, discovered_at) DESC, rowid DESC
       LIMIT ?
     `).all(limit);
+  }
+
+  // ── Scan mode (analysis-only searches, e.g. flat purchases) ──
+
+  getScanFilters() {
+    return this.db.prepare(`
+      SELECT * FROM filters WHERE mode = 'scan' AND archived = 0
+      ORDER BY created_at DESC, rowid DESC
+    `).all();
+  }
+
+  /** Listings belonging to scan-mode filters, newest first. */
+  getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null } = {}) {
+    let sql = `
+      SELECT l.*, f.name AS filter_name, f.web_url AS filter_url
+      FROM listings l
+      JOIN filters f ON f.id = l.filter_id
+      WHERE f.mode = 'scan'
+    `;
+    const params = [];
+    if (filterId) { sql += ' AND l.filter_id = ?'; params.push(filterId); }
+    if (sinceIso) { sql += ' AND l.discovered_at >= ?'; params.push(sinceIso); }
+    sql += ' ORDER BY l.discovered_at DESC, l.rowid DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    return this.db.prepare(sql).all(...params);
+  }
+
+  /** Attach enrichment data (coordinates, expose details) to a listing. */
+  updateListingScanData(hash, { lat, lng, postcode, url, scan_json } = {}) {
+    const sets = [];
+    const vals = [];
+    if (lat !== undefined && lat !== null) { sets.push('lat = ?'); vals.push(lat); }
+    if (lng !== undefined && lng !== null) { sets.push('lng = ?'); vals.push(lng); }
+    if (postcode) { sets.push('postcode = ?'); vals.push(String(postcode)); }
+    if (url) { sets.push('url = ?'); vals.push(String(url)); }
+    if (scan_json !== undefined && scan_json !== null) {
+      sets.push('scan_json = ?');
+      vals.push(typeof scan_json === 'string' ? scan_json : JSON.stringify(scan_json));
+    }
+    if (sets.length === 0) return { changes: 0 };
+    vals.push(hash);
+    return this.db.prepare(`UPDATE listings SET ${sets.join(', ')} WHERE hash = ?`).run(...vals);
+  }
+
+  /** Scan listings still missing enrichment (coordinates or details). */
+  getScanListingsNeedingEnrichment(limit = 10) {
+    return this.db.prepare(`
+      SELECT l.* FROM listings l
+      JOIN filters f ON f.id = l.filter_id
+      WHERE f.mode = 'scan' AND (l.lat IS NULL OR (l.source = 'is24' AND l.scan_json IS NULL))
+      ORDER BY l.discovered_at DESC, l.rowid DESC
+      LIMIT ?
+    `).all(limit);
+  }
+
+  getGeoCache(postcode) {
+    return this.db.prepare('SELECT * FROM geo_cache WHERE postcode = ?').get(String(postcode));
+  }
+
+  setGeoCache(postcode, lat, lng) {
+    return this.db.prepare(`
+      INSERT OR REPLACE INTO geo_cache (postcode, lat, lng) VALUES (?, ?, ?)
+    `).run(String(postcode), lat, lng);
   }
 
   getCaptchaConsecutive() {

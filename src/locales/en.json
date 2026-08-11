@@ -122,6 +122,21 @@
       "github": "GitHub Sponsor",
       "buymeacoffee": "Buy Me a Coffee",
       "kofi": "Ko-fi"
+    },
+    "report": {
+      "title": "Weekly Report (Kaufradar)",
+      "desc": "Sends a weekly e-mail with all flats found by scan searches. Works with any SMTP account — for ProtonMail use the local Proton Mail Bridge (127.0.0.1:1025) or a Proton Business SMTP token.",
+      "enabled": "Send weekly e-mail report",
+      "to": "Recipient",
+      "host": "SMTP host",
+      "port": "Port",
+      "secure": "Encryption",
+      "secureSsl": "SSL/TLS (465)",
+      "secureStarttls": "STARTTLS (587/1025)",
+      "secureNone": "None (local only)",
+      "user": "SMTP user",
+      "pass": "SMTP password / token",
+      "from": "Sender address"
     }
   },
   "chromium": {
@@ -400,7 +415,12 @@
     "clearQueue": "Clear queue",
     "clearQueueFailed": "Could not clear queue.",
     "queueCleared": "Queue cleared",
-    "openInBrowser": "Open in browser"
+    "openInBrowser": "Open in browser",
+    "scanBadge": "Scan",
+    "scanModeNote": "Analysis mode: listings are only collected and shown in the Kaufradar — no applications are sent.",
+    "multiSourceHint": "Supports IS24 (rent & buy), Kleinanzeigen and Neubaukompass search URLs.",
+    "openScanBrowser": "Open Kaufradar",
+    "foundListings": "found"
   },
   "errors": {
     "backendUnavailable": {

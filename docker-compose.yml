@@ -1,0 +1,31 @@
+# Homelander headless scanner (Kaufradar) — analysis-only, no applications.
+#
+#   cp .env.example .env       # fill in searches + (optional) mail keys
+#   docker compose up -d --build
+#   http://<pi-address>:8477   # Kaufradar, reachable from your LAN
+#
+# Searches: list URLs in HOMELANDER_SCAN_URLS (.env), or drop a
+# scan-searches.json into the data volume:
+#   docker compose cp scan-searches.json homelander-scanner:/data/
+#   (JSON array of "url" strings or { "url": "...", "name": "..." } objects)
+#
+# Weekly e-mail report: set HOMELANDER_REPORT_ENABLED=true and the
+# HOMELANDER_SMTP_* variables in .env (ProtonMail SMTP token — see
+# .env.example).
+
+services:
+  homelander-scanner:
+    build: .
+    container_name: homelander-scanner
+    restart: unless-stopped
+    ports:
+      # Kaufradar has no authentication — this exposes it to every device on
+      # the network the host is attached to. Fine on a private home LAN;
+      # switch back to "127.0.0.1:8477:8477" on anything shared or public.
+      - "8477:8477"
+    env_file: .env
+    volumes:
+      - homelander-data:/data
+
+volumes:
+  homelander-data:

@@ -335,12 +335,23 @@ export default function SearchTab() {
               </span>
             )}
           </div>
-          <button
-            className="btn btn-primary text-sm"
-            onClick={() => setShowAddDialog(true)}
-          >
-            + {t('search.addSearchButton', 'Add search')}
-          </button>
+          <div className="flex items-center gap-2">
+            {filters.some((f) => f.mode === 'scan') && (
+              <button
+                className="btn btn-secondary text-sm"
+                onClick={() => window.homelander?.openScanBrowser?.()}
+                title={t('search.scanModeNote', 'Analyse-Modus: Angebote werden nur gesammelt und im Kaufradar angezeigt — es werden keine Bewerbungen versendet.')}
+              >
+                🗺 {t('search.openScanBrowser', 'Kaufradar öffnen')}
+              </button>
+            )}
+            <button
+              className="btn btn-primary text-sm"
+              onClick={() => setShowAddDialog(true)}
+            >
+              + {t('search.addSearchButton', 'Add search')}
+            </button>
+          </div>
         </div>
 
         {loading && filters.length === 0 ? (

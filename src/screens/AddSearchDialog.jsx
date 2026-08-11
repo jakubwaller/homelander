@@ -103,13 +103,16 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
         </label>
         <input
           type="url"
-          className="input mb-3"
-          placeholder="https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten?..."
+          className="input mb-1"
+          placeholder="https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-kaufen?..."
           value={url}
           onChange={(e) => { setUrl(e.target.value); setTestResult(null); setTestError(null); setValidation(null); }}
           onKeyDown={handleKeyDown}
           autoFocus
         />
+        <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+          {t('search.multiSourceHint', 'Unterstützt Such-URLs von IS24 (Miete & Kauf), Kleinanzeigen und Neubaukompass.')}
+        </p>
 
         {/* Name — optional, auto-generated from URL */}
         <label className="block text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>
@@ -144,6 +147,11 @@ export default function AddSearchDialog({ onCancel, onAdd }) {
             {!testError && validation.unsupportedParams?.length > 0 && (
               <div className="text-xs mt-2" style={{ color: 'var(--danger)' }}>
                 {t('search.unsupportedFilterCount', '{{count}} unsupported filters').replace('{{count}}', validation.unsupportedParams.length)}
+              </div>
+            )}
+            {validation.mode === 'scan' && (
+              <div className="text-xs mt-2" style={{ color: 'var(--accent)' }}>
+                🔍 {t('search.scanModeNote', 'Analyse-Modus: Angebote werden nur gesammelt und im Kaufradar angezeigt — es werden keine Bewerbungen versendet.')}
               </div>
             )}
           </div>

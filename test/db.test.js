@@ -62,7 +62,7 @@ describe('HomelanderDB constructor', () => {
       .all()
       .map((t) => t.name)
       .sort();
-    assert.deepEqual(tables, ['filters', 'listings', 'manual_skips', 'results', 'schema_version']);
+    assert.deepEqual(tables, ['filters', 'geo_cache', 'listings', 'manual_skips', 'results', 'schema_version']);
     db.close();
   });
 
@@ -88,7 +88,7 @@ describe('HomelanderDB constructor', () => {
   it('records schema version', () => {
     const db = freshDB();
     const row = db.db.prepare('SELECT version FROM schema_version').get();
-    assert.equal(row.version, 4);
+    assert.equal(row.version, 5);
     db.close();
   });
 
@@ -148,7 +148,7 @@ describe('HomelanderDB constructor', () => {
       const db = new HomelanderDB(file);
       assert.equal(db.getFilter('old-polled').first_poll_done, 1);
       assert.equal(db.getFilter('old-new').first_poll_done, 0);
-      assert.equal(db.db.prepare('SELECT version FROM schema_version').get().version, 4);
+      assert.equal(db.db.prepare('SELECT version FROM schema_version').get().version, 5);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1116,5 +1116,122 @@ describe('close', () => {
     assert.throws(() => {
       db.db.prepare('SELECT 1').get();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scan mode (schema v5)
+// ---------------------------------------------------------------------------
+
+describe('scan mode', () => {
+  function scanDB() {
+    const db = freshDB();
+    db.addFilter({
+      id: 'scan-1',
+      name: 'Berlin Kauf',
+      web_url: 'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-kaufen',
+      mobile_params: 'realestatetype=apartmentbuy',
+      mode: 'scan',
+      source: 'is24',
+    });
+    db.addFilter({
+      id: 'apply-1',
+      name: 'Berlin Miete',
+      web_url: 'https://www.immobilienscout24.de/Suche/de/berlin/berlin/wohnung-mieten',
+      mobile_params: 'realestatetype=apartmentrent',
+    });
+    return db;
+  }
+
+  it('defaults filters to apply mode / is24 source', () => {
+    const db = seededDB();
+    const filter = db.getFilter('f1');
+    assert.equal(filter.mode, 'apply');
+    assert.equal(filter.source, 'is24');
+    db.close();
+  });
+
+  it('getScanFilters returns only active scan filters', () => {
+    const db = scanDB();
+    assert.deepEqual(db.getScanFilters().map((f) => f.id), ['scan-1']);
+    db.removeFilter('scan-1');
+    assert.deepEqual(db.getScanFilters(), []);
+    db.close();
+  });
+
+  it('getScanListings joins scan filters only and includes filter name', () => {
+    const db = scanDB();
+    db.insertListings([{ expose_id: 'b1', title: 'Kauf', price: 300000, size: 60, rooms: 2, address: '10115 Berlin', postcode: '10115', image_url: '', url: 'https://x/1', source: 'is24' }], 'scan-1');
+    db.insertListings([{ expose_id: 'r1', title: 'Miete', price: 1200, size: 55, rooms: 2, address: 'Berlin', image_url: '' }], 'apply-1');
+    const rows = db.getScanListings();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].expose_id, 'b1');
+    assert.equal(rows[0].filter_name, 'Berlin Kauf');
+    assert.equal(rows[0].postcode, '10115');
+    assert.equal(rows[0].url, 'https://x/1');
+    db.close();
+  });
+
+  it('updateListingScanData stores coordinates and details, clearing enrichment need', () => {
+    const db = scanDB();
+    db.insertListings([{ expose_id: 'b1', title: 'Kauf', price: 300000, size: 60, rooms: 2, address: '10115 Berlin', postcode: '10115', image_url: '', url: '', source: 'is24' }], 'scan-1');
+    assert.equal(db.getScanListingsNeedingEnrichment().length, 1);
+    const hash = db.getScanListings()[0].hash;
+    db.updateListingScanData(hash, { lat: 52.5, lng: 13.4, scan_json: { a: 1 } });
+    const row = db.getScanListings()[0];
+    assert.equal(row.lat, 52.5);
+    assert.equal(JSON.parse(row.scan_json).a, 1);
+    assert.equal(db.getScanListingsNeedingEnrichment().length, 0);
+    db.close();
+  });
+
+  it('geo cache round-trips postcodes', () => {
+    const db = freshDB();
+    assert.equal(db.getGeoCache('10115'), undefined);
+    db.setGeoCache('10115', 52.53, 13.38);
+    const hit = db.getGeoCache('10115');
+    assert.equal(hit.lat, 52.53);
+    assert.equal(hit.lng, 13.38);
+    db.close();
+  });
+
+  it('v4 → v5 migration marks existing buy filters as scan', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'homelander-db-v5-migration-'));
+    const file = join(dir, 'homelander.db');
+    try {
+      const old = new Database(file);
+      old.exec(`
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
+        INSERT INTO schema_version (version) VALUES (4);
+        CREATE TABLE filters (
+          id TEXT PRIMARY KEY, name TEXT, web_url TEXT NOT NULL,
+          mobile_params TEXT NOT NULL, enabled INTEGER DEFAULT 1,
+          archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          last_polled_at TEXT, total_seen INTEGER DEFAULT 0,
+          first_poll_done INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE manual_skips (expose_id TEXT PRIMARY KEY, created_at TEXT);
+        CREATE TABLE listings (
+          hash TEXT PRIMARY KEY, expose_id TEXT NOT NULL, title TEXT,
+          price REAL, size REAL, rooms REAL, address TEXT, image_url TEXT,
+          filter_id TEXT, status TEXT DEFAULT 'seen', discovered_at TEXT,
+          sent_at TEXT, outcome TEXT, failure_reason TEXT, detail TEXT
+        );
+        CREATE TABLE results (id INTEGER PRIMARY KEY AUTOINCREMENT, listing_hash TEXT, filter_id TEXT, outcome TEXT, detail TEXT, timestamp TEXT);
+        INSERT INTO filters (id, name, web_url, mobile_params)
+        VALUES ('buy-old', 'Kauf', 'https://example.com', 'https://api.mobile.immobilienscout24.de/search/list?realestatetype=apartmentbuy&pricetype=purchaseprice');
+        INSERT INTO filters (id, name, web_url, mobile_params)
+        VALUES ('rent-old', 'Miete', 'https://example.com', 'https://api.mobile.immobilienscout24.de/search/list?realestatetype=apartmentrent');
+      `);
+      old.close();
+
+      const db = new HomelanderDB(file);
+      assert.equal(db.getFilter('buy-old').mode, 'scan');
+      assert.equal(db.getFilter('rent-old').mode, 'apply');
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

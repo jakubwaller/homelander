@@ -79,6 +79,16 @@ const SEO_RENT_TYPE_TO_REAL_ESTATE_TYPE = {
 };
 const SEO_MAX_WARMRENT_PATH_PATTERN = /^(?<type>wohnung|haus)-bis-(?<price>\d+)-euro-warm$/;
 
+// Buy-side realestatetypes. The mobile API rejects the `pricetype` param for
+// these with 412 ERROR_COMMON_URL_PARAMETER_NOT_SUPPORTED (confirmed live
+// 2026-08-09) — purchase price is implicit for buy searches.
+const BUY_REALESTATE_TYPES = new Set(['apartmentbuy', 'housebuy', 'plotbuy']);
+
+/** True for purchase searches (Wohnung/Haus/Grundstück kaufen). */
+export function isBuyRealEstateType(realEstateType) {
+  return BUY_REALESTATE_TYPES.has(String(realEstateType || '').toLowerCase());
+}
+
 const PRICE_TYPE_MAP = {
   'wohnung-mieten': 'calculatedtotalrent',
   'neubauwohnung-mieten': 'calculatedtotalrent',
@@ -409,6 +419,15 @@ const MOBILE_UNSUPPORTED_TYPE_SLUGS = new Set([
   'sozialwohnung-mieten',
 ]);
 
+/** Parse German-formatted numbers ("899.000 €" → 899000, "5,5 Zi." → 5.5). */
+export function parseGermanNumber(text) {
+  // First alternative requires at least one ".NNN" thousands group so that
+  // plain digit runs ("350000") fall through to the full-length \d+ match.
+  const match = String(text || '').match(/\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?/);
+  if (!match) return 0;
+  return parseFloat(match[0].replace(/\./g, '').replace(',', '.')) || 0;
+}
+
 function parseWgSlug(segment) {
   const match = String(segment || '').match(/^(\d+)er-wg$/i);
   if (!match) return null;
@@ -657,7 +676,10 @@ export function buildMobileApiUrl(canonical, { page = 1, pageSize = 20, includeL
   if (canonical.location?.geocode) params.set('geocodes', canonical.location.geocode);
   params.set('searchType', canonical.searchType || 'region');
   params.set('realestatetype', canonical.realEstateType || 'apartmentrent');
-  if (canonical.price?.type) params.set('pricetype', canonical.price.type);
+  // Buy searches: never send pricetype — the mobile API 412s on it.
+  if (canonical.price?.type && !isBuyRealEstateType(canonical.realEstateType)) {
+    params.set('pricetype', canonical.price.type);
+  }
 
   const price = formatRange(canonical.price);
   const rooms = formatRange(canonical.rooms);
@@ -845,19 +867,31 @@ export async function fetchListings(webUrl, page = 1) {
     const listings = items.map((item) => {
       const expose = item.item || item;
       const attrs = {};
+      const positional = { price: 0, size: 0, rooms: 0 };
       if (Array.isArray(expose.attributes)) {
         for (const attr of expose.attributes) {
           if (attr.attribute && attr.value) attrs[attr.attribute] = attr.value;
+          // Buy listings return label-less positional attributes like
+          // "899.000 €" / "165 m²" / "5,5 Zi." — recognise them by unit.
+          const value = String(attr.value || '');
+          if (/€/.test(value) && !positional.price) positional.price = parseGermanNumber(value);
+          else if (/m²/.test(value) && !positional.size) positional.size = parseGermanNumber(value);
+          else if (/\bZi\b|Zi\.|Zimmer/i.test(value) && !positional.rooms) positional.rooms = parseGermanNumber(value);
         }
       }
+      const exposeId = String(expose.id || expose.exposeId || '');
       return {
-        expose_id: String(expose.id || expose.exposeId || ''),
+        expose_id: exposeId,
         title: expose.title || '',
-        price: parseFloat(attrs.price || attrs.totalRent || attrs.purchasePrice || 0),
-        size: parseFloat(attrs.livingSpace || attrs.area || 0),
-        rooms: parseFloat(attrs.numberOfRooms || 0),
+        price: parseFloat(attrs.price || attrs.totalRent || attrs.purchasePrice || 0) || positional.price,
+        size: parseFloat(attrs.livingSpace || attrs.area || 0) || positional.size,
+        rooms: parseFloat(attrs.numberOfRooms || 0) || positional.rooms,
         address: expose.address?.line || expose.address || '',
+        postcode: expose.address?.postcode || '',
         image_url: expose.titlePicture?.full || expose.titlePicture?.preview || '',
+        url: exposeId ? `https://www.immobilienscout24.de/expose/${exposeId}` : '',
+        source: 'is24',
+        is_project: !!expose.isProject,
       };
     });
 
