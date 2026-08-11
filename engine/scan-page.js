@@ -124,7 +124,45 @@ export function renderScanPage() {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
+    // Transit lines live in their own pane below the overlay pane (z 400), so
+    // they always render under listing/project markers regardless of when the
+    // async fetches land.
+    map.createPane('transit').style.zIndex = 350;
     markerLayer = L.layerGroup().addTo(map);
+    loadTransitLines();
+    loadManualProjects();
+  }
+
+  function loadTransitLines() {
+    fetch('/api/scan/transit').then(function (r) { return r.json(); }).then(function (data) {
+      (data.lines || []).forEach(function (line) {
+        (line.ways || []).forEach(function (way) {
+          L.polyline(way, {
+            pane: 'transit', color: line.colour || '#666',
+            weight: 3, opacity: 0.6, interactive: false
+          }).addTo(map);
+        });
+      });
+    }).catch(function () { /* map just has no lines */ });
+  }
+
+  function loadManualProjects() {
+    fetch('/api/scan/projects').then(function (r) { return r.json(); }).then(function (data) {
+      (data.projects || []).forEach(function (p) {
+        if (p.lat == null || p.lng == null) return;
+        var m = L.circleMarker([p.lat, p.lng], {
+          radius: 9, weight: 2, color: '#3b2f14',
+          fillColor: '#D9A441', fillOpacity: 0.95
+        }).addTo(map);
+        m.bindTooltip(p.name);
+        m.bindPopup(
+          '<strong>' + esc(p.name) + '</strong> <span style="color:#B8860B">Neubau</span><br>' +
+          esc(p.address || '') +
+          (p.note ? '<br>' + esc(p.note) : '') +
+          (p.url ? '<br><a href="' + esc(p.url) + '" target="_blank" rel="noopener">Projektseite</a>' : '')
+        );
+      });
+    }).catch(function () { /* no pins then */ });
   }
 
   // Marker fills need to be dark and saturated: the pastel badge colours wash

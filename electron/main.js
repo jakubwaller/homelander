@@ -104,7 +104,7 @@ let scanServer = null; // Kaufradar — local browse site for scan-mode listings
 async function ensureScanServer() {
   if (scanServer) return scanServer;
   try {
-    scanServer = await startScanServer(() => db(), { port: config?.scan?.port || 8477 });
+    scanServer = await startScanServer(() => db(), { port: config?.scan?.port || 8477, dataDir: DATA_DIR });
     console.log(`[main] Kaufradar running at ${scanServer.url}`);
   } catch (err) {
     swallow(err, 'main/scan-server-start');

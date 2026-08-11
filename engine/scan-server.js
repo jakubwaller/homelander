@@ -5,10 +5,23 @@
 // Started by the Electron main process; the daemon writes the data.
 
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { URL } from 'node:url';
 import { renderScanPage } from './scan-page.js';
+import { readTransitLines } from './transit.js';
 
 const DEFAULT_PORT = 8477;
+
+/** Hand-maintained off-portal Neubau projects, dropped into the data dir. */
+function readManualProjects(dataDir) {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dataDir, 'manual-projects.json'), 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter(p => p && p.name) : [];
+  } catch {
+    return [];
+  }
+}
 
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -29,10 +42,12 @@ function parseListingRow(row) {
 /**
  * Start the Kaufradar server.
  * @param {() => import('./db.js').HomelanderDB} dbGetter  lazy DB accessor
- * @param {{ port?: number, host?: string }} options
+ * @param {{ port?: number, host?: string, dataDir?: string }} options
+ *   dataDir enables /api/scan/transit and /api/scan/projects (both empty
+ *   without it).
  * @returns {Promise<{ server, port, url, close }>}
  */
-export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0.1' } = {}) {
+export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0.1', dataDir = null } = {}) {
   const server = createServer((req, res) => {
     try {
       const url = new URL(req.url, `http://${host}`);
@@ -44,6 +59,14 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end(renderScanPage());
         return;
+      }
+
+      if (path === '/api/scan/transit') {
+        return json(res, 200, dataDir ? readTransitLines(dataDir) : { generated_at: null, lines: [] });
+      }
+
+      if (path === '/api/scan/projects') {
+        return json(res, 200, { projects: dataDir ? readManualProjects(dataDir) : [] });
       }
 
       if (path === '/api/scan/filters') {

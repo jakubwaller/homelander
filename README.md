@@ -107,6 +107,8 @@ Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is publish
 
 Configure searches via `HOMELANDER_SCAN_URLS` in `.env` (comma-separated IS24 buy / Kleinanzeigen / Neubaukompass search URLs) or drop a `scan-searches.json` (array of URLs) into the `/data` volume. Data lives in the `homelander-data` volume: `homelander.db` and `scan-listings.json`.
 
+The Kaufradar map overlays local U-/S-Bahn lines (route geometry fetched from Overpass into the data volume, refreshed monthly) and renders gold pins from an optional `/data/manual-projects.json` — a JSON array of `{ "name", "url", "address", "lat", "lng", "note" }` objects for Neubau projects that are marketed only on a developer's own site and never reach the portals.
+
 The weekly e-mail report sends via SMTP — set `HOMELANDER_REPORT_ENABLED=true`, `HOMELANDER_REPORT_TO`, and the `HOMELANDER_SMTP_*` variables in `.env`. For ProtonMail use `smtp.protonmail.ch:587` with a dedicated SMTP token (Unlimited plan or higher, paired with a custom-domain address; the From address must equal the token's address — it defaults to `HOMELANDER_SMTP_USER`). The desktop app configures the same thing under Settings → Wochenbericht.
 
 ⚠️ The Kaufradar has no authentication — the provided compose file exposes it to your LAN. Only do that on a private network you trust; on shared networks bind it to `127.0.0.1:8477:8477` and tunnel in.

@@ -32,6 +32,7 @@ import { HomelanderDB } from './db.js';
 import { fetchAnyListings, validateAnySearchUrl } from './sources.js';
 import { createScanCycle } from './scan-cycle.js';
 import { startScanServer } from './scan-server.js';
+import { ensureTransitLines } from './transit.js';
 
 const DATA_DIR = process.env.HOMELANDER_DATA_DIR || join(homedir(), '.homelander');
 const DB_PATH = join(DATA_DIR, 'homelander.db');
@@ -161,8 +162,9 @@ async function main() {
   if (!once) {
     const host = process.env.HOMELANDER_SCAN_HOST || config.scan?.host || '127.0.0.1';
     const port = Number(process.env.HOMELANDER_SCAN_PORT) || config.scan?.port || 8477;
-    server = await startScanServer(() => db, { host, port });
+    server = await startScanServer(() => db, { host, port, dataDir: DATA_DIR });
     log(`Kaufradar running at ${server.url}`);
+    void ensureTransitLines(DATA_DIR, { log });
   }
 
   const intervalSec = Number(process.env.HOMELANDER_POLL_INTERVAL)
