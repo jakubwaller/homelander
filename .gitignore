@@ -43,3 +43,7 @@ homelander-brand-assets.zip
 icon-screenshots/
 scripts/icon_variant_screenshots.mjs
 chrome-bundled/
+
+# Pi-side runtime config (lives in the repo dir next to .env, synced into /data)
+scan-searches.json
+manual-projects.json
