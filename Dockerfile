@@ -30,7 +30,10 @@ ENV NODE_ENV=production \
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
 COPY engine ./engine
-RUN mkdir -p /data && chown node:node /data
+# The runtime never invokes npm (CMD is plain node) — drop npm and its
+# vendored deps from the image; they only feed the weekly CVE scan noise.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+ && mkdir -p /data && chown node:node /data
 USER node
 VOLUME /data
 EXPOSE 8477
