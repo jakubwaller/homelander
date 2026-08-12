@@ -2,25 +2,45 @@
   <img src="brand/social/avatar-1024.png" width="128" alt="Homelander">
 </p>
 
-<h1 align="center">Homelander</h1>
+<h1 align="center">Homelander — Kaufradar</h1>
 
 <p align="center">
-  <b>Desktop app that automates apartment applications on ImmobilienScout24</b><br>
-  Paste a search URL — it polls for new listings and auto-applies for you.
+  <b>Analysis-only flat-purchase scanner</b><br>
+  A fork of <a href="https://github.com/B1Z0N/homelander">B1Z0N/homelander</a> that watches IS24 and Kleinanzeigen
+  buy listings, puts them on a map and mails a weekly report. It never applies to anything.
 </p>
 
 <p align="center">
-  <a href="https://github.com/B1Z0N/homelander/actions/workflows/ci.yml"><img src="https://github.com/B1Z0N/homelander/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/platform-Docker%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/electron-42-47848f" alt="Electron 42">
 </p>
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=udNWQz3WNBI"><b>▶ Watch the demo</b></a> (1:41)
-  &nbsp;·&nbsp;
-  <a href="https://www.youtube.com/watch?v=tihX4nCKdwQ"><b>macOS install guide</b></a>
-</p>
+## 🔭 About this fork
+
+Upstream Homelander is a desktop app that auto-applies to IS24 rental listings. This fork keeps that intact and adds **Kaufradar**, a scan-only mode for *buying*: it collects IS24-buy and Kleinanzeigen listings, enriches and geocodes them, and serves a Leaflet map with photos, floor plans, a seen-flag, a U-/S-Bahn overlay and a weekly e-mail report. Scan filters are excluded from the apply loop by design, and the headless build ships without Electron or Chromium — it cannot send an application even by accident.
+
+This fork publishes no desktop binaries; those come from the upstream [Releases](https://github.com/B1Z0N/homelander/releases). What you deploy from here is the Docker scanner below.
+
+## 🗺️ Kaufradar — headless Docker scanner (analysis-only)
+
+The scan half of Homelander (flat-purchase monitoring, Kaufradar browse site, JSON export, weekly e-mail report) runs headless — no Electron, no Chromium, and it can never send applications. Deploy it on a home server / Raspberry Pi like any other compose project:
+
+```bash
+cp .env.example .env           # searches + optional mail provider keys
+docker compose up -d --build
+# Kaufradar: http://<host-address>:8477 from any device on your LAN
+```
+
+Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is published for `arm64` and `arm/v7`, and the only native module (`better-sqlite3`) uses a prebuilt binary when available and otherwise compiles during the build — expect the first `docker compose up -d --build` on a Pi to take a few minutes.
+
+Configure searches via `HOMELANDER_SCAN_URLS` in `.env` (comma-separated IS24 buy / Kleinanzeigen / Neubaukompass search URLs) or drop a `scan-searches.json` (array of URLs) into the `/data` volume. Data lives in the `homelander-data` volume: `homelander.db` and `scan-listings.json`.
+
+The Kaufradar map overlays local U-/S-Bahn lines (route geometry fetched from Overpass into the data volume, refreshed monthly) and renders gold pins from an optional `/data/manual-projects.json` — a JSON array of `{ "name", "url", "address", "lat", "lng", "note" }` objects for Neubau projects that are marketed only on a developer's own site and never reach the portals.
+
+The weekly e-mail report sends via SMTP — set `HOMELANDER_REPORT_ENABLED=true`, `HOMELANDER_REPORT_TO`, and the `HOMELANDER_SMTP_*` variables in `.env`. For ProtonMail use `smtp.protonmail.ch:587` with a dedicated SMTP token (Unlimited plan or higher, paired with a custom-domain address; the From address must equal the token's address — it defaults to `HOMELANDER_SMTP_USER`). The desktop app configures the same thing under Settings → Wochenbericht.
+
+⚠️ The Kaufradar has no authentication — the provided compose file exposes it to your LAN. Only do that on a private network you trust; on shared networks bind it to `127.0.0.1:8477:8477` and tunnel in.
 
 ## 📸 Screenshots
 
@@ -65,11 +85,11 @@ Free. No terminal. No cloud. No manual refreshing. Set it and forget it.
 - **🌍 Multilanguage** — full German and English UI
 - **📦 Local-first** — all data in SQLite, nothing sent to us
 
-## ⬇️ Installation
+## ⬇️ Installation (desktop app)
 
-Download the latest version from the **[Releases](https://github.com/B1Z0N/homelander/releases)** page.
+Download the latest desktop build from the upstream **[Releases](https://github.com/B1Z0N/homelander/releases)** page — this fork ships the Docker scanner above, not binaries.
 
-📺 Prefer video? **[Watch the macOS install walkthrough](https://www.youtube.com/watch?v=tihX4nCKdwQ)** — download, Gatekeeper, and first launch.
+📺 Prefer video? **[Watch the demo](https://www.youtube.com/watch?v=udNWQz3WNBI)** (1:41) or the **[macOS install walkthrough](https://www.youtube.com/watch?v=tihX4nCKdwQ)** — download, Gatekeeper, and first launch.
 
 | Platform | Package |
 |----------|---------|
@@ -93,31 +113,11 @@ Then launch from Applications or Spotlight. ([See this step in the video](https:
 
 Download the `.exe` and run it. Windows SmartScreen may show a warning — click **More info** → **Run anyway**.
 
-### Docker — headless Kaufradar scanner (analysis-only)
-
-The scan half of Homelander (flat-purchase monitoring, Kaufradar browse site, JSON export, weekly e-mail report) runs headless — no Electron, no Chromium, and it can never send applications. Deploy it on a home server / Raspberry Pi like any other compose project:
-
-```bash
-cp .env.example .env           # searches + optional mail provider keys
-docker compose up -d --build
-# Kaufradar: http://<host-address>:8477 from any device on your LAN
-```
-
-Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is published for `arm64` and `arm/v7`, and the only native module (`better-sqlite3`) uses a prebuilt binary when available and otherwise compiles during the build — expect the first `docker compose up -d --build` on a Pi to take a few minutes.
-
-Configure searches via `HOMELANDER_SCAN_URLS` in `.env` (comma-separated IS24 buy / Kleinanzeigen / Neubaukompass search URLs) or drop a `scan-searches.json` (array of URLs) into the `/data` volume. Data lives in the `homelander-data` volume: `homelander.db` and `scan-listings.json`.
-
-The Kaufradar map overlays local U-/S-Bahn lines (route geometry fetched from Overpass into the data volume, refreshed monthly) and renders gold pins from an optional `/data/manual-projects.json` — a JSON array of `{ "name", "url", "address", "lat", "lng", "note" }` objects for Neubau projects that are marketed only on a developer's own site and never reach the portals.
-
-The weekly e-mail report sends via SMTP — set `HOMELANDER_REPORT_ENABLED=true`, `HOMELANDER_REPORT_TO`, and the `HOMELANDER_SMTP_*` variables in `.env`. For ProtonMail use `smtp.protonmail.ch:587` with a dedicated SMTP token (Unlimited plan or higher, paired with a custom-domain address; the From address must equal the token's address — it defaults to `HOMELANDER_SMTP_USER`). The desktop app configures the same thing under Settings → Wochenbericht.
-
-⚠️ The Kaufradar has no authentication — the provided compose file exposes it to your LAN. Only do that on a private network you trust; on shared networks bind it to `127.0.0.1:8477:8477` and tunnel in.
-
 ## ⚠️ Disclaimer
 
-Homelander is a **fun portfolio / hobby project** created for educational purposes. It is **not intended to be used on ImmobilienScout24** and is in no way a tool for submitting actual applications or interacting with the IS24 platform.
+Homelander is a **fun portfolio / hobby project** created for educational purposes. It is **not intended to be used on ImmobilienScout24** and is in no way a tool for submitting actual applications or interacting with the IS24 platform. The Kaufradar additions in this fork are **analysis-only**: they read publicly reachable listing pages for personal use, submit nothing, and the headless build contains no apply engine at all.
 
-This project is **not affiliated with, endorsed by, or connected to ImmobilienScout24 GmbH** in any way. Any use of this software to interact with IS24 is strictly prohibited and may violate IS24's terms of service. The authors assume no liability for any consequences, including but not limited to account restrictions, blocked access, legal claims, or any other actions taken by ImmobilienScout24 or any other party. This software is provided "as is" without warranty of any kind.
+This project is **not affiliated with, endorsed by, or connected to** ImmobilienScout24 GmbH, Kleinanzeigen GmbH & Co. KG, or any other listing portal. Automated access may violate a portal's terms of service — check them yourself before pointing this at anything. The authors assume no liability for any consequences, including but not limited to account restrictions, blocked access, legal claims, or any other actions taken by a portal operator or any other party. This software is provided "as is" without warranty of any kind.
 
 ## 🔧 First Launch
 
@@ -151,8 +151,11 @@ Config lives at `~/.homelander/config.json`. Database at `~/.homelander/homeland
 All data is **local** — nothing is sent anywhere except:
 
 - **IS24's API** — to discover new listings
-- **IS24's website via Chromium** — to submit contact forms
-- **2captcha API** — to solve captchas
+- **IS24's website via Chromium** — to submit contact forms (desktop apply mode only)
+- **2captcha API** — to solve captchas (desktop apply mode only)
+- **Portal listing pages** — scan mode fetches exposés to enrich Kaufradar entries
+- **Overpass and Nominatim (OpenStreetMap)** — transit-line geometry and geocoding for the map, cached locally
+- **Your configured mail provider** — only if the weekly report is enabled
 
 No telemetry. No analytics. No cloud. Your `config.json`, `homelander.db`, and Chrome profile stay on your machine.
 
@@ -166,7 +169,7 @@ No telemetry. No analytics. No cloud. Your `config.json`, `homelander.db`, and C
 ### Install & Run
 
 ```bash
-git clone https://github.com/B1Z0N/homelander.git
+git clone https://github.com/jakubwaller/homelander.git
 cd homelander
 npm install
 npm run dev
@@ -212,28 +215,18 @@ Everything runs on your computer. Your data stays local.
 
 ## 🤝 Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
-
-- Bug reports → [Issue template](https://github.com/B1Z0N/homelander/issues/new?template=bug_report.yml)
-- Feature ideas → [Feature request](https://github.com/B1Z0N/homelander/issues/new?template=feature_request.yml)
-- Questions → [Discussions](https://github.com/B1Z0N/homelander/discussions)
+Issues and discussions are disabled on this fork. For the desktop app, report bugs and feature ideas [upstream](https://github.com/B1Z0N/homelander/issues). See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup.
 
 ## ❤️ Support
 
-If Homelander saves you time and stress, consider supporting development:
+If the Kaufradar helped you, you can buy me a coffee: <https://ko-fi.com/jakubwaller>
 
-<p align="center">
-  <a href="https://github.com/sponsors/B1Z0N"><img src="https://img.shields.io/badge/Sponsor-GitHub-30363D?style=for-the-badge&logo=githubsponsors&logoColor=white" alt="Sponsor on GitHub"></a>
-  &nbsp;
-  <a href="https://www.buymeacoffee.com/b1z0n"><img src="https://img.shields.io/badge/Buy%20Me%20A-Coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy Me A Coffee"></a>
-  &nbsp;
-  <a href="https://ko-fi.com/b1z0n"><img src="https://img.shields.io/badge/Ko--fi-Support-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white" alt="Support on Ko-fi"></a>
-</p>
+The desktop app and its auto-apply engine are [B1Z0N](https://github.com/B1Z0N)'s work — support him on [GitHub Sponsors](https://github.com/sponsors/B1Z0N), [Buy Me a Coffee](https://www.buymeacoffee.com/b1z0n) or [Ko-fi](https://ko-fi.com/b1z0n).
 
 ## 📄 License
 
-MIT © [Mykola Fedurko](https://github.com/B1Z0N)
+MIT. Original project © [Mykola Fedurko](https://github.com/B1Z0N), Kaufradar fork additions © [Jakub Waller](https://github.com/jakubwaller). See [LICENSE](LICENSE).
 
 ## 🙏 Credits
 
-Built on an auto-apply engine developed and battle-tested across thousands of IS24 listings. Key icon brand by the author.
+Built on an auto-apply engine developed and battle-tested across thousands of IS24 listings. Key icon brand by the original author.
