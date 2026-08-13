@@ -3,7 +3,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HomelanderDB } from '../engine/db.js';
@@ -83,5 +83,40 @@ describe('scan-server', () => {
 
   it('rejects non-GET methods', async () => {
     assert.equal((await fetch(`${srv.url}api/scan/listings`, { method: 'POST' })).status, 405);
+  });
+
+  it('serves manual projects with a stable hash and toggleable seen state', async () => {
+    writeFileSync(join(dir, 'manual-projects.json'), JSON.stringify([
+      { name: 'Testprojekt', address: 'Musterstr. 1, 20095 Hamburg', lat: 53.55, lng: 10.0 },
+    ]));
+    const srv2 = await startScanServer(() => db, { port: 0, dataDir: dir });
+    try {
+      let { projects } = await (await fetch(`${srv2.url}api/scan/projects`)).json();
+      assert.equal(projects.length, 1);
+      const p = projects[0];
+      assert.match(p.hash, /^[a-f0-9]{64}$/);
+      assert.equal(p.seen, 0);
+
+      const resp = await fetch(`${srv2.url}api/scan/seen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash: p.hash, seen: true }),
+      });
+      assert.equal(resp.status, 200);
+
+      ({ projects } = await (await fetch(`${srv2.url}api/scan/projects`)).json());
+      assert.equal(projects[0].hash, p.hash);
+      assert.equal(projects[0].seen, 1);
+
+      await fetch(`${srv2.url}api/scan/seen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash: p.hash, seen: false }),
+      });
+      ({ projects } = await (await fetch(`${srv2.url}api/scan/projects`)).json());
+      assert.equal(projects[0].seen, 0);
+    } finally {
+      await srv2.close();
+    }
   });
 });
