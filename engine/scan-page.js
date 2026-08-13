@@ -30,8 +30,9 @@ export function renderScanPage() {
   }
   .controls input:focus, .controls select:focus { border-color:var(--gold); }
   .controls input[type=number] { width:96px; }
-  #filter-toggle { display:none; background:var(--bg-card); color:var(--text-dim); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:13px; cursor:pointer; margin-left:auto; }
-  #filter-toggle.on { border-color:var(--gold); color:var(--gold); }
+  #filter-toggle, #list-toggle { display:none; background:var(--bg-card); color:var(--text-dim); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:13px; cursor:pointer; }
+  #list-toggle { margin-left:auto; }
+  #filter-toggle.on, #list-toggle.on { border-color:var(--gold); color:var(--gold); }
   #layout { display:grid; grid-template-columns: minmax(360px, 46%) 1fr; flex:1; min-height:0; }
   #list { overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
   #map { height:100%; }
@@ -73,9 +74,16 @@ export function renderScanPage() {
   #detail a.out { display:inline-block; margin-top:10px; background:var(--gold); color:#151515; font-weight:600; padding:8px 16px; border-radius:9px; text-decoration:none; }
   .leaflet-container { background:#1a1a1e; }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--bg-elevated); color:var(--text); }
+  .locate-btn { font-size:17px; }
   @media (max-width: 900px) {
-    #layout { grid-template-columns: 1fr; grid-template-rows: 45% 55%; }
-    #filter-toggle { display:block; }
+    /* List folded by default: display:none takes it out of the grid, so the
+       map is the only row and gets the whole viewport. The "Liste" toggle
+       restores the split. */
+    #layout { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    #list { display:none; }
+    #layout.list-open { grid-template-rows: 45% 55%; }
+    #layout.list-open #list { display:flex; }
+    #filter-toggle, #list-toggle { display:block; }
     .controls { display:none; width:100%; }
     header.filters-open .controls { display:flex; }
     /* 16px keeps iOS Safari from zooming the page on input focus */
@@ -87,6 +95,7 @@ export function renderScanPage() {
 <header>
   <h1>⌂ Kaufradar</h1>
   <span class="count" id="count">…</span>
+  <button id="list-toggle" aria-expanded="false" aria-controls="list">Liste</button>
   <button id="filter-toggle" aria-expanded="false" aria-controls="controls">Filter</button>
   <div class="controls" id="controls">
     <select id="f-filter"><option value="">Alle Suchen</option></select>
@@ -125,6 +134,8 @@ export function renderScanPage() {
   var markerLayer = null;
   var map = null;
   var activeHash = null;
+  var locateLayer = null;
+  var lastFitKey = null;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -148,6 +159,19 @@ export function renderScanPage() {
     // async fetches land.
     map.createPane('transit').style.zIndex = 350;
     markerLayer = L.layerGroup().addTo(map);
+    var LocateControl = L.Control.extend({
+      onAdd: function () {
+        var div = L.DomUtil.create('div', 'leaflet-bar');
+        var a = L.DomUtil.create('a', 'locate-btn', div);
+        a.href = '#';
+        a.title = 'Meinen Standort anzeigen';
+        a.setAttribute('aria-label', 'Meinen Standort anzeigen');
+        a.textContent = '◎';
+        L.DomEvent.on(a, 'click', function (e) { L.DomEvent.stop(e); locateMe(a); });
+        return div;
+      }
+    });
+    new LocateControl({ position: 'topleft' }).addTo(map);
     // The map pane resizes when the mobile filter panel opens/closes and when
     // the mobile browser chrome collapses; Leaflet won't notice on its own.
     if (window.ResizeObserver) {
@@ -155,6 +179,31 @@ export function renderScanPage() {
     }
     loadTransitLines();
     loadManualProjects();
+  }
+
+  // Geolocation only works in secure contexts — https://homelander.… and
+  // localhost qualify, plain-http LAN access does not; there the error
+  // callback fires and the button just flashes ✕.
+  function locateMe(btn) {
+    function fail() {
+      btn.textContent = '✕';
+      setTimeout(function () { btn.textContent = '◎'; }, 1500);
+    }
+    if (!navigator.geolocation) return fail();
+    btn.textContent = '…';
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      btn.textContent = '◎';
+      var ll = [pos.coords.latitude, pos.coords.longitude];
+      if (locateLayer) map.removeLayer(locateLayer);
+      locateLayer = L.layerGroup([
+        L.circle(ll, {
+          radius: pos.coords.accuracy || 0, weight: 1, color: '#3b82f6',
+          fillColor: '#3b82f6', fillOpacity: 0.12, interactive: false
+        }),
+        L.circleMarker(ll, { radius: 7, weight: 2, color: '#ffffff', fillColor: '#3b82f6', fillOpacity: 1 })
+      ]).addTo(map);
+      map.setView(ll, Math.max(map.getZoom(), 14));
+    }, fail, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
   }
 
   function loadTransitLines() {
@@ -316,7 +365,14 @@ export function renderScanPage() {
         bounds.push([l.lat, l.lng]);
       }
     });
-    if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+    // Refit only when the visible marker set changed — the 60 s auto-refresh
+    // re-renders too, and must not yank away a view the user chose (e.g.
+    // after zooming to their own location).
+    var fitKey = bounds.join(';');
+    if (bounds.length && fitKey !== lastFitKey) {
+      lastFitKey = fitKey;
+      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+    }
   }
 
   function detailTables(details) {
@@ -386,6 +442,12 @@ export function renderScanPage() {
 
   document.getElementById('filter-toggle').addEventListener('click', function () {
     var on = document.querySelector('header').classList.toggle('filters-open');
+    this.classList.toggle('on', on);
+    this.setAttribute('aria-expanded', on ? 'true' : 'false');
+  });
+
+  document.getElementById('list-toggle').addEventListener('click', function () {
+    var on = document.getElementById('layout').classList.toggle('list-open');
     this.classList.toggle('on', on);
     this.setAttribute('aria-expanded', on ? 'true' : 'false');
   });
