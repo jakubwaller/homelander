@@ -5,6 +5,7 @@
 // Started by the Electron main process; the daemon writes the data.
 
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { URL } from 'node:url';
@@ -105,7 +106,17 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       }
 
       if (path === '/api/scan/projects') {
-        return json(res, 200, { projects: dataDir ? readManualProjects(dataDir) : [] });
+        const projects = dataDir ? readManualProjects(dataDir) : [];
+        // Projects share the listings' scan_seen store; a project's key is
+        // the sha256 of its name, so the flag survives note/coordinate edits
+        // and a rename resurfaces the pin as unseen.
+        const seenStmt = dbGetter().db.prepare('SELECT 1 FROM scan_seen WHERE hash = ?');
+        return json(res, 200, {
+          projects: projects.map((p) => {
+            const hash = createHash('sha256').update(`project|${p.name}`).digest('hex');
+            return { ...p, hash, seen: seenStmt.get(hash) ? 1 : 0 };
+          }),
+        });
       }
 
       if (path === '/api/scan/filters') {

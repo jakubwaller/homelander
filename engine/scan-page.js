@@ -219,21 +219,53 @@ export function renderScanPage() {
     }).catch(function () { /* map just has no lines */ });
   }
 
+  function projectStyle(p) {
+    return p.seen
+      ? { radius: 9, weight: 2, color: '#3b2f14', fillColor: '#94a3b8', fillOpacity: 0.6 }
+      : { radius: 9, weight: 2, color: '#3b2f14', fillColor: '#D9A441', fillOpacity: 0.95 };
+  }
+
+  function setProjectSeen(p, marker, next) {
+    fetch('/api/scan/seen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash: p.hash, seen: next })
+    }).then(function () {
+      p.seen = next ? 1 : 0;
+      marker.setStyle(projectStyle(p));
+      var popup = marker.getPopup();
+      var a = popup && popup.isOpen() ? popup.getElement().querySelector('.proj-seen') : null;
+      if (a) a.textContent = p.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren';
+    }).catch(function () {});
+  }
+
   function loadManualProjects() {
     fetch('/api/scan/projects').then(function (r) { return r.json(); }).then(function (data) {
       (data.projects || []).forEach(function (p) {
         if (p.lat == null || p.lng == null) return;
-        var m = L.circleMarker([p.lat, p.lng], {
-          radius: 9, weight: 2, color: '#3b2f14',
-          fillColor: '#D9A441', fillOpacity: 0.95
-        }).addTo(map);
+        var m = L.circleMarker([p.lat, p.lng], projectStyle(p)).addTo(map);
         m.bindTooltip(p.name);
         m.bindPopup(
           '<strong>' + esc(p.name) + '</strong> <span style="color:#B8860B">Neubau</span><br>' +
           esc(p.address || '') +
           (p.note ? '<br>' + esc(p.note) : '') +
-          (p.url ? '<br><a href="' + esc(p.url) + '" target="_blank" rel="noopener">Projektseite</a>' : '')
+          (p.url ? '<br><a href="' + esc(p.url) + '" target="_blank" rel="noopener">Projektseite</a>' : '') +
+          (p.hash ? '<br><a href="#" class="proj-seen"></a>' : '')
         );
+        // Mirror the listing dots: opening a pin marks the project seen
+        // (grey, in place — the popup stays open); the popup link toggles.
+        m.on('click', function () {
+          if (!p.seen && p.hash) setProjectSeen(p, m, true);
+        });
+        m.on('popupopen', function (e) {
+          var a = e.popup.getElement().querySelector('.proj-seen');
+          if (!a) return;
+          a.textContent = p.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren';
+          a.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            setProjectSeen(p, m, !p.seen);
+          });
+        });
       });
     }).catch(function () { /* no pins then */ });
   }
