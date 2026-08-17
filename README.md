@@ -18,7 +18,7 @@
 
 ## 🔭 About this fork
 
-Upstream Homelander is a desktop app that auto-applies to IS24 rental listings. This fork keeps that intact and adds **Kaufradar**, a scan-only mode for *buying*: it collects IS24-buy and Kleinanzeigen listings, enriches and geocodes them, and serves a Leaflet map with photos, floor plans, a seen-flag, a U-/S-Bahn overlay and a weekly e-mail report. Scan filters are excluded from the apply loop by design, and the headless build ships without Electron or Chromium — it cannot send an application even by accident.
+Upstream Homelander is a desktop app that auto-applies to IS24 rental listings. This fork keeps that intact and adds **Kaufradar**, a scan-only mode for *buying*: it collects IS24-buy and Kleinanzeigen listings, enriches and geocodes them, and serves a Leaflet map with photos, floor plans, a seen-flag, favourites, per-property file uploads, a U-/S-Bahn overlay and a weekly e-mail report. Scan filters are excluded from the apply loop by design, and the headless build ships without Electron or Chromium — it cannot send an application even by accident.
 
 This fork publishes no desktop binaries; those come from the upstream [Releases](https://github.com/B1Z0N/homelander/releases). What you deploy from here is the Docker scanner below.
 
@@ -37,6 +37,8 @@ Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is publish
 Configure searches via `HOMELANDER_SCAN_URLS` in `.env` (comma-separated IS24 buy / Kleinanzeigen / Neubaukompass search URLs) or drop a `scan-searches.json` (array of URLs) into the `/data` volume. Data lives in the `homelander-data` volume: `homelander.db` and `scan-listings.json`.
 
 The Kaufradar map overlays local U-/S-Bahn lines (route geometry fetched from Overpass into the data volume, refreshed monthly) and renders gold pins from an optional `/data/manual-projects.json` — a JSON array of `{ "name", "url", "address", "lat", "lng", "note" }` objects for Neubau projects that are marketed only on a developer's own site and never reach the portals.
+
+Every entry — portal listing or Neubau pin — can be **starred** (★ button; "★ Nur Favoriten" filters the list and the map) and takes **file uploads**: drop the price lists, exposés and Grundriss PDFs a developer mails you onto the detail view and they stay with the property, in `/data/uploads/<hash>/`.
 
 The weekly e-mail report sends via SMTP — set `HOMELANDER_REPORT_ENABLED=true`, `HOMELANDER_REPORT_TO`, and the `HOMELANDER_SMTP_*` variables in `.env`. For ProtonMail use `smtp.protonmail.ch:587` with a dedicated SMTP token (Unlimited plan or higher, paired with a custom-domain address; the From address must equal the token's address — it defaults to `HOMELANDER_SMTP_USER`). The desktop app configures the same thing under Settings → Wochenbericht.
 

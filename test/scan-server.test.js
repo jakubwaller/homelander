@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { HomelanderDB } from '../engine/db.js';
 import { startScanServer } from '../engine/scan-server.js';
 
-let dir, db, srv, hash;
+let dir, db, srv, srvFiles, hash;
 
 before(async () => {
   dir = mkdtempSync(join(tmpdir(), 'homelander-scan-server-'));
@@ -37,9 +37,11 @@ before(async () => {
   hash = db.getScanListings()[0].hash;
   db.updateListingScanData(hash, { lat: 52.5, lng: 13.4, scan_json: { texts: [{ title: 'Lage', text: 'zentral' }] } });
   srv = await startScanServer(() => db, { port: 0 });
+  srvFiles = await startScanServer(() => db, { port: 0, dataDir: dir });
 });
 
 after(async () => {
+  await srvFiles?.close();
   await srv?.close();
   db?.close();
   rmSync(dir, { recursive: true, force: true });
@@ -85,6 +87,100 @@ describe('scan-server', () => {
     assert.equal((await fetch(`${srv.url}api/scan/listings`, { method: 'POST' })).status, 405);
   });
 
+  it('stars a listing and reports it back with the listings', async () => {
+    let data = await (await fetch(`${srv.url}api/scan/listings`)).json();
+    assert.equal(data.listings[0].favorite, 0);
+
+    const resp = await fetch(`${srv.url}api/scan/favorite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash, favorite: true }),
+    });
+    assert.equal(resp.status, 200);
+    assert.deepEqual(await resp.json(), { hash, favorite: true });
+
+    data = await (await fetch(`${srv.url}api/scan/listings`)).json();
+    assert.equal(data.listings[0].favorite, 1);
+
+    await fetch(`${srv.url}api/scan/favorite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash, favorite: false }),
+    });
+    data = await (await fetch(`${srv.url}api/scan/listings`)).json();
+    assert.equal(data.listings[0].favorite, 0);
+  });
+
+  it('rejects a malformed favourite hash', async () => {
+    const resp = await fetch(`${srv.url}api/scan/favorite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash: '../../etc/passwd', favorite: true }),
+    });
+    assert.equal(resp.status, 400);
+  });
+
+  it('uploads, lists, downloads and deletes a document', async () => {
+    const body = Buffer.from('%PDF-1.4 Preisliste');
+    const up = await fetch(`${srvFiles.url}api/scan/files/${hash}?name=${encodeURIComponent('Preise & Info.pdf')}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body,
+    });
+    assert.equal(up.status, 200);
+    const { file } = await up.json();
+    assert.equal(file.name, 'Preise & Info.pdf');
+    assert.equal(file.size, body.length);
+
+    const { files } = await (await fetch(`${srvFiles.url}api/scan/files/${hash}`)).json();
+    assert.equal(files.length, 1);
+    assert.equal(files[0].url, `/files/${hash}/${file.file}`);
+
+    const { counts } = await (await fetch(`${srvFiles.url}api/scan/files`)).json();
+    assert.equal(counts[hash], 1);
+
+    const dl = await fetch(`${srvFiles.url}files/${hash}/${file.file}`);
+    assert.equal(dl.status, 200);
+    assert.equal(dl.headers.get('content-type'), 'application/pdf');
+    assert.match(dl.headers.get('content-disposition'), /^inline/);
+    assert.equal(Buffer.from(await dl.arrayBuffer()).toString(), body.toString());
+
+    const del = await fetch(`${srvFiles.url}api/scan/files/${hash}/${file.file}`, { method: 'DELETE' });
+    assert.equal(del.status, 200);
+    assert.deepEqual(await (await fetch(`${srvFiles.url}api/scan/files/${hash}`)).json(), { hash, files: [] });
+    assert.equal((await fetch(`${srvFiles.url}files/${hash}/${file.file}`)).status, 404);
+  });
+
+  it('takes uploads for a manual project hash too', async () => {
+    const projectHash = 'ab'.repeat(32);
+    await fetch(`${srvFiles.url}api/scan/files/${projectHash}?name=grundriss.pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: Buffer.from('plan'),
+    });
+    const { files } = await (await fetch(`${srvFiles.url}api/scan/files/${projectHash}`)).json();
+    assert.equal(files.length, 1);
+    assert.equal(files[0].name, 'grundriss.pdf');
+  });
+
+  it('404s uploads for a path-traversal file name and rejects DELETE of unknown files', async () => {
+    assert.equal((await fetch(`${srvFiles.url}files/${hash}/..%2f..%2fhomelander.db`)).status, 404);
+    assert.equal((await fetch(`${srvFiles.url}files/${hash}/files.json`)).status, 404);
+    assert.equal(
+      (await fetch(`${srvFiles.url}api/scan/files/${hash}/01-nothere.pdf`, { method: 'DELETE' })).status,
+      404
+    );
+  });
+
+  it('answers 501 for uploads when no data directory is configured', async () => {
+    const resp = await fetch(`${srv.url}api/scan/files/${hash}?name=x.pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: Buffer.from('x'),
+    });
+    assert.equal(resp.status, 501);
+  });
+
   it('serves manual projects with a stable hash and toggleable seen state', async () => {
     writeFileSync(join(dir, 'manual-projects.json'), JSON.stringify([
       { name: 'Testprojekt', address: 'Musterstr. 1, 20095 Hamburg', lat: 53.55, lng: 10.0 },
@@ -96,6 +192,15 @@ describe('scan-server', () => {
       const p = projects[0];
       assert.match(p.hash, /^[a-f0-9]{64}$/);
       assert.equal(p.seen, 0);
+      assert.equal(p.favorite, 0);
+
+      await fetch(`${srv2.url}api/scan/favorite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash: p.hash, favorite: true }),
+      });
+      ({ projects } = await (await fetch(`${srv2.url}api/scan/projects`)).json());
+      assert.equal(projects[0].favorite, 1);
 
       const resp = await fetch(`${srv2.url}api/scan/seen`, {
         method: 'POST',
