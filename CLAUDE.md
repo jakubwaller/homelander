@@ -1,234 +1,136 @@
-# Homelander
+# Homelander — Kaufradar
 
-Desktop app for automated IS24 apartment applications. Paste an IS24 search URL — Homelander polls for new listings and auto-applies for you via a bundled Chromium browser.
+Analysis-only flat-purchase scanner. Polls IS24-buy / Kleinanzeigen / Neubaukompass searches,
+enriches and geocodes the results, and serves them as a map ("Kaufradar") plus a weekly e-mail
+report. **There is no apply path in this repository** — the Electron desktop app, the Puppeteer
+apply engine and the React UI were removed; upstream still has them.
 
-- **Repo:** `https://github.com/B1Z0N/homelander`
-- **Author:** Mykola Fedurko (B1Z0N)
-- **License:** MIT
+- **Repo:** `https://github.com/jakubwaller/homelander` (fork of `B1Z0N/homelander`)
+- **License:** MIT — © Mykola Fedurko (upstream), © Jakub Waller (Kaufradar)
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Desktop shell | Electron 42, Node 24 |
-| Renderer | React 19, Vite 6, Tailwind CSS 4 |
-| State | Zustand 5 (single store, no Redux) |
-| Browser automation | Puppeteer 24 (bundled Chromium), Chrome CDP |
-| Database | better-sqlite3 12, WAL mode, single-file SQLite |
-| Auth / captcha | 2captcha, IS24 session cookies in Chromium profile |
-| Build / package | electron-builder, macOS `.dmg` + `.zip`, Windows `.exe` (NSIS), Linux `.deb` + `.AppImage` |
-| CI | GitHub Actions, `macos-latest`, Node 22 |
-| Release | `workflow_dispatch` with version tag + platform matrix |
+| Runtime | Node 22, ESM (`"type": "module"`), no framework |
+| Database | better-sqlite3 12, WAL mode, single-file SQLite (schema v7) |
+| UI | One hand-written HTML/CSS/JS page string + Leaflet from CDN |
+| Geocoding | Nominatim (OSM), rate limited + cached in SQLite |
+| Transit overlay | Overpass API, cached to the data dir, refreshed monthly |
+| Mail | Dependency-free SMTP client |
+| Deployment | Docker (`node:22-bookworm-slim`), single container |
+| CI | GitHub Actions, ubuntu — unit tests + image build/boot |
+
+`better-sqlite3` is the **only** dependency, runtime or dev.
 
 ## Architecture
 
-Homelander is an **Electron app** with a **forked daemon process** for background work.
+One process, no IPC, no child processes:
 
 ```
-┌─ Electron main (electron/main.js) ─────────────────────────────────┐
-│  • App lifecycle, BrowserWindow, Tray                              │
-│  • Chrome lifecycle (electron/chrome.js) — Puppeteer + CDP         │
-│  • Config load/save (JSON at ~/.homelander/config.json)            │
-│  • IPC bridge (electron/preload.cjs) — contextBridge               │
-│  • Support bundle generation                                       │
-│                                                                     │
-│  ┌─ Daemon child process (engine/daemon.js) ──────────────────┐    │
-│  │  Forked via child_process.fork(), communicates via stdout   │    │
-│  │  JSON lines + IPC                                            │    │
-│  │                                                               │    │
-│  │  Two independent async loops:                                │    │
-│  │    pollLoop  — hits IS24 Mobile API every N seconds,         │    │
-│  │                writes new listings to SQLite                 │    │
-│  │    applyLoop — reads pending listings from SQLite,           │    │
-│  │                drives CDP browser to fill + submit forms     │    │
-│  │                                                               │    │
-│  │  Uses: engine/is24-contactor.js (IS24Contactor class)        │    │
-│  │        engine/url-translator.js (web URL → mobile API)       │    │
-│  │        engine/db.js (HomelanderDB — better-sqlite3 wrapper)  │    │
-│  └───────────────────────────────────────────────────────────┘    │
-│                                                                     │
-│  ┌─ Renderer (src/) ──────────────────────────────────────────┐    │
-│  │  React 19 SPA built with Vite, styled with Tailwind CSS 4   │    │
-│  │                                                               │    │
-│  │  Tabs: Searches | History | Settings                         │    │
-│  │  Setup wizard on first launch (5 steps)                      │    │
-│  │  IPC via window.homelander.* (preload bridge)                │    │
-│  └───────────────────────────────────────────────────────────┘    │
-└────────────────────────────────────────────────────────────────────┘
+engine/headless.js ── the entrypoint and the only long-lived loop
+  │
+  ├─ syncs searches from HOMELANDER_SCAN_URLS / scan-searches.json into SQLite
+  ├─ every HOMELANDER_POLL_INTERVAL seconds:
+  │    url-translator.js  → web search URL to mobile API params + fetchListings()
+  │    sources.js         → IS24 buy / Kleinanzeigen / Neubaukompass + exposé enrichment
+  │    scan-cycle.js      → post-processing shared by poll and startup:
+  │                           media.js  (photos + Grundrisse into <data>/media/<hash>/)
+  │                           geocoding (Nominatim, cached in geo_cache)
+  │                           scan-listings.json export
+  │                           report.js → smtp-mailer.js (weekly, if enabled)
+  │
+  └─ scan-server.js ── localhost HTTP server, serves:
+       scan-page.js  → the whole single-page UI as one string
+       uploads.js    → per-property document store
+       transit.js    → U-/S-Bahn geometry for the map overlay
 ```
-
-### Key Flows
-
-1. **User adds search** → URL validated → translated to mobile API params → saved in SQLite
-2. **Poll loop** → `engine/url-translator.js` → `fetchListings()` → IS24 Mobile API (`api.mobile.immobilienscout24.de/search/list`) → new listings written to SQLite with `status='seen'`
-3. **Apply loop** → picks one pending listing per filter → `IS24Contactor.apply()` → opens expose page via CDP → fills contact form → submits → records outcome in SQLite
-4. **Captcha wall** → 5 consecutive captcha failures → apply pauses for 15 min → auto-resumes
-5. **Session expiry** → IS24 login detected as expired → apply pauses → user re-logs in → resumes
-
-### Chrome/Browser
-
-- **One bundled Chromium profile** owned by Puppeteer (not system Chrome)
-- Profile stored at `~/.homelander/chrome-profiles/profile-<hash>/`
-- Manual login: plain Chromium process (no CDP, no `--enable-automation`) to avoid bot detection on IS24 SSO
-- After login, CDP launches on port 9222 for the daemon to use
-- Browser visibility: `hidden_unless_needed` by default; shows when user needs to interact
-- Max 5 tabs; restart throttle: 3/hour
 
 ## Source Tree
 
 ```
 homelander/
-├── electron/             # Electron main process
-│   ├── main.js           # App lifecycle, IPC handlers, daemon management, config
-│   ├── chrome.js         # ChromeManager — Puppeteer/Chromium lifecycle, CDP
-│   └── preload.cjs       # contextBridge (must be CommonJS): window.homelander.*
-├── engine/               # Daemon (forked child process) + shared engine modules
-│   ├── daemon.js         # pollLoop + applyLoop, IPC, pause/captcha logic, scan post-processing
-│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3, WAL mode (schema v7)
-│   ├── is24-contactor.js # IS24Contactor — CDP form filling, captcha solving
+├── engine/
+│   ├── headless.js       # Entrypoint: search sync, poll loop, server start
+│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3 (schema v7)
 │   ├── url-translator.js # IS24 web URL → mobile API params + fetchListings()
-│   ├── sources.js        # Multi-source scan: IS24 buy / Kleinanzeigen / Neubaukompass, exposé enrichment, Nominatim geocoding
-│   ├── scan-cycle.js     # Shared scan post-processing (enrich + export + report), used by daemon and headless
-│   ├── headless.js       # Headless scanner entrypoint (Docker) — poll + Kaufradar, no Electron/Chromium
-│   ├── scan-server.js    # Kaufradar — localhost HTTP server (API + page), run by Electron main
-│   ├── scan-page.js      # Kaufradar single-page UI (inline HTML/CSS/JS + Leaflet map)
-│   ├── uploads.js        # Per-property document store (<data dir>/uploads/<hash>/ + files.json)
+│   ├── sources.js        # Multi-source scan + exposé enrichment + Nominatim geocoding
+│   ├── scan-cycle.js     # Shared scan post-processing (enrich + export + report)
+│   ├── scan-server.js    # Kaufradar HTTP server (API + page + uploads)
+│   ├── scan-page.js      # Kaufradar single-page UI (inline HTML/CSS/JS + Leaflet)
+│   ├── media.js          # Photo + Grundriss archive per listing
+│   ├── transit.js        # Overpass U-/S-Bahn route geometry, monthly refresh
+│   ├── uploads.js        # Per-property document store (<data>/uploads/<hash>/ + files.json)
 │   ├── report.js         # Weekly scan report (HTML builder + due-date logic)
-│   ├── mailer.js         # Report delivery: Mailjet/Resend HTTP APIs (env creds) → SMTP fallback
-│   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH, Proton Bridge compatible)
-├── src/                  # Renderer (React SPA)
-│   ├── main.jsx          # React entry point
-│   ├── App.jsx           # Tab nav, daemon controls, event listeners
-│   ├── stores/appStore.js      # Zustand store (single source of truth)
-│   ├── screens/
-│   │   ├── SearchTab.jsx       # Manage searches (add/remove/pause/poll-now)
-│   │   ├── HistoryTab.jsx      # Outcome feed with filters + retry
-│   │   ├── SettingsTab.jsx     # Persona, timing, message, captcha config
-│   │   └── SetupWizard.jsx     # First-launch 5-step wizard
-│   ├── components/
-│   │   ├── ActivityFeed.jsx    # Listing activity list component
-│   │   ├── FilterCard.jsx      # Per-search status card + controls
-│   │   └── StatusDot.jsx       # Colored status indicator
-│   ├── locales/
-│   │   ├── de.json, en.json    # i18n strings
-│   │   └── LocaleContext.jsx   # React context for locale
-│   └── shared/
-│       ├── is24FormOptions.js  # IS24 form field options (anrede, etc.)
-│       ├── searchUrlUi.js      # URL parsing helpers
-│       └── userErrors.js       # Error formatting + support ID generation
-├── config/
-│   └── autoapply.config.example.yaml  # OLD v2 format — DO NOT USE
-├── brand/                # Brand assets (gold key icon, #D9A441)
-├── resources/            # App icon files (icon.icns, icon.ico, icon.png)
-├── scripts/              # Debug scripts, autoapply.sh, i18n checker
-├── test/                 # Unit tests: db.test.js, is24-contactor.test.js, url-translator.test.js, smoke-db.mjs
+│   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH)
+├── scripts/
+│   └── test-param-coverage.js   # Live IS24 mobile-API param canary (monthly workflow)
+├── test/                 # Node test runner: 10 suites + smoke-db.mjs
 ├── .github/workflows/
-│   ├── ci.yml            # PR + push: test, build, whitespace check (macOS)
-│   └── release.yml       # workflow_dispatch: platform matrix, electron-builder, upload to release
-├── vite.config.js        # Vite config: root=src, outDir=dist, port 5173
-├── electron-builder.yml  # Packaging: dmg/zip (macOS), nsis (Windows), deb+AppImage (Linux)
-└── package.json          # v1.1.4, "type": "module"
+│   ├── ci.yml            # PR + push to main: tests, then image build + boot check
+│   └── param-coverage.yml # Monthly: live IS24 param drift canary
+├── Dockerfile            # Two-stage; copies engine/ + package.json only
+├── docker-compose.yml
+└── .env.example          # The only configuration surface
 ```
 
-## Config (v3)
+## Configuration
 
-Runtime config at `~/.homelander/config.json` — read/written by Electron main process:
+Environment variables only — there is no config UI and no persona. See `.env.example`.
+`HOMELANDER_DATA_DIR` (default `~/.homelander`, `/data` in the container) holds:
 
-```json
-{
-  "persona": { "anrede": "", "vorname": "", "nachname": "", "email": "", "telefon": "",
-               "strasse": "", "hausnummer": "", "plz": "", "ort": "", "einzug": "",
-               "personen": "", "haustiere": "", "haustiere_zusatz": "", "beschaeftigung": "",
-               "einkommen": "", "unterlagen": "" },
-  "is24": { "email": "", "password": "" },
-  "captcha": { "api_key": "" },
-  "message_template": "... {{title}} {{address}} {{name}} ...",
-  "timing": { "speed": "balanced", "overrides": {} },
-  "polling": { "interval_seconds": 600 },
-  "browser": { "visibility": "hidden_unless_needed", "max_tabs": 5 },
-  "scan": { "port": 8477 },
-  "report": { "enabled": false, "to": "", "smtp": { "host": "127.0.0.1", "port": 1025, "secure": "starttls", "user": "", "pass": "", "from": "" } },
-  "_setupComplete": false
-}
+- `homelander.db` — SQLite, WAL (`filters`, `listings`, `results`, `manual_skips`, `geo_cache`,
+  `scan_seen`, `scan_favorite`)
+- `scan-listings.json` — rewritten after every poll
+- `media/<hash>/` — archived photos and floor plans + `media.json`
+- `uploads/<hash>/` — user-supplied documents + `files.json` manifest
+- `transit-lines.json`, `.last-scan-report`
+
+`scan-searches.json` and `manual-projects.json` are read from the data dir (and the repo dir when
+running outside Docker); both are gitignored — never commit them.
+
+## Key Invariants
+
+- **Analysis-only, structurally** — there is no contactor, no Puppeteer, no Chromium. Do not
+  reintroduce an apply path; that is upstream's repo, not this one.
+- **Buy searches must NOT send `pricetype`** — the IS24 mobile API rejects it with 412 for
+  apartmentbuy/housebuy/plotbuy
+- **Kaufradar binds to 127.0.0.1 by default** (port 8477); the container overrides the host to
+  0.0.0.0 because Docker port-mapping needs it. It has no authentication — anything public needs a
+  reverse proxy in front.
+- **Nominatim geocoding is rate-limited to 1 req/s** and cached in the `geo_cache` table — never
+  bypass the cache
+- **`scan_seen` / `scan_favorite` share one hash space** — a 16-hex listing hash or the 64-hex
+  `sha256('project|<name>')` of a manual Neubau pin; the same holds for `uploads/<hash>/`, so no
+  foreign key to `listings` exists or should be added
+- **A listing hash is `sha256(expose_id|price)`** — a price change mints a new listing, which
+  resurfaces it as unseen and orphans its uploads. Deliberate for the seen flag; a known wart for
+  uploads.
+- **Uploaded files are served from the manifest only** — `files.json` membership is the
+  authorisation check; never resolve a request path straight onto disk, and never serve an unknown
+  type inline (HTML/SVG would run on the Kaufradar's origin)
+- **`npm ci` must be paired with an explicit `npm rebuild better-sqlite3`** — newer npm gates
+  install scripts behind an approval prompt, so the native build cannot be left implicit (both the
+  Dockerfile and CI do this)
+- **Overpass 406s a bare node-fetch User-Agent** — `transit.js` sends a real one
+
+## Deployment
+
+Runs as a single container on a VPS. Deploy = merge to `main`, then on the host:
+
+```bash
+cd ~/homelander && git pull && docker compose up -d --build
 ```
 
-Config is **NOT** the old `autoapply.config.yaml` — that file in `config/` is obsolete.
-
-## Data
-
-- **SQLite DB:** `~/.homelander/homelander.db` (WAL mode, `filters`, `listings`, `results`, `manual_skips`, `geo_cache`, `scan_seen`, `scan_favorite` tables)
-- **Scan export:** `~/.homelander/scan-listings.json` (rewritten after every poll when scan filters exist)
-- **Uploaded documents:** `~/.homelander/uploads/<hash>/` + `files.json` manifest (user-supplied PDFs etc. per listing/project)
-- **Report state:** `~/.homelander/.last-scan-report` (weekly e-mail report timestamp)
-- **Config:** `~/.homelander/config.json`
-- **Daemon log:** `~/.homelander/daemon.log`
-- **Debug artifacts:** `~/.homelander/debug/{html,screenshots}/`
-- **Pause flag:** `~/.homelander/.apply-paused`
-- **Support bundles:** `~/.homelander/support-bundles/`
-
-## Brand
-
-- **Primary color:** Gold `#D9A441` on solid white `#FFFFFF` background
-- **macOS:** `.icns` must be opaque white (not transparent → renders gray/dusty)
-- **Never** use `app.dock.setIcon()` — bypasses macOS squircle mask → renders square
-- **Logo:** gold Homelander key on transparent/white canvas
-- **Master:** `brand/icon.svg` (vector), `brand/icon.png` (2048×2048 raster)
+`main` is protected by a ruleset: no direct pushes, PR required, linear history, no bypass actors.
+Branch, open a PR, let CI go green, squash-merge.
 
 ## Development
 
 ```bash
-npm install                    # includes Puppeteer bundled Chromium
-npm run dev                    # Vite + Electron concurrently
-npm run dev:renderer           # Vite only (port 5173)
-npm run dev:electron           # Electron only
-
-npm test                       # unit tests + i18n check
-npm run test:unit              # Node test runner (HOMELANDER_TEST_FAST=1)
-npm run test:i18n              # Hardcoded string checker
-npm run smoke:db               # DB smoke test
-
-npm run scanner                # Headless scan-only mode (no Electron/Chromium)
-docker compose up -d           # Same, as a container (Kaufradar on 127.0.0.1:8477)
-
-npm run build                  # Vite production build
-npm run dist:mac               # macOS .dmg + .zip
-npm run dist:win               # Windows .exe
-npm run dist:linux             # Linux .deb + .AppImage
+npm install --ignore-scripts && npm rebuild better-sqlite3
+npm run scanner      # run the scanner directly, no Docker
+npm test             # unit tests (283)
+npm run smoke:db     # DB smoke test
+docker compose up -d --build
 ```
-
-## Key Invariants
-
-- **ContextBridge is CommonJS** — `electron/preload.cjs` MUST stay `.cjs`; ESM breaks `contextBridge.exposeInMainWorld()`
-- **Single-instance lock** — Electron `requestSingleInstanceLock()` prevents duplicate processes
-- **Daemon communicates via stdout JSON** — types: `stats`, `listing`, `paused`, `resumed`, `error`, `poll_error`, `session_expired`, `chrome_dead`, `ready_for_restart`
-- **Config is mutable at runtime** — daemon receives config patches via IPC `mergePatch()`, no restart needed
-- **Test flag:** `HOMELANDER_TEST_FAST=1` disables all jitter/timeouts in the contactor
-- **Puppeteer downloads skipped in CI:** `PUPPETEER_SKIP_DOWNLOAD=true`
-- **never use system Chrome** — always the Puppeteer-bundled Chromium
-- **do not poll IS24 login pages** — login flow is bot-sensitive; use plain Chromium process without CDP
-- **Tauschwohnung listings immune to captcha wall** — recognized in URL translator, ideal for reliable sends
-- **Per-form login check** — daemon checks IS24 login state before each apply, not just at startup
-- **Scan mode is analysis-only** — filters with `mode='scan'` (all buy searches + all non-IS24 sources) are excluded from the apply loop; they only collect listings for the Kaufradar/export/report
-- **Buy searches must NOT send `pricetype`** — the IS24 mobile API rejects it with 412 for apartmentbuy/housebuy/plotbuy
-- **Kaufradar binds to 127.0.0.1 only** (default port 8477) — served by Electron main, data written by the daemon
-- **Nominatim geocoding is rate-limited to 1 req/s** and cached in the `geo_cache` table — never bypass the cache
-- **`scan_seen` / `scan_favorite` share one hash space** — a 16-hex listing hash or the 64-hex `sha256('project|<name>')` of a manual Neubau pin; the same holds for `uploads/<hash>/`, so no foreign key to `listings` exists or should be added
-- **Uploaded files are served from the manifest only** — `files.json` membership is the authorisation check; never resolve a request path straight onto disk, and never serve an unknown type inline (HTML/SVG would run on the Kaufradar's origin)
-- **HTML snapshots are raw-copied in support bundles (no redaction)** — blocked on Electron main thread if regex-heavy
-
-## Release Process
-
-Releases are `workflow_dispatch` only (never triggered automatically):
-1. Bump version in `package.json`
-2. Commit, tag (`vX.Y.Z`)
-3. `gh release create vX.Y.Z --title "Homelander vX.Y.Z"`
-4. `gh workflow run release.yml -f version=vX.Y.Z -f platforms=mac`
-
-**Never** trigger a release without explicit user request. The `version` input field is required — without `-f version=vTAG`, it defaults to `v1.0.5` (wrong).
-
-## Common Pitfalls
-
-- **`npm install` must run without `--ignore-scripts` in dev** — `better-sqlite3` native addon must compile
-- **`electron-rebuild` needed after install** — `npm run postinstall` handles this (but `npm ci --ignore-scripts` skips it)
-- **IS24 session detection:** check `innerText` for "angemeldet als" (logged in) vs "Anmelden" (logged out); do NOT trust cookie presence alone
-- **Contactor → about:blank after every apply** — fresh page for next listing to avoid SPA state carryover

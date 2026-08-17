@@ -1,20 +1,21 @@
-# Homelander headless scanner (Kaufradar) — analysis-only deployment.
+# Homelander Kaufradar — the whole app.
 #
-# Runs engine/headless.js: polls scan-mode searches (IS24 buy, Kleinanzeigen,
+# Runs engine/headless.js: polls scan searches (IS24 buy, Kleinanzeigen,
 # Neubaukompass), enriches + geocodes listings, writes scan-listings.json,
 # serves the Kaufradar browse site, and sends the weekly e-mail report.
-# No Electron, no Chromium, no auto-applying.
+# There is no apply path in this repo at all.
 #
 #   docker compose up -d          # see docker-compose.yml
 #   docker build -t homelander-scanner .
 
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
-ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json package-lock.json ./
-# better-sqlite3 is the only native module the scanner needs — build it for
-# this platform; every install/postinstall script is skipped (they target
-# Electron and would try to download Chromium).
+# better-sqlite3 is the only runtime dependency, and the only native module —
+# it uses a prebuilt binary where one exists and compiles here otherwise.
+# Install scripts stay off and the rebuild is explicit: newer npm gates install
+# scripts behind an approval prompt, and `npm rebuild` is the way past it that
+# does not depend on which npm the base image happens to ship.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ \
  && npm ci --omit=dev --ignore-scripts \

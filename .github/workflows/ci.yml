@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -17,28 +17,45 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # better-sqlite3 is the only native module and the tests need it built.
+      # Same dance as the Dockerfile: newer npm gates install scripts behind an
+      # approval prompt, so build it explicitly instead.
       - name: Install
-        run: npm ci --ignore-scripts
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: 'true'
-
-      - name: Install setuptools (for node-gyp on Python 3.12+)
-        run: pip3 install --break-system-packages setuptools
+        run: npm ci --ignore-scripts && npm rebuild better-sqlite3
 
       - name: Test
-        run: npm run rebuild:node && npm run test:unit && npm run test:i18n
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: npm run test:unit
 
       - name: DB smoke test
-        run: npm run rebuild:node && node test/smoke-db.mjs
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: 'true'
-
-      - name: Build
-        run: npm run build
-        env:
-          PUPPETEER_SKIP_DOWNLOAD: 'true'
+        run: node test/smoke-db.mjs
 
       - name: Whitespace check
         run: git diff --check
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The scanner ships as a container, so a green test suite is only half
+      # the story — the image has to build and come up too.
+      - name: Build image
+        run: docker build -t homelander-scanner .
+
+      - name: Boot it and hit the API
+        run: |
+          set -euo pipefail
+          docker run -d --name scanner -p 8477:8477 \
+            -e HOMELANDER_SCAN_URLS= \
+            -e HOMELANDER_POLL_INTERVAL=86400 \
+            homelander-scanner
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8477/api/scan/filters >/dev/null; then
+              echo "Kaufradar answered after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Kaufradar did not answer on :8477 within 30s"
+          docker logs scanner
+          exit 1
