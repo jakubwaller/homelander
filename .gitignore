@@ -1,18 +1,8 @@
-# Build output
-build/
-dist/
-release/
-
 # Runtime artifacts
-runtime/
-debug/
 data/
-private/
-autoapply.log
+debug/
 
 # Secrets
-config/autoapply.config.yaml
-*.bak
 .env
 .env.*
 !.env.example
@@ -20,30 +10,14 @@ config/autoapply.config.yaml
 # Node
 node_modules/
 
-# Vite
-.vite/
-
 # OS
 .DS_Store
 Thumbs.db
 
 # IDE
-.hermes/
 .vscode/
 .idea/
 
-# Docs (generated)
-docs/
-
-# Brand/build temp files
-resources/icon-white.iconset/
-resources/tmp_iconset_white/
-resources/_tmp_*
-homelander-brand-assets.zip
-icon-screenshots/
-scripts/icon_variant_screenshots.mjs
-chrome-bundled/
-
-# Pi-side runtime config (lives in the repo dir next to .env, synced into /data)
+# Host-side runtime config (lives next to .env, synced into /data)
 scan-searches.json
 manual-projects.json

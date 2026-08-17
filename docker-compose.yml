@@ -2,7 +2,7 @@
 #
 #   cp .env.example .env       # fill in searches + (optional) mail keys
 #   docker compose up -d --build
-#   http://<pi-address>:8477   # Kaufradar, reachable from your LAN
+#   http://<host-address>:8477   # Kaufradar, reachable from your LAN
 #
 # Searches: list URLs in HOMELANDER_SCAN_URLS (.env), or drop a
 # scan-searches.json into the data volume:

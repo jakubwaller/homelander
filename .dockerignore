@@ -1,14 +1,8 @@
 node_modules
-dist
-release
-chrome-bundled
 .git
 .github
 brand
-resources
-platform
 scripts
-src
 test
 *.md
 .dockerignore
