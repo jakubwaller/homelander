@@ -84,7 +84,7 @@ homelander/
 │   └── preload.cjs       # contextBridge (must be CommonJS): window.homelander.*
 ├── engine/               # Daemon (forked child process) + shared engine modules
 │   ├── daemon.js         # pollLoop + applyLoop, IPC, pause/captcha logic, scan post-processing
-│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3, WAL mode (schema v5)
+│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3, WAL mode (schema v7)
 │   ├── is24-contactor.js # IS24Contactor — CDP form filling, captcha solving
 │   ├── url-translator.js # IS24 web URL → mobile API params + fetchListings()
 │   ├── sources.js        # Multi-source scan: IS24 buy / Kleinanzeigen / Neubaukompass, exposé enrichment, Nominatim geocoding
@@ -92,6 +92,7 @@ homelander/
 │   ├── headless.js       # Headless scanner entrypoint (Docker) — poll + Kaufradar, no Electron/Chromium
 │   ├── scan-server.js    # Kaufradar — localhost HTTP server (API + page), run by Electron main
 │   ├── scan-page.js      # Kaufradar single-page UI (inline HTML/CSS/JS + Leaflet map)
+│   ├── uploads.js        # Per-property document store (<data dir>/uploads/<hash>/ + files.json)
 │   ├── report.js         # Weekly scan report (HTML builder + due-date logic)
 │   ├── mailer.js         # Report delivery: Mailjet/Resend HTTP APIs (env creds) → SMTP fallback
 │   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH, Proton Bridge compatible)
@@ -155,8 +156,9 @@ Config is **NOT** the old `autoapply.config.yaml` — that file in `config/` is 
 
 ## Data
 
-- **SQLite DB:** `~/.homelander/homelander.db` (WAL mode, `filters`, `listings`, `results`, `manual_skips`, `geo_cache` tables)
+- **SQLite DB:** `~/.homelander/homelander.db` (WAL mode, `filters`, `listings`, `results`, `manual_skips`, `geo_cache`, `scan_seen`, `scan_favorite` tables)
 - **Scan export:** `~/.homelander/scan-listings.json` (rewritten after every poll when scan filters exist)
+- **Uploaded documents:** `~/.homelander/uploads/<hash>/` + `files.json` manifest (user-supplied PDFs etc. per listing/project)
 - **Report state:** `~/.homelander/.last-scan-report` (weekly e-mail report timestamp)
 - **Config:** `~/.homelander/config.json`
 - **Daemon log:** `~/.homelander/daemon.log`
@@ -210,6 +212,8 @@ npm run dist:linux             # Linux .deb + .AppImage
 - **Buy searches must NOT send `pricetype`** — the IS24 mobile API rejects it with 412 for apartmentbuy/housebuy/plotbuy
 - **Kaufradar binds to 127.0.0.1 only** (default port 8477) — served by Electron main, data written by the daemon
 - **Nominatim geocoding is rate-limited to 1 req/s** and cached in the `geo_cache` table — never bypass the cache
+- **`scan_seen` / `scan_favorite` share one hash space** — a 16-hex listing hash or the 64-hex `sha256('project|<name>')` of a manual Neubau pin; the same holds for `uploads/<hash>/`, so no foreign key to `listings` exists or should be added
+- **Uploaded files are served from the manifest only** — `files.json` membership is the authorisation check; never resolve a request path straight onto disk, and never serve an unknown type inline (HTML/SVG would run on the Kaufradar's origin)
 - **HTML snapshots are raw-copied in support bundles (no redaction)** — blocked on Electron main thread if regex-heavy
 
 ## Release Process

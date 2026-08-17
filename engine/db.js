@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS scan_seen (
   seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS scan_favorite (
+  hash TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   listing_hash TEXT,
@@ -123,6 +128,8 @@ export class HomelanderDB {
           // Column already exists (first-run via SCHEMA) — ignore
         }
       }
+      // v6 → v7: scan_favorite table (Kaufradar star) — created by the SCHEMA
+      // exec below, no ALTER needed.
       // v5 → v6: scan_seen table (Kaufradar "gesehen" flag) — created by the
       // SCHEMA exec below, no ALTER needed.
       // v4 → v5: scan mode (analysis-only buy searches), multi-source
@@ -529,10 +536,12 @@ export class HomelanderDB {
   getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null } = {}) {
     let sql = `
       SELECT l.*, f.name AS filter_name, f.web_url AS filter_url,
-             (ss.hash IS NOT NULL) AS seen
+             (ss.hash IS NOT NULL) AS seen,
+             (sf.hash IS NOT NULL) AS favorite
       FROM listings l
       JOIN filters f ON f.id = l.filter_id
       LEFT JOIN scan_seen ss ON ss.hash = l.hash
+      LEFT JOIN scan_favorite sf ON sf.hash = l.hash
       WHERE f.mode = 'scan' AND f.archived = 0
     `;
     const params = [];
@@ -549,6 +558,19 @@ export class HomelanderDB {
       return this.db.prepare('INSERT OR IGNORE INTO scan_seen (hash) VALUES (?)').run(hash);
     }
     return this.db.prepare('DELETE FROM scan_seen WHERE hash = ?').run(hash);
+  }
+
+  /** Kaufradar star — the keeper list. Shares the hash space with scan_seen,
+   *  so manual Neubau projects (sha256('project|<name>')) can be starred too. */
+  setListingFavorite(hash, favorite) {
+    if (favorite) {
+      return this.db.prepare('INSERT OR IGNORE INTO scan_favorite (hash) VALUES (?)').run(hash);
+    }
+    return this.db.prepare('DELETE FROM scan_favorite WHERE hash = ?').run(hash);
+  }
+
+  isFavorite(hash) {
+    return !!this.db.prepare('SELECT 1 FROM scan_favorite WHERE hash = ?').get(hash);
   }
 
   /** Attach enrichment data (coordinates, expose details) to a listing. */

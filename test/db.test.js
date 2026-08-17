@@ -62,7 +62,7 @@ describe('HomelanderDB constructor', () => {
       .all()
       .map((t) => t.name)
       .sort();
-    assert.deepEqual(tables, ['filters', 'geo_cache', 'listings', 'manual_skips', 'results', 'scan_seen', 'schema_version']);
+    assert.deepEqual(tables, ['filters', 'geo_cache', 'listings', 'manual_skips', 'results', 'scan_favorite', 'scan_seen', 'schema_version']);
     db.close();
   });
 
@@ -88,7 +88,7 @@ describe('HomelanderDB constructor', () => {
   it('records schema version', () => {
     const db = freshDB();
     const row = db.db.prepare('SELECT version FROM schema_version').get();
-    assert.equal(row.version, 6);
+    assert.equal(row.version, 7);
     db.close();
   });
 
@@ -148,7 +148,7 @@ describe('HomelanderDB constructor', () => {
       const db = new HomelanderDB(file);
       assert.equal(db.getFilter('old-polled').first_poll_done, 1);
       assert.equal(db.getFilter('old-new').first_poll_done, 0);
-      assert.equal(db.db.prepare('SELECT version FROM schema_version').get().version, 6);
+      assert.equal(db.db.prepare('SELECT version FROM schema_version').get().version, 7);
       db.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1156,6 +1156,32 @@ describe('scan mode', () => {
     assert.deepEqual(db.getScanFilters().map((f) => f.id), ['scan-1']);
     db.removeFilter('scan-1');
     assert.deepEqual(db.getScanFilters(), []);
+    db.close();
+  });
+
+  it('setListingFavorite toggles the star and surfaces it on scan listings', () => {
+    const db = scanDB();
+    db.insertListings([{ expose_id: 'b1', title: 'Kauf', price: 300000, size: 60, rooms: 2, address: '10115 Berlin', postcode: '10115', image_url: '', url: 'https://x/1', source: 'is24' }], 'scan-1');
+    const hash = db.getScanListings()[0].hash;
+    assert.equal(db.getScanListings()[0].favorite, 0);
+    assert.equal(db.isFavorite(hash), false);
+
+    db.setListingFavorite(hash, true);
+    db.setListingFavorite(hash, true); // idempotent
+    assert.equal(db.getScanListings()[0].favorite, 1);
+    assert.equal(db.isFavorite(hash), true);
+
+    db.setListingFavorite(hash, false);
+    assert.equal(db.getScanListings()[0].favorite, 0);
+    assert.equal(db.isFavorite(hash), false);
+    db.close();
+  });
+
+  it('setListingFavorite accepts hashes with no listing row (manual projects)', () => {
+    const db = scanDB();
+    const projectHash = 'ab'.repeat(32);
+    db.setListingFavorite(projectHash, true);
+    assert.equal(db.isFavorite(projectHash), true);
     db.close();
   });
 

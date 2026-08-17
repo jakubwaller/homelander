@@ -49,10 +49,15 @@ export function renderScanPage() {
   .badge.kleinanzeigen { color:#86efac; border-color:#86efac44; }
   .badge.neubaukompass { color:#fca5a5; border-color:#fca5a544; }
   .badge.new { color:var(--green); border-color:#34d39944; }
+  .badge.files { color:var(--gold); border-color:#D9A44144; }
   .card.seen { opacity:.45; }
-  .seen-btn { background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:3px 9px; font-size:12px; cursor:pointer; flex-shrink:0; align-self:flex-start; }
-  .seen-btn:hover { border-color:var(--gold); color:var(--gold); }
+  /* A starred listing stays fully legible even once it is checked off. */
+  .card.fav { opacity:1; border-color:var(--gold-dark); }
+  .card .btns { display:flex; flex-direction:column; gap:6px; flex-shrink:0; }
+  .seen-btn, .star-btn { background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:3px 9px; font-size:12px; cursor:pointer; flex-shrink:0; align-self:flex-start; }
+  .seen-btn:hover, .star-btn:hover { border-color:var(--gold); color:var(--gold); }
   .card.seen .seen-btn, .seen-btn.on { color:var(--green); border-color:#34d39944; }
+  .star-btn.on { color:var(--gold); border-color:var(--gold); }
   label.chk { display:flex; gap:5px; align-items:center; font-size:13px; color:var(--text-dim); cursor:pointer; }
   #detail .gallery { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin:10px 0; }
   #detail .gallery img { width:100%; height:104px; object-fit:cover; border-radius:8px; background:var(--bg-elevated); }
@@ -70,6 +75,19 @@ export function renderScanPage() {
   #detail td { padding:4px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
   #detail td:first-child { color:var(--text-dim); width:45%; }
   #detail h4 { color:var(--gold); font-size:13px; margin:14px 0 4px; }
+  #detail .detail-actions { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0 2px; }
+  #detail .files { list-style:none; padding:0; margin:6px 0 0; display:flex; flex-direction:column; gap:6px; }
+  #detail .files li { display:flex; align-items:center; gap:10px; background:var(--bg-elevated); border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
+  #detail .files a { color:var(--text); text-decoration:none; font-size:13px; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #detail .files a:hover { color:var(--gold); }
+  #detail .files .size { color:var(--text-muted); font-size:12px; flex-shrink:0; }
+  #detail .files .del { background:none; border:none; color:var(--text-muted); font-size:16px; line-height:1; cursor:pointer; flex-shrink:0; }
+  #detail .files .del:hover { color:var(--red); }
+  #detail .upload { display:inline-block; margin-top:8px; border:1px dashed var(--border); color:var(--text-dim); border-radius:9px; padding:8px 14px; font-size:13px; cursor:pointer; }
+  #detail .upload:hover { border-color:var(--gold); color:var(--gold); }
+  #detail .upload input { display:none; }
+  #detail .file-status { color:var(--text-muted); font-size:12px; margin-top:6px; }
+  #detail.dropping { outline:2px dashed var(--gold); outline-offset:4px; }
   #detail .text-block { color:var(--text-dim); font-size:13px; white-space:pre-wrap; margin-bottom:8px; }
   #detail a.out { display:inline-block; margin-top:10px; background:var(--gold); color:#151515; font-weight:600; padding:8px 16px; border-radius:9px; text-decoration:none; }
   .leaflet-container { background:#1a1a1e; }
@@ -117,6 +135,7 @@ export function renderScanPage() {
       <option value="30">Letzte 30 Tage</option>
     </select>
     <label class="chk"><input type="checkbox" id="f-hideseen"> Gesehene ausblenden</label>
+    <label class="chk"><input type="checkbox" id="f-fav"> ★ Nur Favoriten</label>
   </div>
 </header>
 <div id="layout">
@@ -132,6 +151,10 @@ export function renderScanPage() {
   var markers = {};
   var cards = {};
   var markerLayer = null;
+  var projectLayer = null;
+  var projectPins = [];
+  var fileCounts = {};
+  var filesHash = null;
   var map = null;
   var activeHash = null;
   var locateLayer = null;
@@ -143,6 +166,10 @@ export function renderScanPage() {
     });
   }
   function euro(v) { return v > 0 ? Math.round(v).toLocaleString('de-DE') + ' €' : '–'; }
+  function kb(n) {
+    return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
+  }
+  function favOnly() { return document.getElementById('f-fav').checked; }
   function perSqm(l) { return (l.price > 0 && l.size > 0) ? Math.round(l.price / l.size).toLocaleString('de-DE') + ' €/m²' : ''; }
   function isNew(l) {
     return (Date.now() - new Date(l.discovered_at + (l.discovered_at.endsWith('Z') ? '' : 'Z')).getTime()) < 48 * 3600 * 1000;
@@ -159,6 +186,7 @@ export function renderScanPage() {
     // async fetches land.
     map.createPane('transit').style.zIndex = 350;
     markerLayer = L.layerGroup().addTo(map);
+    projectLayer = L.layerGroup().addTo(map);
     var LocateControl = L.Control.extend({
       onAdd: function () {
         var div = L.DomUtil.create('div', 'leaflet-bar');
@@ -219,10 +247,17 @@ export function renderScanPage() {
     }).catch(function () { /* map just has no lines */ });
   }
 
+  // Project pins are gold already, so a favourite gets a white ring and a
+  // bigger radius instead of the listing dots' gold one.
   function projectStyle(p) {
-    return p.seen
-      ? { radius: 9, weight: 2, color: '#3b2f14', fillColor: '#94a3b8', fillOpacity: 0.6 }
-      : { radius: 9, weight: 2, color: '#3b2f14', fillColor: '#D9A441', fillOpacity: 0.95 };
+    var dim = p.seen && !p.favorite;
+    return {
+      radius: p.favorite ? 11 : 9,
+      weight: p.favorite ? 3 : 2,
+      color: p.favorite ? '#ffffff' : '#3b2f14',
+      fillColor: dim ? '#94a3b8' : '#D9A441',
+      fillOpacity: dim ? 0.6 : 0.95
+    };
   }
 
   function setProjectSeen(p, marker, next) {
@@ -239,17 +274,42 @@ export function renderScanPage() {
     }).catch(function () {});
   }
 
+  function setProjectFavorite(p, marker, next) {
+    return fetch('/api/scan/favorite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash: p.hash, favorite: next })
+    }).then(function () {
+      p.favorite = next ? 1 : 0;
+      marker.setStyle(projectStyle(p));
+      applyProjectFilter();
+    }).catch(function () {});
+  }
+
+  // "Nur Favoriten" hides the other Neubau pins too — otherwise the map still
+  // shows 51 gold dots while the list is down to three.
+  function applyProjectFilter() {
+    if (!projectLayer) return;
+    projectLayer.clearLayers();
+    projectPins.forEach(function (pin) {
+      if (favOnly() && !pin.p.favorite) return;
+      projectLayer.addLayer(pin.marker);
+    });
+  }
+
   function loadManualProjects() {
     fetch('/api/scan/projects').then(function (r) { return r.json(); }).then(function (data) {
+      projectPins = [];
       (data.projects || []).forEach(function (p) {
         if (p.lat == null || p.lng == null) return;
-        var m = L.circleMarker([p.lat, p.lng], projectStyle(p)).addTo(map);
+        var m = L.circleMarker([p.lat, p.lng], projectStyle(p));
         m.bindTooltip(p.name);
         m.bindPopup(
           '<strong>' + esc(p.name) + '</strong> <span style="color:#B8860B">Neubau</span><br>' +
           esc(p.address || '') +
           (p.note ? '<br>' + esc(p.note) : '') +
           (p.url ? '<br><a href="' + esc(p.url) + '" target="_blank" rel="noopener">Projektseite</a>' : '') +
+          (p.hash ? '<br><a href="#" class="proj-detail">Details &amp; Dateien…</a>' : '') +
           (p.hash ? '<br><a href="#" class="proj-seen"></a>' : '')
         );
         // Mirror the listing dots: opening a pin marks the project seen
@@ -258,15 +318,26 @@ export function renderScanPage() {
           if (!p.seen && p.hash) setProjectSeen(p, m, true);
         });
         m.on('popupopen', function (e) {
-          var a = e.popup.getElement().querySelector('.proj-seen');
-          if (!a) return;
-          a.textContent = p.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren';
-          a.addEventListener('click', function (ev) {
-            ev.preventDefault();
-            setProjectSeen(p, m, !p.seen);
-          });
+          var root = e.popup.getElement();
+          var a = root.querySelector('.proj-seen');
+          if (a) {
+            a.textContent = p.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren';
+            a.addEventListener('click', function (ev) {
+              ev.preventDefault();
+              setProjectSeen(p, m, !p.seen);
+            });
+          }
+          var d = root.querySelector('.proj-detail');
+          if (d) {
+            d.addEventListener('click', function (ev) {
+              ev.preventDefault();
+              openProjectDetail(p, m);
+            });
+          }
         });
+        projectPins.push({ p: p, marker: m });
       });
+      applyProjectFilter();
     }).catch(function () { /* no pins then */ });
   }
 
@@ -276,10 +347,17 @@ export function renderScanPage() {
     return source === 'kleinanzeigen' ? '#059669' : source === 'neubaukompass' ? '#dc2626' : '#7c3aed';
   }
 
+  // A star keeps a dot vivid and gives it a gold ring — checking a favourite
+  // off must not grey it out of sight.
   function markerStyle(l) {
-    return l.seen
-      ? { radius: 7, weight: 2, color: '#ffffff', fillColor: '#94a3b8', fillOpacity: 0.6 }
-      : { radius: 7, weight: 2, color: '#ffffff', fillColor: sourceColor(l.source), fillOpacity: 0.9 };
+    var dim = l.seen && !l.favorite;
+    return {
+      radius: l.favorite ? 9 : 7,
+      weight: l.favorite ? 3 : 2,
+      color: l.favorite ? '#D9A441' : '#ffffff',
+      fillColor: dim ? '#94a3b8' : sourceColor(l.source),
+      fillOpacity: dim ? 0.6 : 0.9
+    };
   }
 
   function filtered() {
@@ -292,7 +370,9 @@ export function renderScanPage() {
     var cutoff = days ? Date.now() - days * 24 * 3600 * 1000 : 0;
     var hideSeen = document.getElementById('f-hideseen').checked;
     var rows = all.filter(function (l) {
-      if (hideSeen && l.seen) return false;
+      if (favOnly() && !l.favorite) return false;
+      // Favourites survive "Gesehene ausblenden" — starring is the keep flag.
+      if (hideSeen && l.seen && !l.favorite) return false;
       if (fid && l.filter_id !== fid) return false;
       if (q && (String(l.title) + ' ' + String(l.address)).toLowerCase().indexOf(q) === -1) return false;
       if (maxPrice && !(l.price > 0 && l.price <= maxPrice)) return false;
@@ -320,6 +400,7 @@ export function renderScanPage() {
     var img = l.image_url
       ? '<img loading="lazy" src="' + esc(l.image_url) + '" alt="">'
       : '<div class="noimg">⌂</div>';
+    var files = fileCounts[l.hash] || 0;
     return img +
       '<div style="min-width:0;flex:1">' +
       '<h3>' + esc(l.title || l.expose_id) + '</h3>' +
@@ -331,8 +412,13 @@ export function renderScanPage() {
       (perSqm(l) ? '<span>' + perSqm(l) + '</span>' : '') +
       '<span class="badge ' + esc(l.source || 'is24') + '">' + esc(l.source || 'is24') + '</span>' +
       (isNew(l) ? '<span class="badge new">neu</span>' : '') +
+      (files ? '<span class="badge files">📎 ' + files + '</span>' : '') +
       '</div></div>' +
-      '<button class="seen-btn" title="' + (l.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren') + '">✓</button>';
+      '<div class="btns">' +
+      '<button class="star-btn' + (l.favorite ? ' on' : '') + '" title="' +
+      (l.favorite ? 'Favorit entfernen' : 'Als Favorit merken') + '">★</button>' +
+      '<button class="seen-btn" title="' + (l.seen ? 'Als ungesehen markieren' : 'Als gesehen markieren') + '">✓</button>' +
+      '</div>';
   }
 
   // inPlace restyles the existing card + marker instead of re-rendering,
@@ -354,6 +440,17 @@ export function renderScanPage() {
     setSeen(l, !l.seen);
   }
 
+  function setFavorite(l, next) {
+    return fetch('/api/scan/favorite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hash: l.hash, favorite: next })
+    }).then(function () {
+      l.favorite = next ? 1 : 0;
+      render();
+    }).catch(function () {});
+  }
+
   function render() {
     var rows = filtered();
     var list = document.getElementById('list');
@@ -369,12 +466,17 @@ export function renderScanPage() {
     var bounds = [];
     rows.forEach(function (l) {
       var card = document.createElement('div');
-      card.className = 'card' + (l.hash === activeHash ? ' active' : '') + (l.seen ? ' seen' : '');
+      card.className = 'card' + (l.hash === activeHash ? ' active' : '') +
+        (l.seen ? ' seen' : '') + (l.favorite ? ' fav' : '');
       card.innerHTML = cardHtml(l);
       card.addEventListener('click', function () { openDetail(l); });
       card.querySelector('.seen-btn').addEventListener('click', function (ev) {
         ev.stopPropagation();
         toggleSeen(l);
+      });
+      card.querySelector('.star-btn').addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        setFavorite(l, !l.favorite);
       });
       list.appendChild(card);
       cards[l.hash] = card;
@@ -397,6 +499,7 @@ export function renderScanPage() {
         bounds.push([l.lat, l.lng]);
       }
     });
+    applyProjectFilter();
     // Refit only when the visible marker set changed — the 60 s auto-refresh
     // re-renders too, and must not yank away a view the user chose (e.g.
     // after zooming to their own location).
@@ -422,16 +525,154 @@ export function renderScanPage() {
     return html;
   }
 
+  // ── Uploaded documents (exposés, price lists, Grundriss PDFs) ──
+
+  function filesSectionHtml() {
+    return '<h4>Dateien</h4>' +
+      '<ul class="files" id="files"></ul>' +
+      '<label class="upload">+ Datei hochladen' +
+      '<input type="file" id="file-input" multiple></label>' +
+      '<div class="file-status" id="file-status">oder Dateien hierher ziehen</div>';
+  }
+
+  function renderFiles(hash, files) {
+    var ul = document.getElementById('files');
+    if (!ul) return;
+    ul.innerHTML = files.map(function (f) {
+      return '<li>' +
+        '<a href="' + esc(f.url) + '" target="_blank" rel="noopener">' + esc(f.name) + '</a>' +
+        '<span class="size">' + kb(f.size) + ' · ' +
+        new Date(f.uploaded_at).toLocaleDateString('de-DE') + '</span>' +
+        '<button class="del" data-file="' + esc(f.file) + '" title="Löschen">×</button>' +
+        '</li>';
+    }).join('');
+    Array.prototype.forEach.call(ul.querySelectorAll('.del'), function (btn) {
+      btn.addEventListener('click', function () {
+        fetch('/api/scan/files/' + hash + '/' + encodeURIComponent(btn.dataset.file), { method: 'DELETE' })
+          .then(function () { loadFiles(hash); refreshFileCounts(); })
+          .catch(function () {});
+      });
+    });
+  }
+
+  function loadFiles(hash) {
+    return fetch('/api/scan/files/' + hash).then(function (r) { return r.json(); }).then(function (d) {
+      renderFiles(hash, d.files || []);
+    }).catch(function () {});
+  }
+
+  // After an upload or delete the 📎 badges are stale — reload and repaint.
+  function refreshFileCounts() {
+    return loadFileCounts().then(render);
+  }
+
+  // Raw body + ?name= — no multipart parser on the server side. Sequential,
+  // so a five-PDF drop doesn't fire five concurrent writes at the same dir.
+  function uploadFiles(hash, list) {
+    var files = Array.prototype.slice.call(list || []);
+    var status = document.getElementById('file-status');
+    if (!files.length) return;
+    var i = 0;
+    function next() {
+      if (i >= files.length) {
+        if (status) status.textContent = 'oder Dateien hierher ziehen';
+        loadFiles(hash);
+        refreshFileCounts();
+        return;
+      }
+      var f = files[i++];
+      if (status) status.textContent = 'lädt ' + f.name + ' (' + i + '/' + files.length + ') …';
+      fetch('/api/scan/files/' + hash + '?name=' + encodeURIComponent(f.name), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: f
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.error && status) status.textContent = f.name + ': ' + d.error;
+        next();
+      }).catch(function (err) {
+        if (status) status.textContent = f.name + ': ' + err.message;
+        next();
+      });
+    }
+    next();
+  }
+
+  // The modal element outlives its contents, so the drop zone is wired once
+  // and reads whichever entry is currently open.
+  function wireDropZone() {
+    var el = document.getElementById('detail');
+    ['dragenter', 'dragover'].forEach(function (type) {
+      el.addEventListener(type, function (e) {
+        if (!filesHash) return;
+        e.preventDefault();
+        el.classList.add('dropping');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (type) {
+      el.addEventListener(type, function (e) {
+        e.preventDefault();
+        if (type === 'dragleave' && el.contains(e.relatedTarget)) return;
+        el.classList.remove('dropping');
+        if (type === 'drop' && filesHash) uploadFiles(filesHash, e.dataTransfer && e.dataTransfer.files);
+      });
+    });
+  }
+
+  function wireFiles(hash) {
+    filesHash = hash;
+    // The input is part of the modal's fresh innerHTML, so this listener dies
+    // with it — no stacking.
+    var input = document.getElementById('file-input');
+    if (input) {
+      input.addEventListener('change', function () {
+        uploadFiles(hash, input.files);
+        input.value = '';
+      });
+    }
+    loadFiles(hash);
+  }
+
+  function openProjectDetail(p, marker) {
+    activeHash = p.hash;
+    var el = document.getElementById('detail');
+    el.innerHTML =
+      '<button class="close" aria-label="close">×</button>' +
+      '<h2>' + esc(p.name) + '</h2>' +
+      '<div class="addr" style="color:var(--text-dim)">' + esc(p.address || '') + '</div>' +
+      '<div class="detail-actions">' +
+      '<button class="star-btn' + (p.favorite ? ' on' : '') + '" id="detail-fav">★ ' +
+      (p.favorite ? 'Favorit' : 'merken') + '</button>' +
+      '</div>' +
+      '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Neubau-Projekt (manuell gepflegt)</div>' +
+      (p.note ? '<div class="text-block" style="margin-top:8px">' + esc(p.note) + '</div>' : '') +
+      filesSectionHtml() +
+      (p.url ? '<a class="out" href="' + esc(p.url) + '" target="_blank" rel="noopener">Zur Projektseite ↗</a>' : '');
+    el.querySelector('.close').addEventListener('click', closeDetail);
+    var favBtn = el.querySelector('#detail-fav');
+    favBtn.addEventListener('click', function () {
+      setProjectFavorite(p, marker, !p.favorite).then(function () {
+        favBtn.classList.toggle('on', !!p.favorite);
+        favBtn.textContent = '★ ' + (p.favorite ? 'Favorit' : 'merken');
+      });
+    });
+    wireFiles(p.hash);
+    document.getElementById('overlay').classList.add('open');
+  }
+
   function openDetail(l) {
     activeHash = l.hash;
     var el = document.getElementById('detail');
     el.innerHTML =
       '<button class="close" aria-label="close">×</button>' +
-      '<button class="seen-btn' + (l.seen ? ' on' : '') + '" id="detail-seen" style="position:absolute;top:12px;right:48px">' +
-      (l.seen ? '✓ gesehen' : 'als gesehen markieren') + '</button>' +
       '<h2>' + esc(l.title || l.expose_id) + '</h2>' +
       '<div class="addr" style="color:var(--text-dim)">' + esc(l.address || '') +
       (l.details && l.details.address ? ' · ' + esc(l.details.address) : '') + '</div>' +
+      '<div class="detail-actions">' +
+      '<button class="star-btn' + (l.favorite ? ' on' : '') + '" id="detail-fav">★ ' +
+      (l.favorite ? 'Favorit' : 'merken') + '</button>' +
+      '<button class="seen-btn' + (l.seen ? ' on' : '') + '" id="detail-seen">' +
+      (l.seen ? '✓ gesehen' : 'als gesehen markieren') + '</button>' +
+      '</div>' +
       '<div class="price-line">' + euro(l.price) +
       (l.size > 0 ? ' · ' + l.size + ' m²' : '') +
       (l.rooms > 0 ? ' · ' + l.rooms + ' Zi.' : '') +
@@ -441,6 +682,7 @@ export function renderScanPage() {
       ' · gefunden ' + new Date(l.discovered_at + (String(l.discovered_at).endsWith('Z') ? '' : 'Z')).toLocaleString('de-DE') +
       (l.filter_name ? ' · Suche: ' + esc(l.filter_name) : '') + '</div>' +
       '<div class="gallery" id="gallery"></div>' +
+      filesSectionHtml() +
       detailTables(l.details) +
       (l.url ? '<a class="out" href="' + esc(l.url) + '" target="_blank" rel="noopener">Zum Original-Inserat ↗</a>' : '');
     el.querySelector('.close').addEventListener('click', closeDetail);
@@ -448,6 +690,16 @@ export function renderScanPage() {
       toggleSeen(l);
       closeDetail();
     });
+    // The star stays open — starring is usually the prelude to dropping a
+    // PDF on the same modal.
+    var favBtn = el.querySelector('#detail-fav');
+    favBtn.addEventListener('click', function () {
+      setFavorite(l, !l.favorite).then(function () {
+        favBtn.classList.toggle('on', !!l.favorite);
+        favBtn.textContent = '★ ' + (l.favorite ? 'Favorit' : 'merken');
+      });
+    });
+    wireFiles(l.hash);
     fetch('/api/scan/media/' + l.hash).then(function (r) { return r.json(); }).then(function (m) {
       var g = document.getElementById('gallery');
       if (!g || !m.files || !m.files.length) return;
@@ -466,6 +718,7 @@ export function renderScanPage() {
   function closeDetail() {
     document.getElementById('overlay').classList.remove('open');
     activeHash = null;
+    filesHash = null;
   }
   document.getElementById('overlay').addEventListener('click', function (e) {
     if (e.target === this) closeDetail();
@@ -503,7 +756,13 @@ export function renderScanPage() {
     });
   }
 
-  ['f-filter', 'f-sort', 'f-days', 'f-hideseen'].forEach(function (id) {
+  function loadFileCounts() {
+    return fetch('/api/scan/files').then(function (r) { return r.json(); }).then(function (d) {
+      fileCounts = d.counts || {};
+    }).catch(function () {});
+  }
+
+  ['f-filter', 'f-sort', 'f-days', 'f-hideseen', 'f-fav'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', render);
   });
   ['f-q', 'f-maxprice', 'f-minrooms', 'f-minsize'].forEach(function (id) {
@@ -511,10 +770,13 @@ export function renderScanPage() {
   });
 
   initMap();
-  loadFilters().then(loadListings).catch(function (err) {
+  wireDropZone();
+  loadFilters().then(loadFileCounts).then(loadListings).catch(function (err) {
     document.getElementById('list').innerHTML = '<div id="empty">Fehler beim Laden: ' + esc(err.message) + '</div>';
   });
-  setInterval(function () { loadFilters().then(loadListings).catch(function () {}); }, 60000);
+  setInterval(function () {
+    loadFilters().then(loadFileCounts).then(loadListings).catch(function () {});
+  }, 60000);
 })();
 </script>
 </body>
