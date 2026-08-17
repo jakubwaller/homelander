@@ -90,6 +90,8 @@ export function renderScanPage() {
   #detail.dropping { outline:2px dashed var(--gold); outline-offset:4px; }
   #detail .text-block { color:var(--text-dim); font-size:13px; white-space:pre-wrap; margin-bottom:8px; }
   #detail a.out { display:inline-block; margin-top:10px; background:var(--gold); color:#151515; font-weight:600; padding:8px 16px; border-radius:9px; text-decoration:none; }
+  #detail a.out.alt { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  #detail .out-row { display:flex; flex-direction:column; align-items:flex-start; }
   .leaflet-container { background:#1a1a1e; }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--bg-elevated); color:var(--text); }
   .locate-btn { font-size:17px; }
@@ -173,6 +175,22 @@ export function renderScanPage() {
   function perSqm(l) { return (l.price > 0 && l.size > 0) ? Math.round(l.price / l.size).toLocaleString('de-DE') + ' €/m²' : ''; }
   function isNew(l) {
     return (Date.now() - new Date(l.discovered_at + (l.discovered_at.endsWith('Z') ? '' : 'Z')).getTime()) < 48 * 3600 * 1000;
+  }
+
+  // Google Maps deep link. The written address beats the pin — Nominatim often
+  // snaps to the street centre, Google resolves the house number. Coordinates
+  // are the fallback for listings that only ever had a geocode.
+  // Returns '' when there is neither; the URL is HTML-escaped for attribute use.
+  function mapsUrl(address, lat, lng) {
+    var q = String(address == null ? '' : address).trim();
+    if (!q && lat != null && lng != null) q = lat + ',' + lng;
+    if (!q) return '';
+    return 'https://www.google.com/maps/search/?api=1&amp;query=' + encodeURIComponent(q);
+  }
+  // Button form for the detail modals; popups use a plain inline link instead.
+  function mapsLinkHtml(address, lat, lng) {
+    var url = mapsUrl(address, lat, lng);
+    return url ? '<a class="out alt" target="_blank" rel="noopener" href="' + url + '">Google Maps ↗</a>' : '';
   }
 
   function initMap() {
@@ -309,6 +327,9 @@ export function renderScanPage() {
           esc(p.address || '') +
           (p.note ? '<br>' + esc(p.note) : '') +
           (p.url ? '<br><a href="' + esc(p.url) + '" target="_blank" rel="noopener">Projektseite</a>' : '') +
+          (mapsUrl(p.address, p.lat, p.lng)
+            ? '<br><a href="' + mapsUrl(p.address, p.lat, p.lng) + '" target="_blank" rel="noopener">Google Maps</a>'
+            : '') +
           (p.hash ? '<br><a href="#" class="proj-detail">Details &amp; Dateien…</a>' : '') +
           (p.hash ? '<br><a href="#" class="proj-seen"></a>' : '')
         );
@@ -485,10 +506,12 @@ export function renderScanPage() {
         m.on('click', function () {
           if (!l.seen) setSeen(l, true, true);
         });
+        var lMaps = mapsUrl((l.details && l.details.address) || l.address, l.lat, l.lng);
         m.bindPopup(
           '<strong>' + esc(l.title || '') + '</strong><br>' + euro(l.price) +
           (l.size > 0 ? ' · ' + l.size + ' m²' : '') +
-          '<br><a href="#" data-hash="' + l.hash + '" class="popup-more">Details…</a>'
+          '<br><a href="#" data-hash="' + l.hash + '" class="popup-more">Details…</a>' +
+          (lMaps ? '<br><a href="' + lMaps + '" target="_blank" rel="noopener">Google Maps</a>' : '')
         );
         m.on('popupopen', function (e) {
           var a = e.popup.getElement().querySelector('.popup-more');
@@ -646,7 +669,10 @@ export function renderScanPage() {
       '<div style="color:var(--text-muted);font-size:12px;margin-top:6px">Neubau-Projekt (manuell gepflegt)</div>' +
       (p.note ? '<div class="text-block" style="margin-top:8px">' + esc(p.note) + '</div>' : '') +
       filesSectionHtml() +
-      (p.url ? '<a class="out" href="' + esc(p.url) + '" target="_blank" rel="noopener">Zur Projektseite ↗</a>' : '');
+      '<div class="out-row">' +
+      (p.url ? '<a class="out" href="' + esc(p.url) + '" target="_blank" rel="noopener">Zur Projektseite ↗</a>' : '') +
+      mapsLinkHtml(p.address, p.lat, p.lng) +
+      '</div>';
     el.querySelector('.close').addEventListener('click', closeDetail);
     var favBtn = el.querySelector('#detail-fav');
     favBtn.addEventListener('click', function () {
@@ -684,7 +710,10 @@ export function renderScanPage() {
       '<div class="gallery" id="gallery"></div>' +
       filesSectionHtml() +
       detailTables(l.details) +
-      (l.url ? '<a class="out" href="' + esc(l.url) + '" target="_blank" rel="noopener">Zum Original-Inserat ↗</a>' : '');
+      '<div class="out-row">' +
+      (l.url ? '<a class="out" href="' + esc(l.url) + '" target="_blank" rel="noopener">Zum Original-Inserat ↗</a>' : '') +
+      mapsLinkHtml((l.details && l.details.address) || l.address, l.lat, l.lng) +
+      '</div>';
     el.querySelector('.close').addEventListener('click', closeDetail);
     el.querySelector('#detail-seen').addEventListener('click', function () {
       toggleSeen(l);
