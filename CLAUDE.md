@@ -59,9 +59,9 @@ homelander/
 │   ├── scan-server.js    # Kaufradar HTTP server (API + page + uploads)
 │   ├── scan-page.js      # Kaufradar single-page UI (inline HTML/CSS/JS + Leaflet)
 │   ├── media.js          # Photo + Grundriss archive per listing
-│   ├── transit.js        # Overpass U-/S-Bahn route geometry, monthly refresh
+│   ├── transit.js        # Overpass U-/S-Bahn route geometry + stops, monthly refresh
 │   ├── uploads.js        # Per-property document store (<data>/uploads/<hash>/ + files.json)
-│   ├── report.js         # Weekly scan report (HTML builder + due-date logic)
+│   ├── report.js         # Weekly scan report (shortlist filter + HTML builder + due-date logic)
 │   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH)
 ├── scripts/
 │   └── test-param-coverage.js   # Live IS24 mobile-API param canary (monthly workflow)
@@ -100,6 +100,15 @@ running outside Docker); both are gitignored — never commit them.
   reverse proxy in front.
 - **Nominatim geocoding is rate-limited to 1 req/s** and cached in the `geo_cache` table — never
   bypass the cache
+- **The weekly mail is a shortlist, the map is not** — `report.js` drops anything under
+  `HOMELANDER_REPORT_MIN_SIZE` / `_MIN_ROOMS` or further than `_MAX_WALK_MINUTES` on foot from a
+  U-/S-Bahn stop (80 m/min, 1.3× detour factor over the straight line). Unknown size, rooms or
+  coordinates fail the criterion; an empty station cache skips the transit filter instead of
+  emptying the mail. Only IS24 listings have exposé coordinates — the rest are measured from the
+  postcode centroid and marked "ca." in the mail
+- **`transit-lines.json` carries `lines` (map overlay) and `stations` (report filter)** — a cache
+  without `stations` counts as stale regardless of age, and `/api/scan/transit` strips them so the
+  map payload stays lines-only
 - **`scan_seen` / `scan_favorite` share one hash space** — a 16-hex listing hash or the 64-hex
   `sha256('project|<name>')` of a manual Neubau pin; the same holds for `uploads/<hash>/`, so no
   foreign key to `listings` exists or should be added
@@ -130,7 +139,7 @@ Branch, open a PR, let CI go green, squash-merge.
 ```bash
 npm install --ignore-scripts && npm rebuild better-sqlite3
 npm run scanner      # run the scanner directly, no Docker
-npm test             # unit tests (283)
+npm test             # unit tests (305)
 npm run smoke:db     # DB smoke test
 docker compose up -d --build
 ```

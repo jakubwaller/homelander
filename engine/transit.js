@@ -1,8 +1,9 @@
-// Transit-line overlay data for the Kaufradar map.
+// Transit data for the Kaufradar: line geometry for the map overlay and
+// station coordinates for the weekly report's walking-distance filter.
 //
 // Fetches U-/S-Bahn route relations around Hamburg from Overpass once and
 // caches them in <data dir>/transit-lines.json (refreshed when the file is
-// older than 30 days). The Kaufradar serves the cache via /api/scan/transit;
+// older than 30 days). The Kaufradar serves the lines via /api/scan/transit;
 // a failed fetch just means the map has no lines until the next attempt.
 
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -20,24 +21,52 @@ const OVERPASS_ENDPOINTS = [
 
 // S-Bahn tagging varies (light_rail vs train), so match both and keep the
 // train side pinned to S-refs; subway covers the U-Bahn.
-const QUERY = `[out:json][timeout:60];
+//
+// Stations come from the same relations rather than a standalone
+// `railway=station` query: the named member nodes of a route are exactly the
+// stops that route serves, so the report can never rank a flat as well
+// connected via a station no U-/S-Bahn actually calls at.
+const QUERY = `[out:json][timeout:90];
 (
   relation["route"="subway"](${BBOX});
   relation["route"="light_rail"](${BBOX});
   relation["route"="train"]["ref"~"^S[0-9]"](${BBOX});
-);
-out geom;`;
+)->.routes;
+.routes out geom;
+node(r.routes)["name"];
+out;`;
+
+// Walking model for "x minutes on foot". 80 m/min is the usual 4.8 km/h
+// Gehminute; the detour factor turns the straight-line distance we can
+// actually compute into an approximate street-network walk (no routing
+// engine here). 10 minutes therefore means ~615 m as the crow flies.
+export const WALK_METERS_PER_MINUTE = 80;
+export const WALK_DETOUR_FACTOR = 1.3;
 
 export function transitFilePath(dataDir) {
   return join(dataDir, TRANSIT_FILE);
 }
 
-export function readTransitLines(dataDir) {
+function readCache(dataDir) {
   try {
     return JSON.parse(readFileSync(transitFilePath(dataDir), 'utf8'));
   } catch {
-    return { generated_at: null, lines: [] };
+    return null;
   }
+}
+
+/** Line geometry for the map overlay. Stations are stripped — /api/scan/transit
+ *  ships this to every page load and the map has no use for them. */
+export function readTransitLines(dataDir) {
+  const cache = readCache(dataDir);
+  return { generated_at: cache?.generated_at ?? null, lines: cache?.lines ?? [] };
+}
+
+/** Station coordinates for the report's walking-distance filter. Empty when the
+ *  cache predates stations — callers must treat that as "unknown", not "none". */
+export function readTransitStations(dataDir) {
+  const cache = readCache(dataDir);
+  return { generated_at: cache?.generated_at ?? null, stations: cache?.stations ?? [] };
 }
 
 /**
@@ -48,6 +77,7 @@ export function readTransitLines(dataDir) {
 export function toLines(elements) {
   const byRef = new Map();
   for (const rel of elements || []) {
+    if (rel.type && rel.type !== 'relation') continue;
     const tags = rel.tags || {};
     const ref = tags.ref || '';
     if (!ref) continue;
@@ -72,11 +102,68 @@ export function toLines(elements) {
     .map(({ wayIds, ...rest }) => rest);
 }
 
+/**
+ * Named stop nodes of the route relations, deduped by name + rounded position.
+ * A station has one stop node per direction and per line calling at it; they sit
+ * tens of metres apart, so all of them are kept — the nearest one is the honest
+ * answer for "how far to the platform" and the whole set costs ~15 kB.
+ */
+export function toStations(elements) {
+  const seen = new Set();
+  const stations = [];
+  for (const node of elements || []) {
+    if (node.type !== 'node' || node.lat == null || node.lon == null) continue;
+    const name = node.tags?.name;
+    if (!name) continue;
+    const lat = Math.round(node.lat * 1e5) / 1e5;
+    const lng = Math.round(node.lon * 1e5) / 1e5;
+    const key = `${name}|${lat}|${lng}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    stations.push({ name, lat, lng });
+  }
+  return stations.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+}
+
+/** Great-circle distance in metres. */
+export function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+/** Straight-line metres to approximate minutes on foot (see the walk model above). */
+export function walkMinutes(meters) {
+  return (meters * WALK_DETOUR_FACTOR) / WALK_METERS_PER_MINUTE;
+}
+
+/**
+ * Closest U-/S-Bahn stop to a point, as { name, meters, minutes }.
+ * Returns null for missing coordinates or an empty station list.
+ */
+export function nearestStation(lat, lng, stations = []) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  let best = null;
+  for (const station of stations) {
+    const meters = haversineMeters(lat, lng, station.lat, station.lng);
+    if (!best || meters < best.meters) best = { name: station.name, meters };
+  }
+  return best ? { ...best, minutes: walkMinutes(best.meters) } : null;
+}
+
 /** Fetch + cache transit lines if the cache is missing or stale. Never throws. */
 export async function ensureTransitLines(dataDir, { log = () => {} } = {}) {
   const path = transitFilePath(dataDir);
   try {
-    if (existsSync(path) && Date.now() - statSync(path).mtimeMs < MAX_AGE_MS) return;
+    // A cache written before stations existed is stale regardless of age —
+    // otherwise the report's walking-distance filter sits blind for up to a
+    // month after the upgrade.
+    if (existsSync(path) && Date.now() - statSync(path).mtimeMs < MAX_AGE_MS
+        && readTransitStations(dataDir).stations.length > 0) return;
   } catch { /* unreadable -> refetch */ }
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
@@ -95,8 +182,10 @@ export async function ensureTransitLines(dataDir, { log = () => {} } = {}) {
       if (data.remark && /error/i.test(data.remark)) throw new Error(data.remark);
       const lines = toLines(data.elements);
       if (!lines.length) throw new Error('no route relations in reply');
-      writeFileSync(path, JSON.stringify({ generated_at: new Date().toISOString(), lines }));
-      log(`Transit lines cached: ${lines.length} route(s), ${Math.round(statSync(path).size / 1024)} kB`);
+      const stations = toStations(data.elements);
+      if (!stations.length) throw new Error('no station nodes in reply');
+      writeFileSync(path, JSON.stringify({ generated_at: new Date().toISOString(), lines, stations }));
+      log(`Transit lines cached: ${lines.length} route(s), ${stations.length} stop(s), ${Math.round(statSync(path).size / 1024)} kB`);
       return;
     } catch (err) {
       log(`WARN: transit line fetch failed (${endpoint}): ${err.message}`);
