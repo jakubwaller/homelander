@@ -137,6 +137,7 @@ export function renderScanPage() {
       <option value="30">Letzte 30 Tage</option>
     </select>
     <label class="chk"><input type="checkbox" id="f-hideseen"> Gesehene ausblenden</label>
+    <label class="chk"><input type="checkbox" id="f-nohouses"> Häuser ausblenden</label>
     <label class="chk"><input type="checkbox" id="f-fav"> ★ Nur Favoriten</label>
   </div>
 </header>
@@ -390,10 +391,12 @@ export function renderScanPage() {
     var days = parseFloat(document.getElementById('f-days').value) || 0;
     var cutoff = days ? Date.now() - days * 24 * 3600 * 1000 : 0;
     var hideSeen = document.getElementById('f-hideseen').checked;
+    var noHouses = document.getElementById('f-nohouses').checked;
     var rows = all.filter(function (l) {
       if (favOnly() && !l.favorite) return false;
       // Favourites survive "Gesehene ausblenden" — starring is the keep flag.
       if (hideSeen && l.seen && !l.favorite) return false;
+      if (noHouses && /haus-kaufen/i.test(String(l.filter_url || ''))) return false;
       if (fid && l.filter_id !== fid) return false;
       if (q && (String(l.title) + ' ' + String(l.address)).toLowerCase().indexOf(q) === -1) return false;
       if (maxPrice && !(l.price > 0 && l.price <= maxPrice)) return false;
@@ -791,7 +794,7 @@ export function renderScanPage() {
     }).catch(function () {});
   }
 
-  ['f-filter', 'f-sort', 'f-days', 'f-hideseen', 'f-fav'].forEach(function (id) {
+  ['f-filter', 'f-sort', 'f-days', 'f-hideseen', 'f-nohouses', 'f-fav'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', render);
   });
   ['f-q', 'f-maxprice', 'f-minrooms', 'f-minsize'].forEach(function (id) {

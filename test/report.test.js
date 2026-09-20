@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HomelanderDB } from '../engine/db.js';
 import {
-  buildScanReportHtml, filterReportListings, markApproxCoords,
+  buildScanReportHtml, filterReportListings, isHouseListing, markApproxCoords,
   maybeSendWeeklyReport, resolveReportCriteria, resolveReportSmtp,
 } from '../engine/report.js';
 
@@ -100,7 +100,7 @@ describe('buildScanReportHtml', () => {
 
 describe('resolveReportCriteria', () => {
   it('defaults to 80 m² / 4 rooms / 10 walking minutes', () => {
-    assert.deepEqual(resolveReportCriteria({}), { minSize: 80, minRooms: 4, maxWalkMinutes: 10 });
+    assert.deepEqual(resolveReportCriteria({}), { minSize: 80, minRooms: 4, maxWalkMinutes: 10, westStations: ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp'] });
   });
 
   it('takes overrides from env and treats 0 as "criterion off"', () => {
@@ -108,7 +108,9 @@ describe('resolveReportCriteria', () => {
       HOMELANDER_REPORT_MIN_SIZE: '65',
       HOMELANDER_REPORT_MIN_ROOMS: '0',
       HOMELANDER_REPORT_MAX_WALK_MINUTES: '15',
-    }), { minSize: 65, minRooms: 0, maxWalkMinutes: 15 });
+      HOMELANDER_REPORT_WEST_STATIONS: 'Altona, Stellingen',
+    }), { minSize: 65, minRooms: 0, maxWalkMinutes: 15, westStations: ['Altona', 'Stellingen'] });
+    assert.deepEqual(resolveReportCriteria({ HOMELANDER_REPORT_WEST_STATIONS: '' }).westStations, []);
   });
 
   it('falls back on blank or unparseable values rather than filtering everything out', () => {
@@ -116,7 +118,7 @@ describe('resolveReportCriteria', () => {
       HOMELANDER_REPORT_MIN_SIZE: '',
       HOMELANDER_REPORT_MIN_ROOMS: 'vier',
       HOMELANDER_REPORT_MAX_WALK_MINUTES: '-3',
-    }), { minSize: 80, minRooms: 4, maxWalkMinutes: 10 });
+    }), { minSize: 80, minRooms: 4, maxWalkMinutes: 10, westStations: ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp'] });
   });
 });
 
@@ -244,5 +246,65 @@ describe('buildScanReportHtml with criteria', () => {
     });
     assert.match(html, /ÖPNV-Filter wurde diese Woche übersprungen/);
     assert.match(html, /Keine Angebote in diesem Zeitraum, die den Kriterien entsprechen/);
+  });
+});
+
+describe('houses and the west region', () => {
+  const hbf = [
+    { name: 'Hamburg Hauptbahnhof', lat: 53.5522, lng: 10.0081 },
+  ];
+  const outer = [
+    { name: 'Bahrenfeld', lat: 53.56, lng: 9.911 },
+    { name: 'Langenfelde', lat: 53.5797, lng: 9.9308 },
+    { name: 'Lattenkamp (Sporthalle)', lat: 53.5997, lng: 9.9946 },
+  ];
+  const inside = { name: 'Holstenstraße', lat: 53.5617, lng: 9.9499 };
+  const east = { name: 'Berliner Tor', lat: 53.5527, lng: 10.0248 };
+  const stations = [...hbf, ...outer, inside, east];
+  const criteria = {
+    stations, minSize: 80, minRooms: 4, maxWalkMinutes: 10,
+    westStations: ['Bahrenfeld', 'Langenfelde', 'Lattenkamp'],
+  };
+  const flat = (over) => ({ expose_id: 'x', size: 90, rooms: 4, ...over });
+
+  it('recognises house searches by their URL', () => {
+    assert.equal(isHouseListing({ filter_url: 'https://www.kleinanzeigen.de/s-haus-kaufen/hamburg/c208l9409' }), true);
+    assert.equal(isHouseListing({ filter_url: 'https://www.immobilienscout24.de/Suche/de/hamburg/hamburg/haus-kaufen' }), true);
+    assert.equal(isHouseListing({ filter_url: 'https://www.immobilienscout24.de/Suche/de/hamburg/hamburg/wohnung-kaufen' }), false);
+    assert.equal(isHouseListing({}), false);
+  });
+
+  it('drops houses and counts them', () => {
+    const { kept, dropped } = filterReportListings([
+      flat({ lat: 53.5619, lng: 9.9501, filter_url: 'https://x.example/haus-kaufen' }),
+      flat({ lat: 53.5619, lng: 9.9501, filter_url: 'https://x.example/wohnung-kaufen' }),
+    ], criteria);
+    assert.equal(kept.length, 1);
+    assert.equal(dropped.house, 1);
+    assert.equal(dropped.total, 1);
+  });
+
+  it('measures the walk only to stops between the Hbf and the named stations', () => {
+    const { kept, dropped } = filterReportListings([
+      flat({ lat: 53.5619, lng: 9.9501 }),   // next to Holstenstraße, inside the wedge
+      flat({ lat: 53.5529, lng: 10.0250 }),  // next to Berliner Tor, east of the Hbf
+    ], criteria);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].walk.name, 'Holstenstraße');
+    assert.equal(dropped.transit, 1);
+  });
+
+  it('skips the west filter, and says so, when a named station is missing', () => {
+    const { kept, regionSkipped } = filterReportListings(
+      [flat({ lat: 53.5529, lng: 10.0250 })],
+      { ...criteria, westStations: ['Bahrenfeld', 'Nirgendwo'] });
+    assert.equal(regionSkipped, true);
+    assert.equal(kept.length, 1);
+  });
+
+  it('says "nur Wohnungen" and names the region in the mail', () => {
+    const html = buildScanReportHtml({ listings: [], criteria: { westStations: ['Bahrenfeld'] } });
+    assert.match(html, /nur Wohnungen/);
+    assert.match(html, /westlich des Hbf \(bis Bahrenfeld\)/);
   });
 });

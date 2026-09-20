@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sendMail } from './smtp-mailer.js';
-import { nearestStation, readTransitStations } from './transit.js';
+import { nearestStation, readTransitStations, stationsWithinRegion } from './transit.js';
 
 const REPORT_STATE_FILE = '.last-scan-report';
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -20,6 +20,19 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_MIN_SIZE = 80;          // m²
 const DEFAULT_MIN_ROOMS = 4;
 const DEFAULT_MAX_WALK_MINUTES = 10;  // on foot to the nearest U-/S-Bahn stop
+
+// Report region: only stops between the Hbf and these outer stops count for the
+// walking-distance criterion (see stationsWithinRegion). Override with
+// HOMELANDER_REPORT_WEST_STATIONS (comma-separated); set it empty to disable.
+const DEFAULT_WEST_STATIONS = ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp'];
+
+/**
+ * True for house searches (IS24 / Kleinanzeigen `haus-kaufen` URLs). Listings
+ * carry no property type of their own; the search that found them does.
+ */
+export function isHouseListing(listing) {
+  return /haus-kaufen/i.test(String(listing?.filter_url || ''));
+}
 
 /** Non-negative number from env, falling back when unset or unparseable. */
 function numEnv(env, key, fallback) {
@@ -35,6 +48,9 @@ export function resolveReportCriteria(env = process.env) {
     minSize: numEnv(env, 'HOMELANDER_REPORT_MIN_SIZE', DEFAULT_MIN_SIZE),
     minRooms: numEnv(env, 'HOMELANDER_REPORT_MIN_ROOMS', DEFAULT_MIN_ROOMS),
     maxWalkMinutes: numEnv(env, 'HOMELANDER_REPORT_MAX_WALK_MINUTES', DEFAULT_MAX_WALK_MINUTES),
+    westStations: env?.HOMELANDER_REPORT_WEST_STATIONS === undefined
+      ? DEFAULT_WEST_STATIONS
+      : String(env.HOMELANDER_REPORT_WEST_STATIONS).split(',').map((n) => n.trim()).filter(Boolean),
   };
 }
 
@@ -79,25 +95,36 @@ export function markApproxCoords(db, listings) {
  * so the transit criterion is skipped entirely instead of emptying the mail.
  */
 export function filterReportListings(listings = [], {
-  stations = [], minSize = 0, minRooms = 0, maxWalkMinutes = 0,
+  stations = [], minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [],
 } = {}) {
+  // Restrict the candidate stops to the west wedge. If the cache lacks one of
+  // the named stops the wedge would be wrong, so fall back to all stops and
+  // flag it instead of quietly emptying the mail.
+  let candidates = stations;
+  let regionSkipped = false;
+  if (westStations.length && stations.length) {
+    const region = stationsWithinRegion(stations, westStations);
+    if (region.stations.length && region.missing.length === 0) candidates = region.stations;
+    else regionSkipped = true;
+  }
   const transitSkipped = maxWalkMinutes > 0 && stations.length === 0;
   const walkLimit = transitSkipped ? 0 : maxWalkMinutes;
-  const dropped = { size: 0, rooms: 0, transit: 0 };
+  const dropped = { size: 0, rooms: 0, transit: 0, house: 0 };
   const kept = [];
 
   for (const listing of listings) {
+    if (isHouseListing(listing)) { dropped.house++; continue; }
     if (minSize > 0 && !(listing.size >= minSize)) { dropped.size++; continue; }
     if (minRooms > 0 && !(listing.rooms >= minRooms)) { dropped.rooms++; continue; }
-    const walk = stations.length
-      ? nearestStation(listing.lat, listing.lng, stations)
+    const walk = candidates.length
+      ? nearestStation(listing.lat, listing.lng, candidates)
       : null;
     if (walkLimit > 0 && !(walk && walk.minutes <= walkLimit)) { dropped.transit++; continue; }
     kept.push(walk ? { ...listing, walk } : listing);
   }
 
-  dropped.total = dropped.size + dropped.rooms + dropped.transit;
-  return { kept, dropped, transitSkipped };
+  dropped.total = dropped.size + dropped.rooms + dropped.transit + dropped.house;
+  return { kept, dropped, transitSkipped, regionSkipped };
 }
 
 function esc(text) {
@@ -118,18 +145,19 @@ function fmtWalk(listing) {
 }
 
 /** One-line summary of the thresholds the shortlist was built with. */
-function fmtCriteria({ minSize = 0, minRooms = 0, maxWalkMinutes = 0 } = {}) {
-  const parts = [];
+function fmtCriteria({ minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [] } = {}) {
+  const parts = ['nur Wohnungen'];
   if (minSize > 0) parts.push(`ab ${minSize}\u00a0m²`);
   if (minRooms > 0) parts.push(`ab ${minRooms}\u00a0Zimmer`);
   if (maxWalkMinutes > 0) parts.push(`max. ${maxWalkMinutes}\u00a0Min zu Fuß zur U-/S-Bahn`);
+  if (westStations.length) parts.push(`westlich des Hbf (bis ${westStations.join(', ')})`);
   return parts.join(' · ');
 }
 
 /** Build the HTML body for a scan report. */
 export function buildScanReportHtml({
   listings = [], sinceIso, generatedAt = new Date(),
-  criteria = null, dropped = null, transitSkipped = false,
+  criteria = null, dropped = null, transitSkipped = false, regionSkipped = false,
 }) {
   const byFilter = new Map();
   for (const listing of listings) {
@@ -168,6 +196,7 @@ export function buildScanReportHtml({
     [dropped.size, 'zu klein'],
     [dropped.rooms, 'zu wenige Zimmer'],
     [dropped.transit, 'zu weit von der Bahn'],
+    [dropped.house, 'Häuser'],
   ].filter(([n]) => n > 0).map(([n, why]) => `${n} ${why}`).join(', ') : '';
   const droppedLine = dropped?.total > 0
     ? `${dropped.total} weitere Angebote entsprachen den Kriterien nicht`
@@ -182,6 +211,7 @@ export function buildScanReportHtml({
     <p style="color:#777;margin-top:0;">${listings.length} Angebote${since ? ` seit ${since}` : ''} · Stand ${generatedAt.toLocaleString('de-DE')}</p>
     ${criteriaLine ? `<p style="color:#777;margin-top:0;font-size:13px;">Kriterien: ${criteriaLine}</p>` : ''}
     ${transitSkipped ? '<p style="color:#B8860B;font-size:13px;">Hinweis: Keine Haltestellendaten verfügbar — der ÖPNV-Filter wurde diese Woche übersprungen.</p>' : ''}
+    ${regionSkipped ? '<p style="color:#B8860B;font-size:13px;">Hinweis: Nicht alle Bahnhöfe der Westregion sind in den Haltestellendaten — der Westfilter wurde diese Woche übersprungen.</p>' : ''}
     ${sections || `<p>${emptyText}</p>`}
     ${droppedLine ? `<p style="color:#aaa;font-size:12px;margin-top:16px;">${droppedLine}</p>` : ''}
     <p style="color:#aaa;font-size:12px;margin-top:24px;">Automatisch erstellt von Homelander (Scan-Modus — es wurden keine Bewerbungen versendet).</p>
@@ -248,18 +278,19 @@ export async function maybeSendWeeklyReport(db, config, dataDir, { log = () => {
   if (scanFilters.length === 0) return { sent: false, reason: 'no_scan_filters' };
 
   const sinceIso = lastSent || new Date(Date.now() - WEEK_MS).toISOString();
-  const found = db.getScanListings({ sinceIso, limit: 500 });
+  const found = db.getScanListings({ sinceIso, limit: 5000 });
 
   const criteria = resolveReportCriteria(env);
   const { stations } = readTransitStations(dataDir);
-  const { kept, dropped, transitSkipped } = filterReportListings(
+  const { kept, dropped, transitSkipped, regionSkipped } = filterReportListings(
     markApproxCoords(db, found), { ...criteria, stations }
   );
+  if (regionSkipped) log('WARN: west-region stations missing from transit cache — report skipped the west filter');
   if (transitSkipped) log('WARN: no transit stations cached — report skipped the walking-distance filter');
 
   try {
     const html = buildScanReportHtml({
-      listings: kept, sinceIso, criteria, dropped, transitSkipped,
+      listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped,
     });
     await sendMail(
       { ...smtp, to: recipient },
