@@ -24,7 +24,15 @@ const DEFAULT_MAX_WALK_MINUTES = 10;  // on foot to the nearest U-/S-Bahn stop
 // Report region: only stops between the Hbf and these outer stops count for the
 // walking-distance criterion (see stationsWithinRegion). Override with
 // HOMELANDER_REPORT_WEST_STATIONS (comma-separated); set it empty to disable.
-const DEFAULT_WEST_STATIONS = ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp'];
+const DEFAULT_WEST_STATIONS = ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp', 'Sierichstraße'];
+// Stops added on top of the hull: U3 Feldstraße→Hbf and S-Bahn Altona→Hbf
+// (HOMELANDER_REPORT_EXTRA_STATIONS).
+const DEFAULT_EXTRA_STATIONS = [
+  'St. Pauli', 'Landungsbrücken', 'Baumwall', 'Rödingsmarkt', 'Rathaus', 'Hauptbahnhof Süd',
+  'Hamburg-Altona', 'Königstraße', 'Reeperbahn', 'Stadthausbrücke',
+];
+const listEnv = (env, key, fallback) => (env?.[key] === undefined ? fallback
+  : String(env[key]).split(',').map((n) => n.trim()).filter(Boolean));
 
 /**
  * True for house searches (IS24 / Kleinanzeigen `haus-kaufen` URLs). Listings
@@ -48,9 +56,8 @@ export function resolveReportCriteria(env = process.env) {
     minSize: numEnv(env, 'HOMELANDER_REPORT_MIN_SIZE', DEFAULT_MIN_SIZE),
     minRooms: numEnv(env, 'HOMELANDER_REPORT_MIN_ROOMS', DEFAULT_MIN_ROOMS),
     maxWalkMinutes: numEnv(env, 'HOMELANDER_REPORT_MAX_WALK_MINUTES', DEFAULT_MAX_WALK_MINUTES),
-    westStations: env?.HOMELANDER_REPORT_WEST_STATIONS === undefined
-      ? DEFAULT_WEST_STATIONS
-      : String(env.HOMELANDER_REPORT_WEST_STATIONS).split(',').map((n) => n.trim()).filter(Boolean),
+    westStations: listEnv(env, 'HOMELANDER_REPORT_WEST_STATIONS', DEFAULT_WEST_STATIONS),
+    extraStations: listEnv(env, 'HOMELANDER_REPORT_EXTRA_STATIONS', DEFAULT_EXTRA_STATIONS),
   };
 }
 
@@ -95,7 +102,7 @@ export function markApproxCoords(db, listings) {
  * so the transit criterion is skipped entirely instead of emptying the mail.
  */
 export function filterReportListings(listings = [], {
-  stations = [], minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [],
+  stations = [], minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [], extraStations = [],
 } = {}) {
   // Restrict the candidate stops to the west wedge. If the cache lacks one of
   // the named stops the wedge would be wrong, so fall back to all stops and
@@ -103,7 +110,7 @@ export function filterReportListings(listings = [], {
   let candidates = stations;
   let regionSkipped = false;
   if (westStations.length && stations.length) {
-    const region = stationsWithinRegion(stations, westStations);
+    const region = stationsWithinRegion(stations, westStations, undefined, extraStations);
     if (region.stations.length && region.missing.length === 0) candidates = region.stations;
     else regionSkipped = true;
   }

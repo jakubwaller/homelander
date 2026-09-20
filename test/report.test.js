@@ -100,7 +100,8 @@ describe('buildScanReportHtml', () => {
 
 describe('resolveReportCriteria', () => {
   it('defaults to 80 m² / 4 rooms / 10 walking minutes', () => {
-    assert.deepEqual(resolveReportCriteria({}), { minSize: 80, minRooms: 4, maxWalkMinutes: 10, westStations: ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp'] });
+    assert.deepEqual(resolveReportCriteria({}), { minSize: 80, minRooms: 4, maxWalkMinutes: 10, westStations: ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp', 'Sierichstraße'],
+      extraStations: resolveReportCriteria({}).extraStations });
   });
 
   it('takes overrides from env and treats 0 as "criterion off"', () => {
@@ -109,7 +110,8 @@ describe('resolveReportCriteria', () => {
       HOMELANDER_REPORT_MIN_ROOMS: '0',
       HOMELANDER_REPORT_MAX_WALK_MINUTES: '15',
       HOMELANDER_REPORT_WEST_STATIONS: 'Altona, Stellingen',
-    }), { minSize: 65, minRooms: 0, maxWalkMinutes: 15, westStations: ['Altona', 'Stellingen'] });
+    }), { minSize: 65, minRooms: 0, maxWalkMinutes: 15, westStations: ['Altona', 'Stellingen'],
+      extraStations: resolveReportCriteria({}).extraStations });
     assert.deepEqual(resolveReportCriteria({ HOMELANDER_REPORT_WEST_STATIONS: '' }).westStations, []);
   });
 
@@ -118,7 +120,8 @@ describe('resolveReportCriteria', () => {
       HOMELANDER_REPORT_MIN_SIZE: '',
       HOMELANDER_REPORT_MIN_ROOMS: 'vier',
       HOMELANDER_REPORT_MAX_WALK_MINUTES: '-3',
-    }), { minSize: 80, minRooms: 4, maxWalkMinutes: 10, westStations: ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp'] });
+    }), { minSize: 80, minRooms: 4, maxWalkMinutes: 10, westStations: ['Lutterothstraße', 'Langenfelde', 'Bahrenfeld', 'Lattenkamp', 'Sierichstraße'],
+      extraStations: resolveReportCriteria({}).extraStations });
   });
 });
 
@@ -292,6 +295,14 @@ describe('houses and the west region', () => {
     assert.equal(kept.length, 1);
     assert.equal(kept[0].walk.name, 'Holstenstraße');
     assert.equal(dropped.transit, 1);
+  });
+
+  it('counts extra stops even when they lie outside the hull', () => {
+    const stPauli = { name: 'St. Pauli', lat: 53.5509, lng: 9.97 };
+    const { kept } = filterReportListings(
+      [flat({ lat: 53.5511, lng: 9.9702 })],
+      { ...criteria, stations: [...stations, stPauli], extraStations: ['St. Pauli'] });
+    assert.equal(kept[0]?.walk.name, 'St. Pauli');
   });
 
   it('skips the west filter, and says so, when a named station is missing', () => {
