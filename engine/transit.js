@@ -193,7 +193,8 @@ function inPolygon(lng, lat, ring) {
  * inside the convex hull of the anchor's stop nodes and the outer stops. The
  * transit cache keeps no stop order per line, so this is a geographic wedge,
  * not a walk along the track — it also takes in stops on neighbouring lines.
- * `extraNames` are added on top, hull or not. Returns { stations, missing }: the stops inside the hull, and the requested
+ * `extraNames` are added on top, hull or not; a missing extra is reported in
+ * `missingExtra` but does not invalidate the region. Returns { stations, missing, missingExtra }: the stops inside the hull, and the requested
  * names the cache has no stop for (a hull built from a partial list would
  * silently shrink, so callers should treat a non-empty `missing` as a fault).
  */
@@ -209,14 +210,15 @@ export function stationsWithinRegion(stations = [], outerNames = [], anchorName 
   }
   // Extra stops count regardless of the hull (line stretches the hull misses).
   const extra = new Set();
+  const missingExtra = [];
   for (const name of extraNames) {
     const want = normalizeStationName(name);
     const hits = stations.filter((s) => normalizeStationName(s.name) === want);
-    if (hits.length) hits.forEach((s) => extra.add(s)); else missing.push(name);
+    if (hits.length) hits.forEach((s) => extra.add(s)); else missingExtra.push(name);
   }
-  if (!anchorStops.length || !outer.length) return { stations: [], missing };
+  if (!anchorStops.length || !outer.length) return { stations: [], missing, missingExtra };
   const ring = convexHull([...anchorStops, ...outer].map((s) => [s.lng, s.lat]));
-  return { stations: stations.filter((s) => extra.has(s) || inPolygon(s.lng, s.lat, ring)), missing };
+  return { stations: stations.filter((s) => extra.has(s) || inPolygon(s.lng, s.lat, ring)), missing, missingExtra };
 }
 
 /** Fetch + cache transit lines if the cache is missing or stale. Never throws. */

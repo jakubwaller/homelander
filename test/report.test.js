@@ -305,6 +305,21 @@ describe('houses and the west region', () => {
     assert.equal(kept[0]?.walk.name, 'St. Pauli');
   });
 
+  it('keeps the west filter when only an extra stop is missing from the cache', () => {
+    const { kept, dropped } = filterReportListings(
+      [flat({ lat: 53.5529, lng: 10.0250 })],
+      { ...criteria, extraStations: ['Nirgendwo'] });
+    assert.equal(kept.length, 0);
+    assert.equal(dropped.transit, 1);
+  });
+
+  it('does not claim the west region in the mail when the walk filter is off', () => {
+    const html = buildScanReportHtml({
+      listings: [], criteria: { maxWalkMinutes: 0, westStations: ['Bahrenfeld'] },
+    });
+    assert.doesNotMatch(html, /westlich des Hbf/);
+  });
+
   it('skips the west filter, and says so, when a named station is missing', () => {
     const { kept, regionSkipped } = filterReportListings(
       [flat({ lat: 53.5529, lng: 10.0250 })],

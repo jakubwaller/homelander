@@ -196,7 +196,10 @@ export function buildScanReportHtml({
   }).join('\n');
 
   const since = sinceIso ? new Date(sinceIso).toLocaleDateString('de-DE') : '';
-  const criteriaLine = fmtCriteria(criteria || {});
+  // The west restriction only applies through the walking criterion, and only
+// when it actually ran — don't claim it in the mail otherwise.
+const westApplied = criteria?.maxWalkMinutes > 0 && !transitSkipped && !regionSkipped;
+  const criteriaLine = fmtCriteria(westApplied ? criteria : { ...(criteria || {}), westStations: [] });
   // Say what the filter swallowed — an empty mail should never be ambiguous
   // between "nothing matched" and "the filter is broken".
   const breakdown = dropped ? [
