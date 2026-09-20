@@ -329,7 +329,7 @@ describe('houses and the west region', () => {
   });
 
   it('says "nur Wohnungen" and names the region in the mail', () => {
-    const html = buildScanReportHtml({ listings: [], criteria: { westStations: ['Bahrenfeld'] } });
+    const html = buildScanReportHtml({ listings: [], criteria: { maxWalkMinutes: 10, westStations: ['Bahrenfeld'] } });
     assert.match(html, /nur Wohnungen/);
     assert.match(html, /westlich des Hbf \(bis Bahrenfeld\)/);
   });
