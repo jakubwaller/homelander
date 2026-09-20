@@ -155,6 +155,72 @@ export function nearestStation(lat, lng, stations = []) {
   return best ? { ...best, minutes: walkMinutes(best.meters) } : null;
 }
 
+/** Lower-case, ß→ss, parenthetical suffix stripped: "Lattenkamp (Sporthalle)" → "lattenkamp". */
+function normalizeStationName(name) {
+  return String(name ?? '').toLowerCase().replace(/ß/g, 'ss')
+    .replace(/\(.*?\)/g, '').replace(/[^a-z0-9äöüé]+/g, ' ').trim();
+}
+
+/** Andrew's monotone chain; returns the hull as an [lng, lat] ring. */
+function convexHull(points) {
+  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (pts.length < 3) return pts;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const build = (input) => {
+    const out = [];
+    for (const p of input) {
+      while (out.length >= 2 && cross(out[out.length - 2], out[out.length - 1], p) <= 0) out.pop();
+      out.push(p);
+    }
+    out.pop();
+    return out;
+  };
+  return [...build(pts), ...build([...pts].reverse())];
+}
+
+function inPolygon(lng, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Stops "between" the anchor (Hbf) and the named outer stations: everything
+ * inside the convex hull of the anchor's stop nodes and the outer stops. The
+ * transit cache keeps no stop order per line, so this is a geographic wedge,
+ * not a walk along the track — it also takes in stops on neighbouring lines.
+ * `extraNames` are added on top, hull or not; a missing extra is reported in
+ * `missingExtra` but does not invalidate the region. Returns { stations, missing, missingExtra }: the stops inside the hull, and the requested
+ * names the cache has no stop for (a hull built from a partial list would
+ * silently shrink, so callers should treat a non-empty `missing` as a fault).
+ */
+export function stationsWithinRegion(stations = [], outerNames = [], anchorName = 'Hamburg Hauptbahnhof', extraNames = []) {
+  const anchor = normalizeStationName(anchorName);
+  const anchorStops = stations.filter((s) => normalizeStationName(s.name) === anchor);
+  const missing = [];
+  const outer = [];
+  for (const name of outerNames) {
+    const want = normalizeStationName(name);
+    const hits = stations.filter((s) => normalizeStationName(s.name) === want);
+    if (hits.length) outer.push(...hits); else missing.push(name);
+  }
+  // Extra stops count regardless of the hull (line stretches the hull misses).
+  const extra = new Set();
+  const missingExtra = [];
+  for (const name of extraNames) {
+    const want = normalizeStationName(name);
+    const hits = stations.filter((s) => normalizeStationName(s.name) === want);
+    if (hits.length) hits.forEach((s) => extra.add(s)); else missingExtra.push(name);
+  }
+  if (!anchorStops.length || !outer.length) return { stations: [], missing, missingExtra };
+  const ring = convexHull([...anchorStops, ...outer].map((s) => [s.lng, s.lat]));
+  return { stations: stations.filter((s) => extra.has(s) || inPolygon(s.lng, s.lat, ring)), missing, missingExtra };
+}
+
 /** Fetch + cache transit lines if the cache is missing or stale. Never throws. */
 export async function ensureTransitLines(dataDir, { log = () => {} } = {}) {
   const path = transitFilePath(dataDir);
