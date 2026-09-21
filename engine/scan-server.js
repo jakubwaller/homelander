@@ -110,6 +110,14 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       const url = new URL(req.url, `http://${host}`);
       const path = url.pathname;
 
+      // Container healthcheck — public in both modes (with accounts every
+      // other route answers 401 without a session) and says nothing but
+      // whether the DB still answers.
+      if (path === '/healthz' && req.method === 'GET') {
+        dbGetter().db.prepare('SELECT 1').get();
+        return json(res, 200, { ok: true });
+      }
+
       // ── Accounts ──
       if (authSecret && path === '/login' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
