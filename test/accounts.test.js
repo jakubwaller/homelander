@@ -136,6 +136,12 @@ describe('accounts over HTTP', () => {
     assert.match(await form.text(), /Anmelden/);
   });
 
+  it('answers the container healthcheck without a session, and leaks nothing through it', async () => {
+    const res = await call('/healthz');
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true });
+  });
+
   it('rejects a wrong password and sets an HttpOnly cookie on success', async () => {
     const bad = await login('anna', 'nope');
     assert.equal(bad.res.status, 401);

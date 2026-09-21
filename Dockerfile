@@ -39,5 +39,5 @@ USER node
 VOLUME /data
 EXPOSE 8477
 HEALTHCHECK --interval=60s --timeout=5s --start-period=15s \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.HOMELANDER_SCAN_PORT||8477)+'/api/scan/filters').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.HOMELANDER_SCAN_PORT||8477)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "engine/headless.js"]
