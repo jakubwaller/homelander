@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -74,6 +74,34 @@ CREATE TABLE IF NOT EXISTS scan_favorite (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
+-- Kaufradar accounts. seen / favourite flags are per user; the legacy
+-- scan_seen / scan_favorite tables above only feed the first account (see
+-- adoptLegacyScanState). user_id 0 is the login-less single-user mode.
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  pass_hash TEXT NOT NULL,
+  email TEXT,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  last_report_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS user_seen (
+  user_id INTEGER NOT NULL,
+  hash TEXT NOT NULL,
+  seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  PRIMARY KEY (user_id, hash)
+);
+
+CREATE TABLE IF NOT EXISTS user_favorite (
+  user_id INTEGER NOT NULL,
+  hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+  PRIMARY KEY (user_id, hash)
+);
+
 CREATE TABLE IF NOT EXISTS results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   listing_hash TEXT,
@@ -128,6 +156,8 @@ export class HomelanderDB {
           // Column already exists (first-run via SCHEMA) — ignore
         }
       }
+      // v7 → v8: users + per-user seen/favourite tables — created by the
+      // SCHEMA exec below; the legacy flags are copied over right after it.
       // v6 → v7: scan_favorite table (Kaufradar star) — created by the SCHEMA
       // exec below, no ALTER needed.
       // v5 → v6: scan_seen table (Kaufradar "gesehen" flag) — created by the
@@ -150,6 +180,14 @@ export class HomelanderDB {
         }
       }
       this.db.exec(SCHEMA);
+      if (version && version.version < 8) {
+        this.db.exec(`
+          INSERT OR IGNORE INTO user_seen (user_id, hash, seen_at)
+            SELECT 0, hash, seen_at FROM scan_seen;
+          INSERT OR IGNORE INTO user_favorite (user_id, hash, created_at)
+            SELECT 0, hash, created_at FROM scan_favorite;
+        `);
+      }
       if (version && version.version < 5) {
         // Existing buy searches (previously broken by the pricetype 412 bug)
         // become scan-only — they must never enter the apply loop.
@@ -533,18 +571,18 @@ export class HomelanderDB {
   }
 
   /** Listings belonging to scan-mode filters, newest first. */
-  getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null } = {}) {
+  getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null, userId = 0 } = {}) {
     let sql = `
       SELECT l.*, f.name AS filter_name, f.web_url AS filter_url,
              (ss.hash IS NOT NULL) AS seen,
              (sf.hash IS NOT NULL) AS favorite
       FROM listings l
       JOIN filters f ON f.id = l.filter_id
-      LEFT JOIN scan_seen ss ON ss.hash = l.hash
-      LEFT JOIN scan_favorite sf ON sf.hash = l.hash
+      LEFT JOIN user_seen ss ON ss.hash = l.hash AND ss.user_id = ?
+      LEFT JOIN user_favorite sf ON sf.hash = l.hash AND sf.user_id = ?
       WHERE f.mode = 'scan' AND f.archived = 0
     `;
-    const params = [];
+    const params = [userId, userId];
     if (filterId) { sql += ' AND l.filter_id = ?'; params.push(filterId); }
     if (sinceIso) { sql += ' AND l.discovered_at >= ?'; params.push(sinceIso); }
     sql += ' ORDER BY l.discovered_at DESC, l.rowid DESC LIMIT ? OFFSET ?';
@@ -552,25 +590,86 @@ export class HomelanderDB {
     return this.db.prepare(sql).all(...params);
   }
 
-  /** Kaufradar "gesehen" flag — checked off listings the user is done with. */
-  setListingSeen(hash, seen) {
+  /** Kaufradar "gesehen" flag — checked off listings the user is done with.
+   *  Per user; 0 is the login-less single-user mode. */
+  setListingSeen(hash, seen, userId = 0) {
     if (seen) {
-      return this.db.prepare('INSERT OR IGNORE INTO scan_seen (hash) VALUES (?)').run(hash);
+      return this.db.prepare('INSERT OR IGNORE INTO user_seen (user_id, hash) VALUES (?, ?)').run(userId, hash);
     }
-    return this.db.prepare('DELETE FROM scan_seen WHERE hash = ?').run(hash);
+    return this.db.prepare('DELETE FROM user_seen WHERE user_id = ? AND hash = ?').run(userId, hash);
   }
 
-  /** Kaufradar star — the keeper list. Shares the hash space with scan_seen,
-   *  so manual Neubau projects (sha256('project|<name>')) can be starred too. */
-  setListingFavorite(hash, favorite) {
+  isSeen(hash, userId = 0) {
+    return !!this.db.prepare('SELECT 1 FROM user_seen WHERE user_id = ? AND hash = ?').get(userId, hash);
+  }
+
+  /** Kaufradar star — the keeper list. Shares the hash space with the seen
+   *  flag, so manual Neubau projects (sha256('project|<name>')) can be starred too. */
+  setListingFavorite(hash, favorite, userId = 0) {
     if (favorite) {
-      return this.db.prepare('INSERT OR IGNORE INTO scan_favorite (hash) VALUES (?)').run(hash);
+      return this.db.prepare('INSERT OR IGNORE INTO user_favorite (user_id, hash) VALUES (?, ?)').run(userId, hash);
     }
-    return this.db.prepare('DELETE FROM scan_favorite WHERE hash = ?').run(hash);
+    return this.db.prepare('DELETE FROM user_favorite WHERE user_id = ? AND hash = ?').run(userId, hash);
   }
 
-  isFavorite(hash) {
-    return !!this.db.prepare('SELECT 1 FROM scan_favorite WHERE hash = ?').get(hash);
+  isFavorite(hash, userId = 0) {
+    return !!this.db.prepare('SELECT 1 FROM user_favorite WHERE user_id = ? AND hash = ?').get(userId, hash);
+  }
+
+  // ── Accounts ──
+
+  countUsers() {
+    return this.db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  }
+
+  /** Create an account. The very first one inherits the flags recorded before
+   *  accounts existed (the legacy tables), so nothing is lost on rollout. */
+  createUser({ name, passHash, email = null, isAdmin = false, settings = {} }) {
+    const first = this.countUsers() === 0;
+    const info = this.db.prepare(
+      'INSERT INTO users (name, pass_hash, email, is_admin, settings_json) VALUES (?, ?, ?, ?, ?)'
+    ).run(name, passHash, email, isAdmin ? 1 : 0, JSON.stringify(settings));
+    const id = Number(info.lastInsertRowid);
+    if (first) {
+      // Legacy tables (frozen at the v8 upgrade) plus whatever was flagged in
+      // login-less mode since (user 0) — accounts may be switched on later.
+      for (const src of ['SELECT hash, seen_at FROM scan_seen', 'SELECT hash, seen_at FROM user_seen WHERE user_id = 0']) {
+        this.db.prepare(`INSERT OR IGNORE INTO user_seen (user_id, hash, seen_at) SELECT ?, hash, seen_at FROM (${src})`).run(id);
+      }
+      for (const src of ['SELECT hash, created_at FROM scan_favorite', 'SELECT hash, created_at FROM user_favorite WHERE user_id = 0']) {
+        this.db.prepare(`INSERT OR IGNORE INTO user_favorite (user_id, hash, created_at) SELECT ?, hash, created_at FROM (${src})`).run(id);
+      }
+    }
+    return { id, first };
+  }
+
+  getUser(id) {
+    return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null;
+  }
+
+  getUserByName(name) {
+    return this.db.prepare('SELECT * FROM users WHERE name = ?').get(String(name || '')) || null;
+  }
+
+  listUsers() {
+    return this.db.prepare('SELECT * FROM users ORDER BY id').all();
+  }
+
+  updateUser(id, { passHash, email, settings, lastReportAt } = {}) {
+    const sets = [];
+    const vals = [];
+    if (passHash !== undefined) { sets.push('pass_hash = ?'); vals.push(passHash); }
+    if (email !== undefined) { sets.push('email = ?'); vals.push(email); }
+    if (settings !== undefined) { sets.push('settings_json = ?'); vals.push(JSON.stringify(settings)); }
+    if (lastReportAt !== undefined) { sets.push('last_report_at = ?'); vals.push(lastReportAt); }
+    if (!sets.length) return;
+    this.db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
+  }
+
+  deleteUser(id) {
+    this.db.prepare('DELETE FROM user_seen WHERE user_id = ?').run(id);
+    this.db.prepare('DELETE FROM user_favorite WHERE user_id = ?').run(id);
+    return this.db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0;
   }
 
   /** Attach enrichment data (coordinates, expose details) to a listing. */

@@ -10,6 +10,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { URL } from 'node:url';
 import { renderScanPage } from './scan-page.js';
+import { renderLoginPage } from './login-page.js';
+import {
+  createLoginThrottle, hashPassword, makeSession, normalizeSettings, parseSettings,
+  sessionCookie, userFromCookie, validEmail, verifyPassword,
+} from './auth.js';
 import { readTransitLines } from './transit.js';
 import {
   MAX_UPLOAD_BYTES, deleteUpload, isValidHash, readUploads,
@@ -85,21 +90,111 @@ function readBinaryBody(req, res, handle) {
 /**
  * Start the Kaufradar server.
  * @param {() => import('./db.js').HomelanderDB} dbGetter  lazy DB accessor
- * @param {{ port?: number, host?: string, dataDir?: string }} options
+ * @param {{ port?: number, host?: string, dataDir?: string, authSecret?: string, trustProxy?: boolean }} options
  *   dataDir enables /api/scan/transit and /api/scan/projects (both empty
- *   without it).
+ *   without it). authSecret turns on accounts: every route but the login
+ *   requires a session and seen/favourite/upload state is per user. Without
+ *   it the server is login-less and everything belongs to user 0.
  * @returns {Promise<{ server, port, url, close }>}
  */
-export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0.1', dataDir = null } = {}) {
+export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0.1', dataDir = null, authSecret = null, trustProxy = false } = {}) {
+  const throttle = createLoginThrottle();
+  const LOCAL_USER = { id: 0, name: '', email: null, is_admin: 1, settings_json: '{}' };
+  // X-Forwarded-For is only believable behind our own reverse proxy (trustProxy);
+  // on a directly exposed port a client could mint a fresh value per attempt.
+  const clientIp = (req) => String((trustProxy && req.headers['x-forwarded-for']) || req.socket.remoteAddress || '').split(',').pop().trim();
+  const secure = (req) => req.headers['x-forwarded-proto'] === 'https';
+
   const server = createServer((req, res) => {
     try {
       const url = new URL(req.url, `http://${host}`);
       const path = url.pathname;
 
+      // ── Accounts ──
+      if (authSecret && path === '/login' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(renderLoginPage());
+        return;
+      }
+      if (authSecret && path === '/api/login' && req.method === 'POST') {
+        readJsonBody(req, res, ({ name, password }) => {
+          const key = clientIp(req);
+          if (throttle.blocked(key)) return json(res, 429, { error: 'Zu viele Versuche — bitte später erneut versuchen.' });
+          const user = dbGetter().getUserByName(name);
+          // Hash even for an unknown name so timing doesn't reveal which names exist.
+          const ok = verifyPassword(password, user?.pass_hash || 'scrypt$AAAA$AAAA') && user;
+          if (!ok) { throttle.fail(key); return json(res, 401, { error: 'Name oder Passwort falsch.' }); }
+          throttle.clear(key);
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
+            'Set-Cookie': sessionCookie(makeSession(authSecret, user), { secure: secure(req) }),
+          });
+          res.end(JSON.stringify({ ok: true }));
+        });
+        return;
+      }
+      if (authSecret && path === '/api/logout' && req.method === 'POST') {
+        res.writeHead(200, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Set-Cookie': sessionCookie('', { secure: secure(req), maxAgeMs: 0 }),
+        });
+        res.end('{"ok":true}');
+        return;
+      }
+
+      let user = LOCAL_USER;
+      if (authSecret) {
+        user = userFromCookie(authSecret, dbGetter(), req.headers.cookie);
+        if (!user) {
+          if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
+            res.writeHead(302, { Location: '/login', 'Cache-Control': 'no-store' });
+            res.end();
+            return;
+          }
+          return json(res, 401, { error: 'login required' });
+        }
+      }
+      const uid = user.id;
+      const scope = authSecret ? uid : undefined;   // uploads/<uid>/… only with accounts
+
+      if (path === '/api/me' && req.method === 'GET') {
+        return json(res, 200, {
+          accounts: !!authSecret, name: user.name, email: user.email || '',
+          is_admin: !!user.is_admin, settings: parseSettings(user),
+        });
+      }
+      if (authSecret && path === '/api/me/settings' && req.method === 'POST') {
+        readJsonBody(req, res, ({ email, settings }) => {
+          const cleanEmail = String(email || '').trim();
+          if (cleanEmail && !validEmail(cleanEmail)) return json(res, 400, { error: 'Ungültige E-Mail-Adresse.' });
+          const next = normalizeSettings(settings);
+          if (next.report.enabled && !cleanEmail) return json(res, 400, { error: 'Für den Wochenbericht wird eine E-Mail-Adresse benötigt.' });
+          dbGetter().updateUser(uid, { email: cleanEmail || null, settings: next });
+          return json(res, 200, { email: cleanEmail, settings: next });
+        });
+        return;
+      }
+      if (authSecret && path === '/api/me/password' && req.method === 'POST') {
+        readJsonBody(req, res, ({ current, next }) => {
+          if (!verifyPassword(current, user.pass_hash)) return json(res, 403, { error: 'Aktuelles Passwort falsch.' });
+          if (String(next || '').length < 10) return json(res, 400, { error: 'Neues Passwort: mindestens 10 Zeichen.' });
+          const updated = { ...user, pass_hash: hashPassword(next) };
+          dbGetter().updateUser(uid, { passHash: updated.pass_hash });
+          // The old cookie dies with the old hash — hand this browser a fresh one.
+          res.writeHead(200, {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Set-Cookie': sessionCookie(makeSession(authSecret, updated), { secure: secure(req) }),
+          });
+          res.end('{"ok":true}');
+        });
+        return;
+      }
+
       if (req.method === 'POST' && path === '/api/scan/seen') {
         readJsonBody(req, res, ({ hash, seen }) => {
           if (!isValidHash(hash)) return json(res, 400, { error: 'bad hash' });
-          dbGetter().setListingSeen(hash, !!seen);
+          dbGetter().setListingSeen(hash, !!seen, uid);
           return json(res, 200, { hash, seen: !!seen });
         });
         return;
@@ -108,7 +203,7 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       if (req.method === 'POST' && path === '/api/scan/favorite') {
         readJsonBody(req, res, ({ hash, favorite }) => {
           if (!isValidHash(hash)) return json(res, 400, { error: 'bad hash' });
-          dbGetter().setListingFavorite(hash, !!favorite);
+          dbGetter().setListingFavorite(hash, !!favorite, uid);
           return json(res, 200, { hash, favorite: !!favorite });
         });
         return;
@@ -120,7 +215,7 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       if (uploadPost) {
         if (!dataDir) return json(res, 501, { error: 'no data directory' });
         readBinaryBody(req, res, (buffer) => {
-          const entry = saveUpload(dataDir, uploadPost[1], url.searchParams.get('name') || '', buffer);
+          const entry = saveUpload(dataDir, uploadPost[1], url.searchParams.get('name') || '', buffer, scope);
           return json(res, 200, { hash: uploadPost[1], file: entry });
         });
         return;
@@ -129,19 +224,19 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       const uploadDelete = req.method === 'DELETE' && path.match(/^\/api\/scan\/files\/([a-f0-9]{8,64})\/([\w][\w.-]*)$/);
       if (uploadDelete) {
         if (!dataDir) return json(res, 501, { error: 'no data directory' });
-        const removed = deleteUpload(dataDir, uploadDelete[1], uploadDelete[2]);
+        const removed = deleteUpload(dataDir, uploadDelete[1], uploadDelete[2], scope);
         return json(res, removed ? 200 : 404, removed ? { deleted: uploadDelete[2] } : { error: 'not found' });
       }
 
       if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' });
 
       if (path === '/api/scan/files') {
-        return json(res, 200, { counts: uploadCounts(dataDir) });
+        return json(res, 200, { counts: uploadCounts(dataDir, scope) });
       }
 
       const filesApi = path.match(/^\/api\/scan\/files\/([a-f0-9]{8,64})$/);
       if (filesApi) {
-        const files = readUploads(dataDir, filesApi[1]).map(f => ({
+        const files = readUploads(dataDir, filesApi[1], scope).map(f => ({
           ...f, url: `/files/${filesApi[1]}/${f.file}`,
         }));
         return json(res, 200, { hash: filesApi[1], files });
@@ -149,7 +244,7 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
 
       const fileGet = path.match(/^\/files\/([a-f0-9]{8,64})\/([\w][\w.-]*)$/);
       if (fileGet) {
-        const file = uploadPath(dataDir, fileGet[1], fileGet[2]);
+        const file = uploadPath(dataDir, fileGet[1], fileGet[2], scope);
         if (!file) return json(res, 404, { error: 'not found' });
         const { type, inline } = serveTypeFor(fileGet[2]);
         res.writeHead(200, {
@@ -197,18 +292,18 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
 
       if (path === '/api/scan/projects') {
         const projects = dataDir ? readManualProjects(dataDir) : [];
-        // Projects share the listings' scan_seen / scan_favorite stores; a
+        // Projects share the listings' per-user seen / favourite stores; a
         // project's key is the sha256 of its name, so the flags survive
         // note/coordinate edits and a rename resurfaces the pin as unseen.
-        const seenStmt = dbGetter().db.prepare('SELECT 1 FROM scan_seen WHERE hash = ?');
-        const favStmt = dbGetter().db.prepare('SELECT 1 FROM scan_favorite WHERE hash = ?');
+        const seenStmt = dbGetter().db.prepare('SELECT 1 FROM user_seen WHERE user_id = ? AND hash = ?');
+        const favStmt = dbGetter().db.prepare('SELECT 1 FROM user_favorite WHERE user_id = ? AND hash = ?');
         return json(res, 200, {
           projects: projects.map((p) => {
             const hash = createHash('sha256').update(`project|${p.name}`).digest('hex');
             return {
               ...p, hash,
-              seen: seenStmt.get(hash) ? 1 : 0,
-              favorite: favStmt.get(hash) ? 1 : 0,
+              seen: seenStmt.get(uid, hash) ? 1 : 0,
+              favorite: favStmt.get(uid, hash) ? 1 : 0,
             };
           }),
         });
@@ -222,7 +317,7 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
         const filterId = url.searchParams.get('filter_id') || null;
         const limit = Math.min(10000, parseInt(url.searchParams.get('limit') || '5000', 10) || 5000);
         const listings = dbGetter()
-          .getScanListings({ filterId, limit })
+          .getScanListings({ filterId, limit, userId: uid })
           .map(parseListingRow);
         return json(res, 200, { generated_at: new Date().toISOString(), count: listings.length, listings });
       }

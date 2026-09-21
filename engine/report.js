@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { sendMail } from './smtp-mailer.js';
+import { parseSettings } from './auth.js';
 import { nearestStation, readTransitStations, stationsWithinRegion } from './transit.js';
 
 const REPORT_STATE_FILE = '.last-scan-report';
@@ -34,12 +35,15 @@ const DEFAULT_EXTRA_STATIONS = [
 const listEnv = (env, key, fallback) => (env?.[key] === undefined ? fallback
   : String(env[key]).split(',').map((n) => n.trim()).filter(Boolean));
 
+/** Search-URL slugs that mean a house: haus-kaufen, neubauhaus-kaufen, villa-kaufen, haus-mit-keller-kaufen … Shared with the map filter. */
+export const HOUSE_SEARCH_PATTERN = '(?:haus|villa)[a-z-]*-kaufen';
+
 /**
  * True for house searches (IS24 / Kleinanzeigen `haus-kaufen` URLs). Listings
  * carry no property type of their own; the search that found them does.
  */
 export function isHouseListing(listing) {
-  return /haus-kaufen/i.test(String(listing?.filter_url || ''));
+  return new RegExp(HOUSE_SEARCH_PATTERN, 'i').test(String(listing?.filter_url || ''));
 }
 
 /** Non-negative number from env, falling back when unset or unparseable. */
@@ -103,6 +107,7 @@ export function markApproxCoords(db, listings) {
  */
 export function filterReportListings(listings = [], {
   stations = [], minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [], extraStations = [],
+  type = 'flats',
 } = {}) {
   // Restrict the candidate stops to the west wedge. If the cache lacks one of
   // the named stops the wedge would be wrong, so fall back to all stops and
@@ -116,11 +121,13 @@ export function filterReportListings(listings = [], {
   }
   const transitSkipped = maxWalkMinutes > 0 && stations.length === 0;
   const walkLimit = transitSkipped ? 0 : maxWalkMinutes;
-  const dropped = { size: 0, rooms: 0, transit: 0, house: 0 };
+  const dropped = { size: 0, rooms: 0, transit: 0, house: 0, flat: 0 };
   const kept = [];
 
   for (const listing of listings) {
-    if (isHouseListing(listing)) { dropped.house++; continue; }
+    const house = isHouseListing(listing);
+    if (type === 'flats' && house) { dropped.house++; continue; }
+    if (type === 'houses' && !house) { dropped.flat++; continue; }
     if (minSize > 0 && !(listing.size >= minSize)) { dropped.size++; continue; }
     if (minRooms > 0 && !(listing.rooms >= minRooms)) { dropped.rooms++; continue; }
     const walk = candidates.length
@@ -130,7 +137,7 @@ export function filterReportListings(listings = [], {
     kept.push(walk ? { ...listing, walk } : listing);
   }
 
-  dropped.total = dropped.size + dropped.rooms + dropped.transit + dropped.house;
+  dropped.total = dropped.size + dropped.rooms + dropped.transit + dropped.house + dropped.flat;
   return { kept, dropped, transitSkipped, regionSkipped };
 }
 
@@ -152,8 +159,8 @@ function fmtWalk(listing) {
 }
 
 /** One-line summary of the thresholds the shortlist was built with. */
-function fmtCriteria({ minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [] } = {}) {
-  const parts = ['nur Wohnungen'];
+function fmtCriteria({ minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStations = [], type = 'flats' } = {}) {
+  const parts = type === 'both' ? [] : [type === 'houses' ? 'nur Häuser' : 'nur Wohnungen'];
   if (minSize > 0) parts.push(`ab ${minSize}\u00a0m²`);
   if (minRooms > 0) parts.push(`ab ${minRooms}\u00a0Zimmer`);
   if (maxWalkMinutes > 0) parts.push(`max. ${maxWalkMinutes}\u00a0Min zu Fuß zur U-/S-Bahn`);
@@ -207,6 +214,7 @@ const westApplied = criteria?.maxWalkMinutes > 0 && !transitSkipped && !regionSk
     [dropped.rooms, 'zu wenige Zimmer'],
     [dropped.transit, 'zu weit von der Bahn'],
     [dropped.house, 'Häuser'],
+    [dropped.flat, 'Wohnungen'],
   ].filter(([n]) => n > 0).map(([n, why]) => `${n} ${why}`).join(', ') : '';
   const droppedLine = dropped?.total > 0
     ? `${dropped.total} weitere Angebote entsprachen den Kriterien nicht`
@@ -228,7 +236,7 @@ const westApplied = criteria?.maxWalkMinutes > 0 && !transitSkipped && !regionSk
   </body></html>`;
 }
 
-function readReportState(dataDir) {
+export function readReportState(dataDir) {
   try {
     const raw = readFileSync(join(dataDir, REPORT_STATE_FILE), 'utf8');
     const parsed = JSON.parse(raw);
@@ -266,49 +274,102 @@ export function resolveReportSmtp(env = process.env, report = {}) {
   return report?.smtp?.host ? { ...report.smtp } : null;
 }
 
-/**
- * Send the weekly scan report if enabled, configured, and due.
- * Enabled via config.report.enabled (desktop Settings) or the
- * HOMELANDER_REPORT_ENABLED env var (Docker).
- * Returns { sent, reason } — never throws.
- */
-export async function maybeSendWeeklyReport(db, config, dataDir, { log = () => {}, force = false, env = process.env } = {}) {
-  const report = config?.report || {};
-  const enabled = report.enabled || String(env.HOMELANDER_REPORT_ENABLED || '').toLowerCase() === 'true';
-  if (!enabled) return { sent: false, reason: 'disabled' };
-  const recipient = env.HOMELANDER_REPORT_TO || report.to || report.smtp?.to;
-  const smtp = resolveReportSmtp(env, report);
-  if (!recipient || !smtp) return { sent: false, reason: 'mail_not_configured' };
+/** Report settings a per-user account gets from the env-configured shortlist — how the first account keeps the mail it had before accounts existed. */
+export function legacyReportSettings(env = process.env, config = {}) {
+  const c = resolveReportCriteria(env);
+  return {
+    report: {
+      enabled: !!config?.report?.enabled || String(env?.HOMELANDER_REPORT_ENABLED || '').toLowerCase() === 'true', type: 'flats', minSize: c.minSize, minRooms: c.minRooms,
+      maxWalkMinutes: c.maxWalkMinutes, region: c.westStations.length ? 'west' : 'all',
+    },
+  };
+}
 
-  const lastSent = readReportState(dataDir);
-  const due = force || !lastSent || (Date.now() - new Date(lastSent).getTime()) >= WEEK_MS;
-  if (!due) return { sent: false, reason: 'not_due' };
+/** Env thresholds → the per-user criteria shape. "West" borrows the env region lists. */
+export function criteriaFromSettings(rep, env = process.env) {
+  const base = resolveReportCriteria(env);
+  const west = rep.region === 'west';
+  return {
+    type: rep.type, minSize: rep.minSize, minRooms: rep.minRooms, maxWalkMinutes: rep.maxWalkMinutes,
+    westStations: west ? base.westStations : [], extraStations: west ? base.extraStations : [],
+  };
+}
 
-  const scanFilters = db.getScanFilters();
-  if (scanFilters.length === 0) return { sent: false, reason: 'no_scan_filters' };
-
-  const sinceIso = lastSent || new Date(Date.now() - WEEK_MS).toISOString();
+/** Filter, render and mail one shortlist. Throws on SMTP failure. */
+async function deliverReport({ db, dataDir, smtp, recipient, criteria, sinceIso, log }) {
   const found = db.getScanListings({ sinceIso, limit: 5000 });
-
-  const criteria = resolveReportCriteria(env);
   const { stations } = readTransitStations(dataDir);
   const { kept, dropped, transitSkipped, regionSkipped } = filterReportListings(
     markApproxCoords(db, found), { ...criteria, stations }
   );
   if (regionSkipped) log('WARN: west-region stations missing from transit cache — report skipped the west filter');
   if (transitSkipped) log('WARN: no transit stations cached — report skipped the walking-distance filter');
+  const html = buildScanReportHtml({
+    listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped,
+  });
+  await sendMail(
+    { ...smtp, to: recipient },
+    { subject: `Homelander Kaufradar — ${kept.length} Angebote diese Woche`, html }
+  );
+  return { found: found.length, count: kept.length, dropped: dropped.total };
+}
 
+/** One mail per opted-in account, each with its own criteria and its own clock. */
+async function sendUserReports(db, dataDir, smtp, { log, force, env }) {
+  if (!smtp) return { sent: false, reason: 'mail_not_configured' };
+  if (db.getScanFilters().length === 0) return { sent: false, reason: 'no_scan_filters' };
+  let users = 0;
+  for (const user of db.listUsers()) {
+    const rep = parseSettings(user).report;
+    if (!rep.enabled || !user.email) continue;
+    const due = force || !user.last_report_at
+      || (Date.now() - new Date(user.last_report_at).getTime()) >= WEEK_MS;
+    if (!due) continue;
+    try {
+      const r = await deliverReport({
+        db, dataDir, smtp, recipient: user.email, criteria: criteriaFromSettings(rep, env),
+        sinceIso: user.last_report_at || new Date(Date.now() - WEEK_MS).toISOString(), log,
+      });
+      db.updateUser(user.id, { lastReportAt: new Date().toISOString() });
+      users++;
+      log(`Weekly scan report sent to ${user.name} (${r.count} of ${r.found} listings matched)`);
+    } catch (err) {
+      log(`Weekly scan report for ${user.name} failed: ${err.message}`);
+    }
+  }
+  return users ? { sent: true, users } : { sent: false, reason: 'not_due' };
+}
+
+/**
+ * Send the weekly scan report(s) if configured and due. With accounts, every
+ * opted-in user gets their own shortlist; without, the env/config recipient
+ * gets the single legacy mail (config.report.enabled / HOMELANDER_REPORT_ENABLED).
+ * Returns { sent, reason } — never throws.
+ */
+export async function maybeSendWeeklyReport(db, config, dataDir, { log = () => {}, force = false, env = process.env } = {}) {
+  const report = config?.report || {};
+  const smtp = resolveReportSmtp(env, report);
+  if (db.countUsers() > 0) return sendUserReports(db, dataDir, smtp, { log, force, env });
+
+  const enabled = report.enabled || String(env.HOMELANDER_REPORT_ENABLED || '').toLowerCase() === 'true';
+  if (!enabled) return { sent: false, reason: 'disabled' };
+  const recipient = env.HOMELANDER_REPORT_TO || report.to || report.smtp?.to;
+  if (!recipient || !smtp) return { sent: false, reason: 'mail_not_configured' };
+
+  const lastSent = readReportState(dataDir);
+  const due = force || !lastSent || (Date.now() - new Date(lastSent).getTime()) >= WEEK_MS;
+  if (!due) return { sent: false, reason: 'not_due' };
+
+  if (db.getScanFilters().length === 0) return { sent: false, reason: 'no_scan_filters' };
+
+  const sinceIso = lastSent || new Date(Date.now() - WEEK_MS).toISOString();
   try {
-    const html = buildScanReportHtml({
-      listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped,
+    const r = await deliverReport({
+      db, dataDir, smtp, recipient, criteria: resolveReportCriteria(env), sinceIso, log,
     });
-    await sendMail(
-      { ...smtp, to: recipient },
-      { subject: `Homelander Kaufradar — ${kept.length} Angebote diese Woche`, html }
-    );
     writeReportState(dataDir, new Date().toISOString());
-    log(`Weekly scan report sent (${kept.length} of ${found.length} listings matched)`);
-    return { sent: true, count: kept.length, dropped: dropped.total };
+    log(`Weekly scan report sent (${r.count} of ${r.found} listings matched)`);
+    return { sent: true, count: r.count, dropped: r.dropped };
   } catch (err) {
     log(`Weekly scan report failed: ${err.message}`);
     return { sent: false, reason: 'send_failed', error: err.message };

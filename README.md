@@ -56,7 +56,9 @@ Everything is environment variables in `.env` (see `.env.example`); there is no 
 | `HOMELANDER_POLL_INTERVAL` | Seconds between polls (default 600) |
 | `HOMELANDER_DATA_DIR` | Where the DB, exports, media and uploads live (`/data` in the container) |
 | `HOMELANDER_SCAN_HOST` / `_PORT` | Bind address and port for the Kaufradar site |
-| `HOMELANDER_REPORT_ENABLED`, `_TO`, `HOMELANDER_SMTP_*` | Weekly e-mail report |
+| `HOMELANDER_REPORT_ENABLED`, `_TO`, `HOMELANDER_SMTP_*` | Weekly e-mail report (`_ENABLED`/`_TO` only without accounts; with accounts each user sets their own, but `HOMELANDER_SMTP_*` is still required) |
+| `HOMELANDER_AUTH=accounts` | Per-user logins, seen/star/uploads and mail settings; create users with `engine/users-cli.js` |
+| `HOMELANDER_TRUST_PROXY=true` | Trust `X-Forwarded-For` for the login throttle — only behind a reverse proxy |
 
 Searches can also come from a `scan-searches.json` in the data volume (an array of URL strings or
 `{ "url", "name" }` objects), which is what you want once the list outgrows an env var.

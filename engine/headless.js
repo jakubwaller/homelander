@@ -33,6 +33,7 @@ import { fetchAnyListings, validateAnySearchUrl } from './sources.js';
 import { createScanCycle } from './scan-cycle.js';
 import { startScanServer } from './scan-server.js';
 import { ensureTransitLines } from './transit.js';
+import { loadSecret } from './auth.js';
 
 const DATA_DIR = process.env.HOMELANDER_DATA_DIR || join(homedir(), '.homelander');
 const DB_PATH = join(DATA_DIR, 'homelander.db');
@@ -162,7 +163,12 @@ async function main() {
   if (!once) {
     const host = process.env.HOMELANDER_SCAN_HOST || config.scan?.host || '127.0.0.1';
     const port = Number(process.env.HOMELANDER_SCAN_PORT) || config.scan?.port || 8477;
-    server = await startScanServer(() => db, { host, port, dataDir: DATA_DIR });
+    // HOMELANDER_AUTH=accounts turns on per-user logins (create them with
+    // engine/users-cli.js); without it the page stays open to whoever can reach it.
+    const authSecret = process.env.HOMELANDER_AUTH === 'accounts' ? loadSecret(DATA_DIR) : null;
+    if (authSecret && db.countUsers() === 0) log('Accounts are on but none exist yet — run engine/users-cli.js add <name>');
+    server = await startScanServer(() => db, { host, port, dataDir: DATA_DIR, authSecret,
+      trustProxy: process.env.HOMELANDER_TRUST_PROXY === 'true' });
     log(`Kaufradar running at ${server.url}`);
     void ensureTransitLines(DATA_DIR, { log });
   }

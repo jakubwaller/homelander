@@ -2,6 +2,8 @@
 // Self-contained HTML string: inline CSS/JS, Leaflet + OSM tiles from CDN
 // (the page opens in the user's normal browser, which is online anyway).
 
+import { HOUSE_SEARCH_PATTERN } from './report.js';
+
 export function renderScanPage() {
   return `<!doctype html>
 <html lang="de">
@@ -92,6 +94,18 @@ export function renderScanPage() {
   #detail a.out { display:inline-block; margin-top:10px; background:var(--gold); color:#151515; font-weight:600; padding:8px 16px; border-radius:9px; text-decoration:none; }
   #detail a.out.alt { background:transparent; color:var(--gold); border:1px solid var(--gold); }
   #detail .out-row { display:flex; flex-direction:column; align-items:flex-start; }
+  #acct-btn { display:none; }
+  #acct-btn:not([hidden]) { display:block; background:var(--bg-card); color:var(--text-dim); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:13px; cursor:pointer; }
+  #acct-btn:hover { border-color:var(--gold); color:var(--gold); }
+  #detail form.acct { display:flex; flex-direction:column; gap:10px; margin:10px 0 18px; }
+  #detail form.acct label { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-dim); }
+  #detail form.acct label.chk { flex-direction:row; align-items:center; gap:8px; font-size:13px; }
+  #detail form.acct input[type=text], #detail form.acct input[type=email], #detail form.acct input[type=password], #detail form.acct input[type=number], #detail form.acct select {
+    background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:16px; outline:none; }
+  #detail form.acct .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  #detail form.acct button { align-self:flex-start; background:var(--gold); color:#151515; font-weight:600; border:0; border-radius:9px; padding:8px 16px; cursor:pointer; }
+  #detail form.acct .msg { font-size:12px; color:var(--text-dim); min-height:1.2em; }
+  #detail form.acct .msg.err { color:var(--red); }
   .leaflet-container { background:#1a1a1e; }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--bg-elevated); color:var(--text); }
   .locate-btn { font-size:17px; }
@@ -115,6 +129,7 @@ export function renderScanPage() {
 <header>
   <h1>⌂ Kaufradar</h1>
   <span class="count" id="count">…</span>
+  <button id="acct-btn" hidden>Konto</button>
   <button id="list-toggle" aria-expanded="false" aria-controls="list">Liste</button>
   <button id="filter-toggle" aria-expanded="false" aria-controls="controls">Filter</button>
   <div class="controls" id="controls">
@@ -166,6 +181,108 @@ export function renderScanPage() {
   var activeHash = null;
   var locateLayer = null;
   var lastFitKey = null;
+
+  // A session that expired mid-visit answers 401: back to the login form.
+  var nativeFetch = window.fetch;
+  window.fetch = function () {
+    return nativeFetch.apply(this, arguments).then(function (r) {
+      if (r.status === 401) location.href = '/login';
+      return r;
+    });
+  };
+
+  var me = null;
+
+  function fieldVal(form, name) { return form.elements[name].value; }
+
+  function openAccount() {
+    var r = me.settings.report;
+    var el = document.getElementById('detail');
+    el.innerHTML =
+      '<button class="close" aria-label="Schließen">×</button>' +
+      '<h2>Konto — ' + esc(me.name) + '</h2>' +
+      '<h4>Wochenbericht per E-Mail</h4>' +
+      '<form class="acct" id="acct-form">' +
+        '<label>E-Mail-Adresse<input type="email" name="email" value="' + esc(me.email) + '" autocomplete="email"></label>' +
+        '<label class="chk"><input type="checkbox" name="enabled"' + (r.enabled ? ' checked' : '') + '> Wochenbericht senden</label>' +
+        '<label>Immobilientyp<select name="type">' +
+          '<option value="both">Häuser &amp; Wohnungen</option>' +
+          '<option value="houses">Nur Häuser</option>' +
+          '<option value="flats">Nur Wohnungen</option></select></label>' +
+        '<div class="row">' +
+          '<label>min m²<input type="number" name="minSize" min="0" step="5" value="' + r.minSize + '"></label>' +
+          '<label>min Zimmer<input type="number" name="minRooms" min="0" step="0.5" value="' + r.minRooms + '"></label>' +
+          '<label>max Min zur Bahn<input type="number" name="maxWalkMinutes" min="0" step="1" value="' + r.maxWalkMinutes + '"></label>' +
+        '</div>' +
+        '<label>Region (für den Weg zur Bahn)<select name="region">' +
+          '<option value="all">Ganz Hamburg</option>' +
+          '<option value="west">Westen (Hbf bis Bahrenfeld/Lattenkamp)</option></select></label>' +
+        '<div class="msg" id="acct-msg">0 = Kriterium aus. Die Karte zeigt immer alles.</div>' +
+        '<button type="submit">Speichern</button>' +
+      '</form>' +
+      '<h4>Passwort ändern</h4>' +
+      '<form class="acct" id="pw-form">' +
+        '<label>Aktuelles Passwort<input type="password" name="current" autocomplete="current-password" required></label>' +
+        '<label>Neues Passwort (min. 10 Zeichen)<input type="password" name="next" autocomplete="new-password" minlength="10" required></label>' +
+        '<div class="msg" id="pw-msg"></div>' +
+        '<button type="submit">Ändern</button>' +
+      '</form>' +
+      '<button id="logout-btn" type="button">Abmelden</button>';
+    var form = el.querySelector('#acct-form');
+    form.elements.type.value = r.type;
+    form.elements.region.value = r.region;
+    el.querySelector('.close').addEventListener('click', closeDetail);
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var msg = document.getElementById('acct-msg');
+      fetch('/api/me/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: fieldVal(form, 'email'),
+          settings: { report: {
+            enabled: form.elements.enabled.checked, type: fieldVal(form, 'type'),
+            minSize: fieldVal(form, 'minSize'), minRooms: fieldVal(form, 'minRooms'),
+            maxWalkMinutes: fieldVal(form, 'maxWalkMinutes'), region: fieldVal(form, 'region')
+          } }
+        })
+      }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+        .then(function (x) {
+          msg.className = 'msg' + (x.ok ? '' : ' err');
+          if (x.ok) { me.email = x.d.email; me.settings = x.d.settings; msg.textContent = 'Gespeichert.'; }
+          else msg.textContent = x.d.error || 'Fehler beim Speichern.';
+        });
+    });
+    var pwForm = el.querySelector('#pw-form');
+    pwForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var msg = document.getElementById('pw-msg');
+      fetch('/api/me/password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current: fieldVal(pwForm, 'current'), next: fieldVal(pwForm, 'next') })
+      }).then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
+        .then(function (x) {
+          msg.className = 'msg' + (x.ok ? '' : ' err');
+          msg.textContent = x.ok ? 'Passwort geändert.' : (x.d.error || 'Fehler.');
+          if (x.ok) pwForm.reset();
+        });
+    });
+    el.querySelector('#logout-btn').addEventListener('click', function () {
+      fetch('/api/logout', { method: 'POST' }).then(function () { location.href = '/login'; });
+    });
+    document.getElementById('overlay').classList.add('open');
+  }
+
+  function loadMe() {
+    return fetch('/api/me').then(function (r) { return r.json(); }).then(function (d) {
+      me = d;
+      var btn = document.getElementById('acct-btn');
+      if (d.accounts) {
+        btn.hidden = false;
+        btn.textContent = d.name;
+        btn.addEventListener('click', openAccount);
+      }
+    }).catch(function () {});
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -401,7 +518,7 @@ export function renderScanPage() {
       // Favourites survive "Gesehene ausblenden" — starring is the keep flag.
       if (hideSeen && l.seen && !l.favorite) return false;
       if (type) {
-        var isHouse = /haus-kaufen/i.test(String(l.filter_url || ''));
+        var isHouse = new RegExp(${JSON.stringify(HOUSE_SEARCH_PATTERN)}, 'i').test(String(l.filter_url || ''));
         if (type === 'houses' ? !isHouse : isHouse) return false;
       }
       if (fid && l.filter_id !== fid) return false;
@@ -810,6 +927,7 @@ export function renderScanPage() {
 
   initMap();
   wireDropZone();
+  loadMe();
   loadFilters().then(loadFileCounts).then(loadListings).catch(function (err) {
     document.getElementById('list').innerHTML = '<div id="empty">Fehler beim Laden: ' + esc(err.message) + '</div>';
   });

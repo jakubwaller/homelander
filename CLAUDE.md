@@ -13,7 +13,7 @@ apply engine and the React UI were removed; upstream still has them.
 | Layer | Technology |
 |-------|------------|
 | Runtime | Node 22, ESM (`"type": "module"`), no framework |
-| Database | better-sqlite3 12, WAL mode, single-file SQLite (schema v7) |
+| Database | better-sqlite3 12, WAL mode, single-file SQLite (schema v8) |
 | UI | One hand-written HTML/CSS/JS page string + Leaflet from CDN |
 | Geocoding | Nominatim (OSM), rate limited + cached in SQLite |
 | Transit overlay | Overpass API, cached to the data dir, refreshed monthly |
@@ -52,7 +52,7 @@ engine/headless.js ── the entrypoint and the only long-lived loop
 homelander/
 ├── engine/
 │   ├── headless.js       # Entrypoint: search sync, poll loop, server start
-│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3 (schema v7)
+│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3 (schema v8)
 │   ├── url-translator.js # IS24 web URL → mobile API params + fetchListings()
 │   ├── sources.js        # Multi-source scan + exposé enrichment + Nominatim geocoding
 │   ├── scan-cycle.js     # Shared scan post-processing (enrich + export + report)
@@ -60,7 +60,7 @@ homelander/
 │   ├── scan-page.js      # Kaufradar single-page UI (inline HTML/CSS/JS + Leaflet)
 │   ├── media.js          # Photo + Grundriss archive per listing
 │   ├── transit.js        # Overpass U-/S-Bahn route geometry + stops, monthly refresh
-│   ├── uploads.js        # Per-property document store (<data>/uploads/<hash>/ + files.json)
+│   ├── uploads.js        # Per-property document store (<data>/uploads/<userId>/<hash>/ + files.json; uploads/<hash>/ without accounts)
 │   ├── report.js         # Weekly scan report (shortlist filter + HTML builder + due-date logic)
 │   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH)
 ├── scripts/
@@ -83,7 +83,7 @@ Environment variables only — there is no config UI and no persona. See `.env.e
   `scan_seen`, `scan_favorite`)
 - `scan-listings.json` — rewritten after every poll
 - `media/<hash>/` — archived photos and floor plans + `media.json`
-- `uploads/<hash>/` — user-supplied documents + `files.json` manifest
+- `uploads/<userId>/<hash>/` — user-supplied documents + `files.json` manifest (`uploads/<hash>/` in login-less mode)
 - `transit-lines.json`, `.last-scan-report`
 
 `scan-searches.json` and `manual-projects.json` are read from the data dir (and the repo dir when
@@ -109,7 +109,7 @@ running outside Docker); both are gitignored — never commit them.
 - **`transit-lines.json` carries `lines` (map overlay) and `stations` (report filter)** — a cache
   without `stations` counts as stale regardless of age, and `/api/scan/transit` strips them so the
   map payload stays lines-only
-- **`scan_seen` / `scan_favorite` share one hash space** — a 16-hex listing hash or the 64-hex
+- **Seen/favourite flags are per user (`user_seen` / `user_favorite`, user 0 = login-less; `scan_seen` / `scan_favorite` are frozen legacy tables only the first account adopts) and share one hash space** — a 16-hex listing hash or the 64-hex
   `sha256('project|<name>')` of a manual Neubau pin; the same holds for `uploads/<hash>/`, so no
   foreign key to `listings` exists or should be added
 - **A listing hash is `sha256(expose_id|price)`** — a price change mints a new listing, which
