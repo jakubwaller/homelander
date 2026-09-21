@@ -101,11 +101,15 @@ export function renderScanPage() {
   #detail form.acct label { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--text-dim); }
   #detail form.acct label.chk { flex-direction:row; align-items:center; gap:8px; font-size:13px; }
   #detail form.acct input[type=text], #detail form.acct input[type=email], #detail form.acct input[type=password], #detail form.acct input[type=number], #detail form.acct select {
-    background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:16px; outline:none; }
-  #detail form.acct .row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+    background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:16px; outline:none; width:100%; min-width:0; }
+  /* minmax(0,…): a bare 1fr never shrinks below a number input's intrinsic width, which pushed the third field out of the panel. */
+  #detail form.acct .row { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; align-items:end; }
+  #detail form.acct .row label { min-width:0; }
   #detail form.acct button { align-self:flex-start; background:var(--gold); color:#151515; font-weight:600; border:0; border-radius:9px; padding:8px 16px; cursor:pointer; }
   #detail form.acct .msg { font-size:12px; color:var(--text-dim); min-height:1.2em; }
   #detail form.acct .msg.err { color:var(--red); }
+  #logout-btn { background:none; color:var(--text-dim); border:1px solid var(--border); border-radius:9px; padding:8px 16px; font-size:13px; cursor:pointer; }
+  #logout-btn:hover { border-color:var(--gold); color:var(--gold); }
   .leaflet-container { background:#1a1a1e; }
   .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--bg-elevated); color:var(--text); }
   .locate-btn { font-size:17px; }
