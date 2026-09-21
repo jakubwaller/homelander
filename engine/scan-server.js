@@ -119,14 +119,12 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       if (authSecret && path === '/api/login' && req.method === 'POST') {
         readJsonBody(req, res, ({ name, password }) => {
           const key = clientIp(req);
-          const nameKey = `name:${String(name || '').toLowerCase()}`;
-          if (throttle.blocked(key) || throttle.blocked(nameKey)) return json(res, 429, { error: 'Zu viele Versuche — bitte später erneut versuchen.' });
+          if (throttle.blocked(key)) return json(res, 429, { error: 'Zu viele Versuche — bitte später erneut versuchen.' });
           const user = dbGetter().getUserByName(name);
           // Hash even for an unknown name so timing doesn't reveal which names exist.
           const ok = verifyPassword(password, user?.pass_hash || 'scrypt$AAAA$AAAA') && user;
-          if (!ok) { throttle.fail(key); throttle.fail(nameKey); return json(res, 401, { error: 'Name oder Passwort falsch.' }); }
+          if (!ok) { throttle.fail(key); return json(res, 401, { error: 'Name oder Passwort falsch.' }); }
           throttle.clear(key);
-          throttle.clear(nameKey);
           res.writeHead(200, {
             'Content-Type': 'application/json; charset=utf-8',
             'Cache-Control': 'no-store',

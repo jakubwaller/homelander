@@ -13,7 +13,7 @@
 // time) that used to be configured through HOMELANDER_REPORT_* env vars.
 
 import { randomBytes } from 'node:crypto';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { HomelanderDB } from './db.js';
@@ -65,7 +65,9 @@ export function run(db, argv, { dataDir = DATA_DIR, env = process.env, out = con
     if (password.length < MIN_PASSWORD) fail(`Password: at least ${MIN_PASSWORD} characters`);
     const first = db.countUsers() === 0;
     // The first account keeps the mail it had before accounts existed.
-    const settings = first ? legacyReportSettings(env) : normalizeSettings({});
+    let config = {};
+    try { config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')); } catch { /* no config.json */ }
+    const settings = first ? legacyReportSettings(env, config) : normalizeSettings({});
     const recipient = email || (first ? env.HOMELANDER_REPORT_TO || '' : '');
     const { id } = db.createUser({
       name, passHash: hashPassword(password), email: recipient || null, isAdmin: first || !!flags.admin, settings,

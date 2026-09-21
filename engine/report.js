@@ -275,11 +275,11 @@ export function resolveReportSmtp(env = process.env, report = {}) {
 }
 
 /** Report settings a per-user account gets from the env-configured shortlist — how the first account keeps the mail it had before accounts existed. */
-export function legacyReportSettings(env = process.env) {
+export function legacyReportSettings(env = process.env, config = {}) {
   const c = resolveReportCriteria(env);
   return {
     report: {
-      enabled: String(env?.HOMELANDER_REPORT_ENABLED || '').toLowerCase() === 'true', type: 'flats', minSize: c.minSize, minRooms: c.minRooms,
+      enabled: !!config?.report?.enabled || String(env?.HOMELANDER_REPORT_ENABLED || '').toLowerCase() === 'true', type: 'flats', minSize: c.minSize, minRooms: c.minRooms,
       maxWalkMinutes: c.maxWalkMinutes, region: c.westStations.length ? 'west' : 'all',
     },
   };

@@ -271,6 +271,7 @@ describe('per-user reports', () => {
   it('a first account only gets the mail on when the report was enabled', () => {
     assert.equal(legacyReportSettings({}).report.enabled, false);
     assert.equal(legacyReportSettings({ HOMELANDER_REPORT_ENABLED: 'true' }).report.enabled, true);
+    assert.equal(legacyReportSettings({}, { report: { enabled: true } }).report.enabled, true);
   });
 
   it('criteriaFromSettings uses the env region only for "west"', () => {
