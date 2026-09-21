@@ -631,8 +631,14 @@ export class HomelanderDB {
     ).run(name, passHash, email, isAdmin ? 1 : 0, JSON.stringify(settings));
     const id = Number(info.lastInsertRowid);
     if (first) {
-      this.db.prepare('INSERT OR IGNORE INTO user_seen (user_id, hash, seen_at) SELECT ?, hash, seen_at FROM scan_seen').run(id);
-      this.db.prepare('INSERT OR IGNORE INTO user_favorite (user_id, hash, created_at) SELECT ?, hash, created_at FROM scan_favorite').run(id);
+      // Legacy tables (frozen at the v8 upgrade) plus whatever was flagged in
+      // login-less mode since (user 0) — accounts may be switched on later.
+      for (const src of ['SELECT hash, seen_at FROM scan_seen', 'SELECT hash, seen_at FROM user_seen WHERE user_id = 0']) {
+        this.db.prepare(`INSERT OR IGNORE INTO user_seen (user_id, hash, seen_at) SELECT ?, hash, seen_at FROM (${src})`).run(id);
+      }
+      for (const src of ['SELECT hash, created_at FROM scan_favorite', 'SELECT hash, created_at FROM user_favorite WHERE user_id = 0']) {
+        this.db.prepare(`INSERT OR IGNORE INTO user_favorite (user_id, hash, created_at) SELECT ?, hash, created_at FROM (${src})`).run(id);
+      }
     }
     return { id, first };
   }

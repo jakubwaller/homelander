@@ -90,17 +90,19 @@ function readBinaryBody(req, res, handle) {
 /**
  * Start the Kaufradar server.
  * @param {() => import('./db.js').HomelanderDB} dbGetter  lazy DB accessor
- * @param {{ port?: number, host?: string, dataDir?: string, authSecret?: string }} options
+ * @param {{ port?: number, host?: string, dataDir?: string, authSecret?: string, trustProxy?: boolean }} options
  *   dataDir enables /api/scan/transit and /api/scan/projects (both empty
  *   without it). authSecret turns on accounts: every route but the login
  *   requires a session and seen/favourite/upload state is per user. Without
  *   it the server is login-less and everything belongs to user 0.
  * @returns {Promise<{ server, port, url, close }>}
  */
-export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0.1', dataDir = null, authSecret = null } = {}) {
+export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0.1', dataDir = null, authSecret = null, trustProxy = false } = {}) {
   const throttle = createLoginThrottle();
   const LOCAL_USER = { id: 0, name: '', email: null, is_admin: 1, settings_json: '{}' };
-  const clientIp = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',').pop().trim();
+  // X-Forwarded-For is only believable behind our own reverse proxy (trustProxy);
+  // on a directly exposed port a client could mint a fresh value per attempt.
+  const clientIp = (req) => String((trustProxy && req.headers['x-forwarded-for']) || req.socket.remoteAddress || '').split(',').pop().trim();
   const secure = (req) => req.headers['x-forwarded-proto'] === 'https';
 
   const server = createServer((req, res) => {
@@ -117,12 +119,14 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
       if (authSecret && path === '/api/login' && req.method === 'POST') {
         readJsonBody(req, res, ({ name, password }) => {
           const key = clientIp(req);
-          if (throttle.blocked(key)) return json(res, 429, { error: 'Zu viele Versuche — bitte später erneut versuchen.' });
+          const nameKey = `name:${String(name || '').toLowerCase()}`;
+          if (throttle.blocked(key) || throttle.blocked(nameKey)) return json(res, 429, { error: 'Zu viele Versuche — bitte später erneut versuchen.' });
           const user = dbGetter().getUserByName(name);
           // Hash even for an unknown name so timing doesn't reveal which names exist.
           const ok = verifyPassword(password, user?.pass_hash || 'scrypt$AAAA$AAAA') && user;
-          if (!ok) { throttle.fail(key); return json(res, 401, { error: 'Name oder Passwort falsch.' }); }
+          if (!ok) { throttle.fail(key); throttle.fail(nameKey); return json(res, 401, { error: 'Name oder Passwort falsch.' }); }
           throttle.clear(key);
+          throttle.clear(nameKey);
           res.writeHead(200, {
             'Content-Type': 'application/json; charset=utf-8',
             'Cache-Control': 'no-store',

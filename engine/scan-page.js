@@ -2,6 +2,8 @@
 // Self-contained HTML string: inline CSS/JS, Leaflet + OSM tiles from CDN
 // (the page opens in the user's normal browser, which is online anyway).
 
+import { HOUSE_SEARCH_PATTERN } from './report.js';
+
 export function renderScanPage() {
   return `<!doctype html>
 <html lang="de">
@@ -516,7 +518,7 @@ export function renderScanPage() {
       // Favourites survive "Gesehene ausblenden" — starring is the keep flag.
       if (hideSeen && l.seen && !l.favorite) return false;
       if (type) {
-        var isHouse = /haus-kaufen/i.test(String(l.filter_url || ''));
+        var isHouse = new RegExp(${JSON.stringify(HOUSE_SEARCH_PATTERN)}, 'i').test(String(l.filter_url || ''));
         if (type === 'houses' ? !isHouse : isHouse) return false;
       }
       if (fid && l.filter_id !== fid) return false;

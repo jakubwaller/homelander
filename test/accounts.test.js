@@ -12,7 +12,7 @@ import {
 } from '../engine/auth.js';
 import { startScanServer } from '../engine/scan-server.js';
 import { run as runCli } from '../engine/users-cli.js';
-import { criteriaFromSettings, filterReportListings, maybeSendWeeklyReport } from '../engine/report.js';
+import { criteriaFromSettings, filterReportListings, isHouseListing, legacyReportSettings, maybeSendWeeklyReport } from '../engine/report.js';
 import { saveUpload, readUploads } from '../engine/uploads.js';
 
 const SECRET = 'test-secret';
@@ -77,6 +77,16 @@ describe('per-user state in the DB', () => {
     assert.equal(db.isSeen(HASH, a.id), true);
     assert.equal(db.isFavorite(HASH, a.id), true);
     assert.equal(db.isSeen(HASH, b.id), false);
+    db.close();
+  });
+
+  it('the first account also adopts flags set login-less (user 0) after the upgrade', () => {
+    const db = new HomelanderDB(':memory:');
+    db.setListingSeen(HASH, true, 0);
+    db.setListingFavorite(HASH, true, 0);
+    const { id } = db.createUser({ name: 'anna', passHash: 'x' });
+    assert.equal(db.isSeen(HASH, id), true);
+    assert.equal(db.isFavorite(HASH, id), true);
     db.close();
   });
 
@@ -182,6 +192,10 @@ describe('accounts over HTTP', () => {
     assert.equal((await call('/api/me', { cookie: ok.headers.get('set-cookie').split(';')[0] })).status, 200);
   });
 
+  it('a malformed cookie is treated as logged out, not a 500', async () => {
+    assert.equal((await call('/api/me', { cookie: 'hl_session=%' })).status, 401);
+  });
+
   it('throttles repeated bad logins', async () => {
     const results = [];
     for (let i = 0; i < 10; i++) results.push((await login('anna', 'wrong')).res.status);
@@ -190,6 +204,18 @@ describe('accounts over HTTP', () => {
 });
 
 describe('users CLI', () => {
+  it('refuses passwords shorter than 10 characters', () => {
+    const db = new HomelanderDB(':memory:');
+    const realExit = process.exit;
+    const realErr = console.error;
+    process.exit = (c) => { throw new Error(`exit ${c}`); };
+    console.error = () => {};
+    try {
+      assert.throws(() => runCli(db, ['add', 'anna', '--password', 'short'], { out: () => {} }), /exit 1/);
+      assert.equal(db.getUserByName('anna'), null);
+    } finally { process.exit = realExit; console.error = realErr; db.close(); }
+  });
+
   it('first account adopts legacy uploads, flags and the report clock; later ones start clean', () => {
     const dir = tmp();
     const db = new HomelanderDB(join(dir, 'h.db'));
@@ -197,7 +223,7 @@ describe('users CLI', () => {
     saveUpload(dir, HASH, 'a.pdf', Buffer.from('x'));
     writeFileSync(join(dir, '.last-scan-report'), JSON.stringify({ last_sent_at: '2026-09-15T08:00:00.000Z' }));
     const lines = [];
-    const env = { HOMELANDER_REPORT_TO: 'owner@example.com' };
+    const env = { HOMELANDER_REPORT_TO: 'owner@example.com', HOMELANDER_REPORT_ENABLED: 'true' };
     runCli(db, ['add', 'jakub', '--password', 'pw-pw-pw-pw'], { dataDir: dir, env, out: (l) => lines.push(l) });
     const first = db.getUserByName('jakub');
     assert.equal(first.is_admin, 1);
@@ -233,6 +259,18 @@ describe('per-user reports', () => {
     assert.equal(keptOf('both'), 2);
     assert.equal(filterReportListings([house, flat], { type: 'houses' }).dropped.flat, 1);
     assert.equal(filterReportListings([house, flat]).kept[0], flat);   // legacy default: flats only
+  });
+
+  it('recognises villa and haus-mit-keller searches as houses', () => {
+    for (const slug of ['haus-kaufen', 'villa-kaufen', 'haus-mit-keller-kaufen', 'neubauhaus-kaufen']) {
+      assert.equal(isHouseListing({ filter_url: `https://x/${slug}/hamburg` }), true, slug);
+    }
+    assert.equal(isHouseListing({ filter_url: 'https://x/wohnung-kaufen/hamburg' }), false);
+  });
+
+  it('a first account only gets the mail on when the report was enabled', () => {
+    assert.equal(legacyReportSettings({}).report.enabled, false);
+    assert.equal(legacyReportSettings({ HOMELANDER_REPORT_ENABLED: 'true' }).report.enabled, true);
   });
 
   it('criteriaFromSettings uses the env region only for "west"', () => {

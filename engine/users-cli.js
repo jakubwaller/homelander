@@ -23,6 +23,8 @@ import { legacyReportSettings, readReportState } from './report.js';
 
 const DATA_DIR = process.env.HOMELANDER_DATA_DIR || join(homedir(), '.homelander');
 
+const MIN_PASSWORD = 10;   // same floor as the web form
+
 function fail(msg) {
   console.error(msg);
   process.exit(1);
@@ -60,6 +62,7 @@ export function run(db, argv, { dataDir = DATA_DIR, env = process.env, out = con
     const email = flags.email === true ? '' : (flags.email || '');
     if (email && !validEmail(email)) fail('Invalid --email');
     const password = typeof flags.password === 'string' ? flags.password : randomBytes(9).toString('base64url');
+    if (password.length < MIN_PASSWORD) fail(`Password: at least ${MIN_PASSWORD} characters`);
     const first = db.countUsers() === 0;
     // The first account keeps the mail it had before accounts existed.
     const settings = first ? legacyReportSettings(env) : normalizeSettings({});
@@ -79,6 +82,7 @@ export function run(db, argv, { dataDir = DATA_DIR, env = process.env, out = con
   if (cmd === 'passwd') {
     const user = requireUser();
     const password = extra || randomBytes(9).toString('base64url');
+    if (password.length < MIN_PASSWORD) fail(`Password: at least ${MIN_PASSWORD} characters`);
     db.updateUser(user.id, { passHash: hashPassword(password) });
     out(`Password for ${name}: ${password}`);
     return;

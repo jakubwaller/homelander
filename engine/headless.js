@@ -167,7 +167,8 @@ async function main() {
     // engine/users-cli.js); without it the page stays open to whoever can reach it.
     const authSecret = process.env.HOMELANDER_AUTH === 'accounts' ? loadSecret(DATA_DIR) : null;
     if (authSecret && db.countUsers() === 0) log('Accounts are on but none exist yet — run engine/users-cli.js add <name>');
-    server = await startScanServer(() => db, { host, port, dataDir: DATA_DIR, authSecret });
+    server = await startScanServer(() => db, { host, port, dataDir: DATA_DIR, authSecret,
+      trustProxy: process.env.HOMELANDER_TRUST_PROXY === 'true' });
     log(`Kaufradar running at ${server.url}`);
     void ensureTransitLines(DATA_DIR, { log });
   }

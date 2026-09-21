@@ -49,7 +49,9 @@ export function makeSession(secret, user, now = Date.now()) {
 export function userFromCookie(secret, db, cookieHeader, now = Date.now()) {
   const match = String(cookieHeader || '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE_NAME}=`));
   if (!match) return null;
-  const parts = decodeURIComponent(match.slice(COOKIE_NAME.length + 1)).split('.');
+  let raw;
+  try { raw = decodeURIComponent(match.slice(COOKIE_NAME.length + 1)); } catch { return null; }
+  const parts = raw.split('.');
   if (parts.length !== 4) return null;
   const [id, exp, tag, sig] = parts;
   const expected = sign(secret, `${id}.${exp}.${tag}`);

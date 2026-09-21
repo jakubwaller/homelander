@@ -35,12 +35,15 @@ const DEFAULT_EXTRA_STATIONS = [
 const listEnv = (env, key, fallback) => (env?.[key] === undefined ? fallback
   : String(env[key]).split(',').map((n) => n.trim()).filter(Boolean));
 
+/** Search-URL slugs that mean a house: haus-kaufen, neubauhaus-kaufen, villa-kaufen, haus-mit-keller-kaufen … Shared with the map filter. */
+export const HOUSE_SEARCH_PATTERN = '(?:haus|villa)[a-z-]*-kaufen';
+
 /**
  * True for house searches (IS24 / Kleinanzeigen `haus-kaufen` URLs). Listings
  * carry no property type of their own; the search that found them does.
  */
 export function isHouseListing(listing) {
-  return /haus-kaufen/i.test(String(listing?.filter_url || ''));
+  return new RegExp(HOUSE_SEARCH_PATTERN, 'i').test(String(listing?.filter_url || ''));
 }
 
 /** Non-negative number from env, falling back when unset or unparseable. */
@@ -276,7 +279,7 @@ export function legacyReportSettings(env = process.env) {
   const c = resolveReportCriteria(env);
   return {
     report: {
-      enabled: true, type: 'flats', minSize: c.minSize, minRooms: c.minRooms,
+      enabled: String(env?.HOMELANDER_REPORT_ENABLED || '').toLowerCase() === 'true', type: 'flats', minSize: c.minSize, minRooms: c.minRooms,
       maxWalkMinutes: c.maxWalkMinutes, region: c.westStations.length ? 'west' : 'all',
     },
   };
