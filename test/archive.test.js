@@ -165,6 +165,37 @@ describe('getScanListings and archived rows', () => {
 
 });
 
+// Run the env-configured weekly report against a throwaway SMTP server; returns the log lines.
+async function sendReport(db) {
+  const server = createServer((s) => {
+    let data = false;
+    s.write('220 mock\r\n');
+    s.on('data', (chunk) => {
+      for (const line of String(chunk).split('\r\n')) {
+        if (data) { if (line === '.') { data = false; s.write('250 OK\r\n'); } continue; }
+        if (line === 'DATA') { data = true; s.write('354 go\r\n'); }
+        else if (line === 'QUIT') { s.write('221 bye\r\n'); s.end(); }
+        else if (line) s.write('250 OK\r\n');
+      }
+    });
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const dir = mkdtempSync(join(tmpdir(), 'homelander-archive-report-'));
+  const logs = [];
+  try {
+    const result = await maybeSendWeeklyReport(db, {}, dir, {
+      force: true, log: m => logs.push(m),
+      env: {
+        HOMELANDER_REPORT_ENABLED: 'true', HOMELANDER_REPORT_TO: 'me@example.com',
+        HOMELANDER_SMTP_HOST: '127.0.0.1', HOMELANDER_SMTP_PORT: String(server.address().port),
+        HOMELANDER_SMTP_SECURE: 'none', HOMELANDER_SMTP_FROM: 'a@example.com',
+      },
+    });
+    assert.equal(result.sent, true, JSON.stringify(result));
+    return logs.join('\n');
+  } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+}
+
 describe('weekly report', () => {
   it('does not offer archived listings', async () => {
     const db = newDb();
@@ -172,32 +203,17 @@ describe('weekly report', () => {
     const gone = add(db, '2');
     db.markListingChecked(gone, true);
     db.setListingFavorite(gone, true); // survives getScanListings, but not the mail
-    const server = createServer((s) => {
-      let data = false;
-      s.write('220 mock\r\n');
-      s.on('data', (chunk) => {
-        for (const line of String(chunk).split('\r\n')) {
-          if (data) { if (line === '.') { data = false; s.write('250 OK\r\n'); } continue; }
-          if (line === 'DATA') { data = true; s.write('354 go\r\n'); }
-          else if (line === 'QUIT') { s.write('221 bye\r\n'); s.end(); }
-          else if (line) s.write('250 OK\r\n');
-        }
-      });
-    });
-    await new Promise(r => server.listen(0, '127.0.0.1', r));
-    const dir = mkdtempSync(join(tmpdir(), 'homelander-archive-report-'));
-    const logs = [];
-    try {
-      const result = await maybeSendWeeklyReport(db, {}, dir, {
-        force: true, log: m => logs.push(m),
-        env: {
-          HOMELANDER_REPORT_ENABLED: 'true', HOMELANDER_REPORT_TO: 'me@example.com',
-          HOMELANDER_SMTP_HOST: '127.0.0.1', HOMELANDER_SMTP_PORT: String(server.address().port),
-          HOMELANDER_SMTP_SECURE: 'none', HOMELANDER_SMTP_FROM: 'a@example.com',
-        },
-      });
-      assert.equal(result.sent, true, JSON.stringify(result));
-      assert.match(logs.join('\n'), /of 1 listings matched/);
-    } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
+    assert.match(await sendReport(db), /of 1 listings matched/);
+  });
+
+  it('does not call a search quiet when its new listings already went offline', async () => {
+    const db = newDb();
+    db.markListingChecked(add(db, '1'), true);
+    assert.doesNotMatch(await sendReport(db), /no new listings/);
+  });
+
+  it('calls a search quiet when it found nothing in the week', async () => {
+    const db = newDb();
+    assert.match(await sendReport(db), /no new listings since .* in: Test Kauf/);
   });
 });
