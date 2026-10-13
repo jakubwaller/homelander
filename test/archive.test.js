@@ -115,6 +115,19 @@ describe('expiry batch', () => {
     assert.ok(!row(b).gone_at && row(b).checked_at);
     assert.deepEqual(row(c), { gone_at: null, checked_at: null });
   });
+
+  it('checkExpiry stops the batch at the first undecided answer', async () => {
+    const db = newDb();
+    const a = add(db, '1'), b = add(db, '2');
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return { ok: false, status: 429, text: async () => '' }; };
+    const { checkExpiry } = createScanCycle();
+    assert.equal(await checkExpiry(db, 10, 0), 0);
+    assert.equal(calls, 1);
+    const row = h => db.db.prepare('SELECT checked_at FROM listings WHERE hash = ?').get(h);
+    assert.equal(row(a).checked_at, null);
+    assert.equal(row(b).checked_at, null);
+  });
 });
 
 describe('getScanListings and archived rows', () => {
