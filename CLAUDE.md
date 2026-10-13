@@ -118,8 +118,8 @@ running outside Docker); both are gitignored — never commit them.
 - **Expired listings are archived, never deleted** — `scan-cycle.js` checks ≤10 listings per cycle
   (never checked or >7 days ago) against the portal and stops at the first unclear answer, since
   it shares the poller's IP; only a positive "gone" signal (IS24 404 + `ERROR_RESOURCE_NOT_FOUND`,
-  Kleinanzeigen redirect off `/s-anzeige/` or 404/410) sets `gone_at`.
-  A re-priced duplicate archives its older-price rows on insert. `getScanListings` hides archived
+  Kleinanzeigen redirect to a `/s-…` search page or 404/410) sets `gone_at`.
+  An unclear answer is stamped checked, never gone. `getScanListings` hides archived
   rows unless `includeArchived` (favourites always stay); the weekly mail never offers them
 - **Uploaded files are served from the manifest only** — `files.json` membership is the
   authorisation check; never resolve a request path straight onto disk, and never serve an unknown
@@ -145,7 +145,7 @@ Branch, open a PR, let CI go green, squash-merge.
 ```bash
 npm install --ignore-scripts && npm rebuild better-sqlite3
 npm run scanner      # run the scanner directly, no Docker
-npm test             # unit tests (348)
+npm test             # unit tests (349)
 npm run smoke:db     # DB smoke test
 docker compose up -d --build
 ```

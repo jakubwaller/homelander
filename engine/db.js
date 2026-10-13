@@ -187,11 +187,6 @@ export class HomelanderDB {
         for (const col of ['gone_at', 'checked_at']) {
           try { this.db.exec(`ALTER TABLE listings ADD COLUMN ${col} TEXT`); } catch { /* column already exists */ }
         }
-        // An older-price row is superseded by the newer row of the same exposé.
-        this.db.exec(`
-          UPDATE listings SET gone_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-          WHERE EXISTS (SELECT 1 FROM listings n WHERE n.expose_id = listings.expose_id AND n.rowid > listings.rowid);
-        `);
       }
       this.db.exec(SCHEMA);
       if (version && version.version < 8) {
@@ -318,7 +313,7 @@ export class HomelanderDB {
     `).get(String(listing.expose_id));
     if (manuallyApplied) return { changes: 0, skipped: true };
     try {
-      const info = this.db.prepare(`
+      return this.db.prepare(`
         INSERT INTO listings (hash, expose_id, title, price, size, rooms, address, image_url, filter_id, status, url, source, postcode)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'seen', ?, ?, ?)
       `).run(
@@ -327,12 +322,6 @@ export class HomelanderDB {
         listing.filter_id,
         listing.url || null, listing.source || 'is24', listing.postcode || null
       );
-      // A re-priced listing mints a new hash: the older-price rows count as archived.
-      this.db.prepare(`
-        UPDATE listings SET gone_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-        WHERE expose_id = ? AND hash != ? AND gone_at IS NULL
-      `).run(listing.expose_id, hash);
-      return info;
     } catch (err) {
       if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
         return { changes: 0, skipped: true };
@@ -728,7 +717,7 @@ export class HomelanderDB {
     return this.db.prepare(`
       SELECT l.* FROM listings l
       JOIN filters f ON f.id = l.filter_id
-      WHERE f.mode = 'scan' AND l.gone_at IS NULL AND l.source IN ('is24', 'kleinanzeigen')
+      WHERE f.mode = 'scan' AND f.archived = 0 AND l.gone_at IS NULL AND l.source IN ('is24', 'kleinanzeigen')
         AND (l.checked_at IS NULL OR l.checked_at < ?)
       ORDER BY l.checked_at ASC, l.rowid ASC
       LIMIT ?

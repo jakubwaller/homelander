@@ -30,7 +30,7 @@ function add(db, exposeId, price = 100000, source = 'is24') {
 const goneAt = (db, hash) => db.db.prepare('SELECT gone_at FROM listings WHERE hash = ?').get(hash).gone_at;
 
 describe('schema v9', () => {
-  it('adds gone_at/checked_at to a v8 DB and archives older-price duplicates', () => {
+  it('adds gone_at/checked_at to a v8 DB without archiving anything', () => {
     const dir = mkdtempSync(join(tmpdir(), 'homelander-archive-'));
     const file = join(dir, 'homelander.db');
     try {
@@ -45,7 +45,7 @@ describe('schema v9', () => {
 
       const db = new HomelanderDB(file);
       assert.equal(db.db.prepare('SELECT version FROM schema_version').get().version, 9);
-      assert.equal(goneAt(db, HomelanderDB.hashListing('1', 100000)) !== null, true);
+      assert.equal(goneAt(db, HomelanderDB.hashListing('1', 100000)), null);
       assert.equal(goneAt(db, HomelanderDB.hashListing('1', 90000)), null);
       db.close();
     } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -83,6 +83,13 @@ describe('checkListingGone', () => {
     globalThis.fetch = async () => resp(429);
     assert.equal(await checkListingGone(ka), null);
   });
+
+  it('Kleinanzeigen: a redirect to a login, consent or home page is undecided', async () => {
+    for (const to of ['https://www.kleinanzeigen.de/m-einloggen.html', 'https://www.kleinanzeigen.de/', 'https://consent.example.com/']) {
+      globalThis.fetch = async () => resp(200, '', to);
+      assert.equal(await checkListingGone(ka), null, to);
+    }
+  });
 });
 
 describe('expiry batch', () => {
@@ -100,7 +107,14 @@ describe('expiry batch', () => {
     assert.deepEqual(db.getListingsToCheck(1, ago(3)).map(r => r.hash), [never]);
   });
 
-  it('checkExpiry marks gone/live and leaves undecided rows untouched', async () => {
+  it('skips listings of deleted searches', () => {
+    const db = newDb();
+    add(db, '1');
+    db.removeFilter('f1');
+    assert.deepEqual(db.getListingsToCheck(30, new Date().toISOString()), []);
+  });
+
+  it('checkExpiry marks gone/live and never archives an undecided row', async () => {
     const db = newDb();
     const a = add(db, '1'), b = add(db, '2'), c = add(db, '3');
     globalThis.fetch = async (u) => {
@@ -113,20 +127,26 @@ describe('expiry batch', () => {
     const row = h => db.db.prepare('SELECT gone_at, checked_at FROM listings WHERE hash = ?').get(h);
     assert.ok(row(a).gone_at && row(a).checked_at);
     assert.ok(!row(b).gone_at && row(b).checked_at);
-    assert.deepEqual(row(c), { gone_at: null, checked_at: null });
+    assert.ok(!row(c).gone_at && row(c).checked_at);
   });
 
-  it('checkExpiry stops the batch at the first undecided answer', async () => {
+  it('checkExpiry stops at the first undecided answer, and that row cannot jam the queue', async () => {
     const db = newDb();
     const a = add(db, '1'), b = add(db, '2');
+    const row = h => db.db.prepare('SELECT gone_at, checked_at FROM listings WHERE hash = ?').get(h);
     let calls = 0;
     globalThis.fetch = async () => { calls++; return { ok: false, status: 429, text: async () => '' }; };
     const { checkExpiry } = createScanCycle();
     assert.equal(await checkExpiry(db, 10, 0), 0);
     assert.equal(calls, 1);
-    const row = h => db.db.prepare('SELECT checked_at FROM listings WHERE hash = ?').get(h);
-    assert.equal(row(a).checked_at, null);
+    assert.ok(!row(a).gone_at && row(a).checked_at);   // moved to the back, not archived
     assert.equal(row(b).checked_at, null);
+    // Next cycle the portal answers again: the batch starts at b, not at a.
+    const asked = [];
+    globalThis.fetch = async (u) => { asked.push(String(u)); return { ok: true, status: 200 }; };
+    await checkExpiry(db, 10, 0);
+    assert.deepEqual(asked.map(u => u.split('/').pop()), ['2']);
+    assert.ok(row(b).checked_at);
   });
 });
 
@@ -143,14 +163,6 @@ describe('getScanListings and archived rows', () => {
     assert.ok(db.getScanListings().find(l => l.hash === favGone).gone_at);
   });
 
-  it('archives the older-price row when a re-priced duplicate is inserted', () => {
-    const db = newDb();
-    const oldRow = add(db, '1', 100000), newRow = add(db, '1', 90000);
-    assert.deepEqual(db.getScanListings().map(l => l.hash), [newRow]);
-    assert.ok(goneAt(db, oldRow));
-    assert.equal(goneAt(db, newRow), null);
-    assert.equal(db.getScanListings({ includeArchived: true }).length, 2);
-  });
 });
 
 describe('weekly report', () => {
