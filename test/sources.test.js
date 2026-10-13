@@ -108,30 +108,25 @@ describe('validateAnySearchUrl', () => {
 
 // ---------------------------------------------------------------------------
 
+// Shape of the result cards since the 2026-09 restyle (trimmed).
 const KA_FIXTURE = `
-<article class="aditem" data-adid="3315808121" data-href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">
-  <div class="aditem-image">
-    <a href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">
-      <div class="imagebox srpimagebox">
-        <img src="https://img.kleinanzeigen.de/api/v1/prod-ads/images/fa/example?rule=$_59.AUTO" alt="preview" />
+<article class="flex justify-between p-medium flex-col" data-adid="3315808121" data-href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">
+  <div class="relative z-raised mb-medium h-auto w-full basis-auto">
+    <a class="inline-flex items-center" href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">
+      <div class="relative flex items-center" data-image-container>
+        <img class="z-[2] aspect-[4/3]" src="https://img.kleinanzeigen.de/api/v1/prod-ads/images/fa/example?rule=$_59.AUTO" alt="preview">
       </div>
     </a>
   </div>
-  <div class="aditem-main">
-    <div class="aditem-main--top">
-      <div class="aditem-main--top--left">
-        <i class="icon icon-small icon-pin-gray" aria-hidden="true"></i>
-        10247 Friedrichshain
-      </div>
+  <div class="z-raised flex grow flex-col">
+    <div class="flex items-center gap-xxsmall text-onSurfaceNonessential">
+      <svg viewBox="0 0 24 24" data-title="locationOutline" role="img" aria-hidden="true"><path d="M0 0"></path></svg><span>10247 Friedrichshain</span>
     </div>
-    <div class="aditem-main--middle">
-      <h2 class="text-module-begin">
-        <a class="ellipsis" href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">3-Zimmer-Wohnung mit Terrasse &amp; Garten</a>
-      </h2>
-      <p class="aditem-main--middle--tags"> 67,30 m&#178; &#183; 3 Zi. </p>
-      <div class="aditem-main--middle--price-shipping">
-        <p class="aditem-main--middle--price-shipping--price"> 320.000 &#8364; </p>
-      </div>
+    <div class="flex flex-col">
+      <h3 class="mb-xsmall line-clamp-2"><a class="inline-flex" href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">3-Zimmer-Wohnung mit Terrasse &amp; Garten</a></h3>
+      <p class="mb-xsmall text-bodyRegular text-onSurfaceSubdued">Helle Wohnung, ca. 70 m² groß, 3 Zimmer...</p>
+      <p class="font-strong text-onSurfaceSubdued">67,30 m&#178; &#183; 3 Zi.</p>
+      <div class="flex"><p class="my-xsmall text-title3 font-strong text-secondary">320.000 &#8364; VB</p></div>
     </div>
   </div>
 </article>`;

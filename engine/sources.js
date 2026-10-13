@@ -85,18 +85,22 @@ function kleinanzeigenPageUrl(webUrl, page) {
   return url.toString();
 }
 
-/** Parse a Kleinanzeigen search-results HTML page into listings. */
+/** Parse a Kleinanzeigen search-results HTML page into listings.
+ *  Matches on content shape, not class names — the 2026-09 restyle swapped
+ *  every class for Tailwind utilities and silently broke the old parser. */
 export function parseKleinanzeigenHtml(html) {
   const listings = [];
-  const articleRe = /<article class="aditem"[\s\S]*?<\/article>/g;
+  const articleRe = /<article\b[\s\S]*?<\/article>/g;
   for (const match of String(html || '').match(articleRe) || []) {
     const adid = match.match(/data-adid="(\d+)"/)?.[1];
     if (!adid) continue;
     const href = match.match(/data-href="([^"]+)"/)?.[1] || '';
-    const title = decodeEntities(match.match(/<h2[^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/)?.[1] || '');
-    const priceText = decodeEntities(match.match(/aditem-main--middle--price-shipping--price"\s*>\s*([^<]+)/)?.[1] || '');
-    const tags = decodeEntities(match.match(/aditem-main--middle--tags"\s*>\s*([\s\S]*?)<\/p>/)?.[1] || '');
-    const address = decodeEntities(match.match(/icon-pin[^"]*"[^>]*><\/i>\s*([^<]+)/)?.[1] || '');
+    const title = decodeEntities(match.match(/<h[1-6][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/)?.[1] || '');
+    // Text-only <p>s: the price line starts "398.000 €", the tags line "60 m² · 2 Zi."
+    const paragraphs = [...match.matchAll(/<p[^>]*>([^<]*)<\/p>/g)].map(m => decodeEntities(m[1]));
+    const priceText = paragraphs.find(t => /^[\d.,]+\s*€/.test(t)) || '';
+    const tags = paragraphs.find(t => /^[\d.,]+\s*(m²|Zi)/.test(t)) || '';
+    const address = decodeEntities(match.match(/<span>\s*(\d{5}\b[^<]*)<\/span>/)?.[1] || '');
     const image = match.match(/<img[^>]+src="([^"]+)"/)?.[1] || '';
     const sizeMatch = tags.match(/([\d.,]+)\s*m²/);
     const roomsMatch = tags.match(/([\d.,]+)\s*Zi/);
