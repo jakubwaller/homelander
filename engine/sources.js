@@ -129,7 +129,8 @@ async function fetchKleinanzeigenListings(webUrl, page = 1) {
     const listings = parseKleinanzeigenHtml(html);
     // Ads on the page but nothing usable parsed: the markup moved again. Say so
     // instead of looking like an empty search (the 2026-09 restyle went unnoticed for weeks).
-    if (html.includes('data-adid=') && !listings.some(l => l.price)) {
+    // Price *or* size: a narrow search can legitimately return only "VB" ads.
+    if (html.includes('data-adid=') && !listings.some(l => l.price || l.size)) {
       return { listings: [], error: 'no ad parsed (kleinanzeigen.de markup changed?)' };
     }
     return { listings, error: null };

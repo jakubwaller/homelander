@@ -171,6 +171,14 @@ describe('fetchAnyListings — kleinanzeigen markup drift', () => {
     assert.match(error, /markup changed/);
   });
 
+  it('keeps a page whose only ads have no numeric price', async () => {
+    globalThis.fetch = async () => mockHtmlResponse(KA_FIXTURE.replace('320.000 &#8364; VB', 'VB'));
+    const { listings, error } = await fetchAnyListings('https://www.kleinanzeigen.de/s-wohnung-kaufen/hamburg/c196l9409');
+    assert.equal(error, null);
+    assert.equal(listings.length, 1);
+    assert.equal(listings[0].price, 0);
+  });
+
   it('treats a page without ads as an empty search, not an error', async () => {
     globalThis.fetch = async () => mockHtmlResponse('<html><body>Keine Ergebnisse</body></html>');
     const { listings, error } = await fetchAnyListings('https://www.kleinanzeigen.de/s-wohnung-kaufen/hamburg/c196l9409');
