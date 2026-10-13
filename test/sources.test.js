@@ -124,7 +124,7 @@ const KA_FIXTURE = `
     </div>
     <div class="flex flex-col">
       <h3 class="mb-xsmall line-clamp-2"><a class="inline-flex" href="/s-anzeige/3-zimmer-wohnung/3315808121-196-3353">3-Zimmer-Wohnung mit Terrasse &amp; Garten</a></h3>
-      <p class="mb-xsmall text-bodyRegular text-onSurfaceSubdued">Helle Wohnung, ca. 70 m² groß, 3 Zimmer...</p>
+      <p class="mb-xsmall text-bodyRegular text-onSurfaceSubdued">85 m² Wohnfläche, ruhige Lage, 4 Zimmer...</p>
       <p class="font-strong text-onSurfaceSubdued">67,30 m&#178; &#183; 3 Zi.</p>
       <div class="flex"><p class="my-xsmall text-title3 font-strong text-secondary">320.000 &#8364; VB</p></div>
     </div>
@@ -148,6 +148,34 @@ describe('parseKleinanzeigenHtml', () => {
 
   it('returns empty array for pages without ad articles', () => {
     assert.deepEqual(parseKleinanzeigenHtml('<html><body>nix</body></html>'), []);
+  });
+
+  it('does not take the price from a description that starts with one', () => {
+    const html = KA_FIXTURE.replace('85 m² Wohnfläche, ruhige Lage, 4 Zimmer...', '1.200 € Hausgeld inkl. Rücklage...');
+    assert.equal(parseKleinanzeigenHtml(html)[0].price, 320000);
+  });
+
+  it('reads a tags line with size only', () => {
+    const html = KA_FIXTURE.replace('67,30 m&#178; &#183; 3 Zi.', '120 m&#178;');
+    const [l] = parseKleinanzeigenHtml(html);
+    assert.equal(l.size, 120);
+    assert.equal(l.rooms, 0);
+  });
+});
+
+describe('fetchAnyListings — kleinanzeigen markup drift', () => {
+  it('reports an error when ads are present but none parse', async () => {
+    globalThis.fetch = async () => mockHtmlResponse('<li class="card" data-adid="123">restyled</li>');
+    const { listings, error } = await fetchAnyListings('https://www.kleinanzeigen.de/s-wohnung-kaufen/hamburg/c196l9409');
+    assert.deepEqual(listings, []);
+    assert.match(error, /markup changed/);
+  });
+
+  it('treats a page without ads as an empty search, not an error', async () => {
+    globalThis.fetch = async () => mockHtmlResponse('<html><body>Keine Ergebnisse</body></html>');
+    const { listings, error } = await fetchAnyListings('https://www.kleinanzeigen.de/s-wohnung-kaufen/hamburg/c196l9409');
+    assert.deepEqual(listings, []);
+    assert.equal(error, null);
   });
 });
 

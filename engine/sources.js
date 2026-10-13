@@ -96,10 +96,11 @@ export function parseKleinanzeigenHtml(html) {
     if (!adid) continue;
     const href = match.match(/data-href="([^"]+)"/)?.[1] || '';
     const title = decodeEntities(match.match(/<h[1-6][^>]*>\s*<a[^>]*>([\s\S]*?)<\/a>/)?.[1] || '');
-    // Text-only <p>s: the price line starts "398.000 €", the tags line "60 m² · 2 Zi."
+    // Text-only <p>s, matched whole so a description starting "85 m² …" can't win:
+    // price "398.000 €" / "398.000 € VB", tags "60 m² · 2 Zi." / "120 m²" / "3 Zi."
     const paragraphs = [...match.matchAll(/<p[^>]*>([^<]*)<\/p>/g)].map(m => decodeEntities(m[1]));
-    const priceText = paragraphs.find(t => /^[\d.,]+\s*€/.test(t)) || '';
-    const tags = paragraphs.find(t => /^[\d.,]+\s*(m²|Zi)/.test(t)) || '';
+    const priceText = paragraphs.find(t => /^[\d.,]+\s*€( VB)?$/.test(t)) || '';
+    const tags = paragraphs.find(t => /^[\d.,]+\s*(m²|Zi\.)( · [\d.,]+\s*Zi\.)?$/.test(t)) || '';
     const address = decodeEntities(match.match(/<span>\s*(\d{5}\b[^<]*)<\/span>/)?.[1] || '');
     const image = match.match(/<img[^>]+src="([^"]+)"/)?.[1] || '';
     const sizeMatch = tags.match(/([\d.,]+)\s*m²/);
@@ -125,7 +126,13 @@ async function fetchKleinanzeigenListings(webUrl, page = 1) {
     const resp = await fetch(kleinanzeigenPageUrl(webUrl, page), { headers: BROWSER_HEADERS });
     if (!resp.ok) return { listings: [], error: `HTTP ${resp.status} (kleinanzeigen.de)` };
     const html = await resp.text();
-    return { listings: parseKleinanzeigenHtml(html), error: null };
+    const listings = parseKleinanzeigenHtml(html);
+    // Ads on the page but nothing usable parsed: the markup moved again. Say so
+    // instead of looking like an empty search (the 2026-09 restyle went unnoticed for weeks).
+    if (html.includes('data-adid=') && !listings.some(l => l.price)) {
+      return { listings: [], error: 'no ad parsed (kleinanzeigen.de markup changed?)' };
+    }
+    return { listings, error: null };
   } catch (err) {
     return { listings: [], error: err.message };
   }
@@ -137,7 +144,7 @@ async function getKleinanzeigenTotal(webUrl) {
     if (!resp.ok) return { total: 0, error: `HTTP ${resp.status} (kleinanzeigen.de)` };
     const html = await resp.text();
     // "1 - 25 von 5.930 Eigentumswohnung kaufen in Berlin"
-    const summary = html.match(/breadcrump-summary"[^>]*>[^<]*von\s+([\d.]+)/);
+    const summary = html.match(/breadcrum[bp]-summary"[^>]*>[^<]*von\s+([\d.]+)/);
     if (summary) return { total: parseGermanNumber(summary[1]), error: null };
     return { total: parseKleinanzeigenHtml(html).length, error: null };
   } catch (err) {
