@@ -170,8 +170,10 @@ function fmtCriteria({ minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStatio
 
 /** Names of enabled searches that found nothing in the report window. A city-wide
  *  search going quiet for a week means a broken source (Kleinanzeigen went silent
- *  for six weeks in 2026-09 and only the container log knew). */
-export function findQuietSearches(filters = [], listings = []) {
+ *  for six weeks in 2026-09 and only the container log knew). Windows under three
+ *  days say nothing — a forced resend minutes after the last mail would flag all. */
+export function findQuietSearches(filters = [], listings = [], sinceIso = null, now = Date.now()) {
+  if (!sinceIso || now - Date.parse(sinceIso) < 3 * 864e5) return [];
   const active = new Set(listings.map(l => l.filter_id));
   return filters.filter(f => f.enabled && !active.has(f.id)).map(f => f.name || f.id);
 }
@@ -314,7 +316,7 @@ async function deliverReport({ db, dataDir, smtp, recipient, criteria, sinceIso,
   );
   if (regionSkipped) log('WARN: west-region stations missing from transit cache — report skipped the west filter');
   if (transitSkipped) log('WARN: no transit stations cached — report skipped the walking-distance filter');
-  const quietSearches = findQuietSearches(db.getScanFilters(), found);
+  const quietSearches = findQuietSearches(db.getScanFilters(), found, sinceIso);
   if (quietSearches.length) log(`WARN: no new listings since ${sinceIso} in: ${quietSearches.join(', ')}`);
   const html = buildScanReportHtml({
     listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped, quietSearches,

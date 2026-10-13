@@ -100,7 +100,7 @@ describe('buildScanReportHtml', () => {
 
   it('warns about searches that found nothing in the window', () => {
     const html = buildScanReportHtml({
-      listings: [], sinceIso: '2026-09-01T00:00:00Z', quietSearches: ['Wohnung HH (Kleinanzeigen)'],
+      listings: [], sinceIso: '2026-09-01T12:00:00Z', quietSearches: ['Wohnung HH (Kleinanzeigen)'],
     });
     assert.match(html, /Achtung: Keine neuen Angebote seit 1\.9\.2026 in Wohnung HH \(Kleinanzeigen\)/);
   });
@@ -113,8 +113,16 @@ describe('findQuietSearches', () => {
       { id: 'b', name: 'Wohnung HH (Kleinanzeigen)', enabled: 1 },
       { id: 'c', name: 'Pausiert', enabled: 0 },
     ];
-    assert.deepEqual(findQuietSearches(filters, [{ filter_id: 'a' }]), ['Wohnung HH (Kleinanzeigen)']);
-    assert.deepEqual(findQuietSearches(filters, [{ filter_id: 'a' }, { filter_id: 'b' }]), []);
+    const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString();
+    assert.deepEqual(findQuietSearches(filters, [{ filter_id: 'a' }], weekAgo), ['Wohnung HH (Kleinanzeigen)']);
+    assert.deepEqual(findQuietSearches(filters, [{ filter_id: 'a' }, { filter_id: 'b' }], weekAgo), []);
+  });
+
+  it('stays silent for windows under three days (a forced resend)', () => {
+    const filters = [{ id: 'a', name: 'Wohnung HH', enabled: 1 }];
+    const hourAgo = new Date(Date.now() - 3600e3).toISOString();
+    assert.deepEqual(findQuietSearches(filters, [], hourAgo), []);
+    assert.deepEqual(findQuietSearches(filters, [], null), []);
   });
 });
 
