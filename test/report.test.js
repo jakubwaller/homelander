@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HomelanderDB } from '../engine/db.js';
 import {
-  buildScanReportHtml, filterReportListings, isHouseListing, markApproxCoords,
+  buildScanReportHtml, filterReportListings, findQuietSearches, isHouseListing, markApproxCoords,
   maybeSendWeeklyReport, resolveReportCriteria, resolveReportSmtp,
 } from '../engine/report.js';
 
@@ -95,6 +95,26 @@ describe('buildScanReportHtml', () => {
     assert.match(html, /Testwohnung/);
     assert.match(html, /5\.000\u00a0€\/m²/);   // NBSP before the unit (German typography)
     assert.match(html, /keine Bewerbungen versendet/);
+    assert.doesNotMatch(html, /Achtung/);
+  });
+
+  it('warns about searches that found nothing in the window', () => {
+    const html = buildScanReportHtml({
+      listings: [], sinceIso: '2026-09-01T00:00:00Z', quietSearches: ['Wohnung HH (Kleinanzeigen)'],
+    });
+    assert.match(html, /Achtung: Keine neuen Angebote seit 1\.9\.2026 in Wohnung HH \(Kleinanzeigen\)/);
+  });
+});
+
+describe('findQuietSearches', () => {
+  it('names enabled searches without a listing in the window, skips disabled ones', () => {
+    const filters = [
+      { id: 'a', name: 'Wohnung HH', enabled: 1 },
+      { id: 'b', name: 'Wohnung HH (Kleinanzeigen)', enabled: 1 },
+      { id: 'c', name: 'Pausiert', enabled: 0 },
+    ];
+    assert.deepEqual(findQuietSearches(filters, [{ filter_id: 'a' }]), ['Wohnung HH (Kleinanzeigen)']);
+    assert.deepEqual(findQuietSearches(filters, [{ filter_id: 'a' }, { filter_id: 'b' }]), []);
   });
 });
 

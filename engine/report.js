@@ -168,10 +168,19 @@ function fmtCriteria({ minSize = 0, minRooms = 0, maxWalkMinutes = 0, westStatio
   return parts.join(' · ');
 }
 
+/** Names of enabled searches that found nothing in the report window. A city-wide
+ *  search going quiet for a week means a broken source (Kleinanzeigen went silent
+ *  for six weeks in 2026-09 and only the container log knew). */
+export function findQuietSearches(filters = [], listings = []) {
+  const active = new Set(listings.map(l => l.filter_id));
+  return filters.filter(f => f.enabled && !active.has(f.id)).map(f => f.name || f.id);
+}
+
 /** Build the HTML body for a scan report. */
 export function buildScanReportHtml({
   listings = [], sinceIso, generatedAt = new Date(),
   criteria = null, dropped = null, transitSkipped = false, regionSkipped = false,
+  quietSearches = [],
 }) {
   const byFilter = new Map();
   for (const listing of listings) {
@@ -228,6 +237,7 @@ const westApplied = criteria?.maxWalkMinutes > 0 && !transitSkipped && !regionSk
     <h2 style="color:#B8860B;margin-bottom:4px;">Homelander Kaufradar</h2>
     <p style="color:#777;margin-top:0;">${listings.length} Angebote${since ? ` seit ${since}` : ''} · Stand ${generatedAt.toLocaleString('de-DE')}</p>
     ${criteriaLine ? `<p style="color:#777;margin-top:0;font-size:13px;">Kriterien: ${criteriaLine}</p>` : ''}
+    ${quietSearches.length ? `<p style="color:#B22222;font-size:13px;">Achtung: Keine neuen Angebote${since ? ` seit ${since}` : ''} in ${quietSearches.map(esc).join(', ')} — die Quelle ist vermutlich defekt, bitte das Scanner-Log prüfen.</p>` : ''}
     ${transitSkipped ? '<p style="color:#B8860B;font-size:13px;">Hinweis: Keine Haltestellendaten verfügbar — der ÖPNV-Filter wurde diese Woche übersprungen.</p>' : ''}
     ${regionSkipped ? '<p style="color:#B8860B;font-size:13px;">Hinweis: Nicht alle Bahnhöfe der Westregion sind in den Haltestellendaten — der Westfilter wurde diese Woche übersprungen.</p>' : ''}
     ${sections || `<p>${emptyText}</p>`}
@@ -304,8 +314,10 @@ async function deliverReport({ db, dataDir, smtp, recipient, criteria, sinceIso,
   );
   if (regionSkipped) log('WARN: west-region stations missing from transit cache — report skipped the west filter');
   if (transitSkipped) log('WARN: no transit stations cached — report skipped the walking-distance filter');
+  const quietSearches = findQuietSearches(db.getScanFilters(), found);
+  if (quietSearches.length) log(`WARN: no new listings since ${sinceIso} in: ${quietSearches.join(', ')}`);
   const html = buildScanReportHtml({
-    listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped,
+    listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped, quietSearches,
   });
   await sendMail(
     { ...smtp, to: recipient },
