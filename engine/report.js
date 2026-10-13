@@ -309,14 +309,16 @@ export function criteriaFromSettings(rep, env = process.env) {
 
 /** Filter, render and mail one shortlist. Throws on SMTP failure. */
 async function deliverReport({ db, dataDir, smtp, recipient, criteria, sinceIso, log }) {
-  const found = db.getScanListings({ sinceIso, limit: 5000 }).filter(l => !l.gone_at); // favourites stay in the query, but a mail shouldn't offer offline flats
+  // Archived rows too: a search whose new listings all went offline still found them.
+  const discovered = db.getScanListings({ sinceIso, limit: 5000, includeArchived: true });
+  const found = discovered.filter(l => !l.gone_at); // a mail shouldn't offer offline flats, favourites included
   const { stations } = readTransitStations(dataDir);
   const { kept, dropped, transitSkipped, regionSkipped } = filterReportListings(
     markApproxCoords(db, found), { ...criteria, stations }
   );
   if (regionSkipped) log('WARN: west-region stations missing from transit cache — report skipped the west filter');
   if (transitSkipped) log('WARN: no transit stations cached — report skipped the walking-distance filter');
-  const quietSearches = findQuietSearches(db.getScanFilters(), found, sinceIso);
+  const quietSearches = findQuietSearches(db.getScanFilters(), discovered, sinceIso);
   if (quietSearches.length) log(`WARN: no new listings since ${sinceIso} in: ${quietSearches.join(', ')}`);
   const html = buildScanReportHtml({
     listings: kept, sinceIso, criteria, dropped, transitSkipped, regionSkipped, quietSearches,
