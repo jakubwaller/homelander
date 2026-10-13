@@ -297,7 +297,7 @@ export function criteriaFromSettings(rep, env = process.env) {
 
 /** Filter, render and mail one shortlist. Throws on SMTP failure. */
 async function deliverReport({ db, dataDir, smtp, recipient, criteria, sinceIso, log }) {
-  const found = db.getScanListings({ sinceIso, limit: 5000 });
+  const found = db.getScanListings({ sinceIso, limit: 5000 }).filter(l => !l.gone_at); // favourites stay in the query, but a mail shouldn't offer offline flats
   const { stations } = readTransitStations(dataDir);
   const { kept, dropped, transitSkipped, regionSkipped } = filterReportListings(
     markApproxCoords(db, found), { ...criteria, stations }
