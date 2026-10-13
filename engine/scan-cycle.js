@@ -5,7 +5,7 @@
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkListingGone, fetchIs24ExposeDetails, geocodePostcode } from './sources.js';
+import { SOURCE_IS24, SOURCE_KLEINANZEIGEN, checkListingGone, fetchIs24ExposeDetails, geocodePostcode } from './sources.js';
 import { downloadMediaBatch } from './media.js';
 import { maybeSendWeeklyReport } from './report.js';
 
@@ -51,25 +51,31 @@ export function createScanCycle({ log = () => {} } = {}) {
     return enriched;
   }
 
-  /** Expiry check for a small batch: never checked, or last checked over 7 days ago.
-   *  Same IP as the poller, so stay light (~1,400 requests/day at most) and stop
-   *  at the first undecided answer — a 403/429 must not be retried 10× a cycle.
-   *  The undecided row is still stamped checked (not gone) so it moves to the back
-   *  of the queue; otherwise one permanently unclear listing would jam it. */
+  /** Expiry check for a small batch per portal: never checked, or last checked
+   *  over 7 days ago. The portals run side by side, each with its own batch and
+   *  stop, so a throttled IS24 doesn't hold up Kleinanzeigen. Same IP as the
+   *  poller, so stay light (~1,400 requests/day per portal at most) and stop a
+   *  portal at its first undecided answer — a 403/429 must not be retried 10× a
+   *  cycle. The undecided row is still stamped checked (not gone) so it moves to
+   *  the back of the queue; otherwise one permanently unclear listing would jam it.
+   *  Neubaukompass is retired and not checked. */
   async function checkExpiry(db, limit = 10, pauseMs = 1000) {
     const before = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-    let gone = 0;
-    for (const row of db.getListingsToCheck(limit, before)) {
-      const isGone = await checkListingGone(row);
-      db.markListingChecked(row.hash, isGone === true);
-      if (isGone === null) {
-        log(`Expiry check stopped at ${row.expose_id}: portal gave no clear answer (blocked, throttled or down?)`);
-        break;
+    const counts = await Promise.all([SOURCE_IS24, SOURCE_KLEINANZEIGEN].map(async (source) => {
+      let gone = 0;
+      for (const row of db.getListingsToCheck(source, limit, before)) {
+        const isGone = await checkListingGone(row);
+        db.markListingChecked(row.hash, isGone === true);
+        if (isGone === null) {
+          log(`Expiry check stopped at ${row.expose_id}: portal gave no clear answer (blocked, throttled or down?)`);
+          break;
+        }
+        if (isGone) gone++;
+        await sleep(pauseMs);
       }
-      if (isGone) gone++;
-      await sleep(pauseMs);
-    }
-    return gone;
+      return gone;
+    }));
+    return counts[0] + counts[1];
   }
 
   function exportListings(db, dataDir) {

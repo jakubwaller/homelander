@@ -93,25 +93,41 @@ describe('checkListingGone', () => {
 });
 
 describe('expiry batch', () => {
-  it('picks never-checked and >3 day old rows, oldest first, skipping gone and neubaukompass', () => {
+  it('picks never-checked and >3 day old rows of one source, oldest first, skipping gone', () => {
     const db = newDb();
-    const never = add(db, '1'), stale = add(db, '2'), fresh = add(db, '3'), gone = add(db, '4'), nk = add(db, '5', 1, 'neubaukompass');
+    const never = add(db, '1'), stale = add(db, '2'), fresh = add(db, '3'), gone = add(db, '4'), ka = add(db, 'ka-5', 1, 'kleinanzeigen');
     const now = Date.now();
     const ago = days => new Date(now - days * 864e5).toISOString();
     db.markListingChecked(stale, false, ago(4));
     db.markListingChecked(fresh, false, ago(2));
     db.markListingChecked(gone, true, ago(10));
-    const rows = db.getListingsToCheck(30, ago(3)).map(r => r.hash);
-    assert.deepEqual(rows, [never, stale]);
-    assert.ok(!rows.includes(nk));
-    assert.deepEqual(db.getListingsToCheck(1, ago(3)).map(r => r.hash), [never]);
+    assert.deepEqual(db.getListingsToCheck('is24', 30, ago(3)).map(r => r.hash), [never, stale]);
+    assert.deepEqual(db.getListingsToCheck('is24', 1, ago(3)).map(r => r.hash), [never]);
+    assert.deepEqual(db.getListingsToCheck('kleinanzeigen', 30, ago(3)).map(r => r.hash), [ka]);
   });
 
   it('skips listings of deleted searches', () => {
     const db = newDb();
     add(db, '1');
     db.removeFilter('f1');
-    assert.deepEqual(db.getListingsToCheck(30, new Date().toISOString()), []);
+    assert.deepEqual(db.getListingsToCheck('is24', 30, new Date().toISOString()), []);
+  });
+
+  it('checkExpiry: a throttled IS24 does not stop Kleinanzeigen, and neubaukompass is never asked', async () => {
+    const db = newDb();
+    add(db, '1'); add(db, '2'); add(db, 'nk-3', 1, 'neubaukompass');
+    const ka = add(db, 'ka-4', 1, 'kleinanzeigen');
+    const asked = [];
+    globalThis.fetch = async (u) => {
+      asked.push(String(u));
+      if (String(u).includes('immobilienscout24')) return { ok: false, status: 429, text: async () => '' };
+      return { ok: true, status: 200, url: 'https://www.kleinanzeigen.de/s-kategorie/c195' };  // redirected: gone
+    };
+    const { checkExpiry } = createScanCycle();
+    assert.equal(await checkExpiry(db, 10, 0), 1);
+    assert.equal(asked.filter(u => u.includes('immobilienscout24')).length, 1);
+    assert.deepEqual(asked.filter(u => !u.includes('immobilienscout24')), ['https://example.com/ka-4']);
+    assert.ok(goneAt(db, ka));
   });
 
   it('checkExpiry marks gone/live and never archives an undecided row', async () => {

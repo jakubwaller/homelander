@@ -711,17 +711,17 @@ export class HomelanderDB {
     `).all(limit);
   }
 
-  /** Live scan listings never checked, or last checked before `beforeIso` —
-   *  never-checked first, then oldest check. Neubaukompass is retired. */
-  getListingsToCheck(limit, beforeIso) {
+  /** Live scan listings of one source never checked, or last checked before
+   *  `beforeIso` — never-checked first, then oldest check. */
+  getListingsToCheck(source, limit, beforeIso) {
     return this.db.prepare(`
       SELECT l.* FROM listings l
       JOIN filters f ON f.id = l.filter_id
-      WHERE f.mode = 'scan' AND f.archived = 0 AND l.gone_at IS NULL AND l.source IN ('is24', 'kleinanzeigen')
+      WHERE f.mode = 'scan' AND f.archived = 0 AND l.gone_at IS NULL AND l.source = ?
         AND (l.checked_at IS NULL OR l.checked_at < ?)
       ORDER BY l.checked_at ASC, l.rowid ASC
       LIMIT ?
-    `).all(beforeIso, limit);
+    `).all(source, beforeIso, limit);
   }
 
   /** Record an expiry check; `gone` also stamps gone_at. */
