@@ -13,7 +13,7 @@ apply engine and the React UI were removed; upstream still has them.
 | Layer | Technology |
 |-------|------------|
 | Runtime | Node 22, ESM (`"type": "module"`), no framework |
-| Database | better-sqlite3 12, WAL mode, single-file SQLite (schema v8) |
+| Database | better-sqlite3 12, WAL mode, single-file SQLite (schema v9) |
 | UI | One hand-written HTML/CSS/JS page string + Leaflet from CDN |
 | Geocoding | Nominatim (OSM), rate limited + cached in SQLite |
 | Transit overlay | Overpass API, cached to the data dir, refreshed monthly |
@@ -52,7 +52,7 @@ engine/headless.js ── the entrypoint and the only long-lived loop
 homelander/
 ├── engine/
 │   ├── headless.js       # Entrypoint: search sync, poll loop, server start
-│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3 (schema v8)
+│   ├── db.js             # HomelanderDB — SQLite via better-sqlite3 (schema v9)
 │   ├── url-translator.js # IS24 web URL → mobile API params + fetchListings()
 │   ├── sources.js        # Multi-source scan + exposé enrichment + Nominatim geocoding
 │   ├── scan-cycle.js     # Shared scan post-processing (enrich + export + report)
@@ -65,7 +65,7 @@ homelander/
 │   └── smtp-mailer.js    # Dependency-free SMTP client (SSL/STARTTLS/AUTH)
 ├── scripts/
 │   └── test-param-coverage.js   # Live IS24 mobile-API param canary (monthly workflow)
-├── test/                 # Node test runner: 10 suites + smoke-db.mjs
+├── test/                 # Node test runner: 11 suites + smoke-db.mjs
 ├── .github/workflows/
 │   ├── ci.yml            # PR + push to main: tests, then image build + boot check
 │   └── param-coverage.yml # Monthly: live IS24 param drift canary
@@ -115,6 +115,11 @@ running outside Docker); both are gitignored — never commit them.
 - **A listing hash is `sha256(expose_id|price)`** — a price change mints a new listing, which
   resurfaces it as unseen and orphans its uploads. Deliberate for the seen flag; a known wart for
   uploads.
+- **Expired listings are archived, never deleted** — `scan-cycle.js` checks ~30 listings per cycle
+  (never checked or >3 days ago) against the portal; only a positive "gone" signal (IS24 404 +
+  `ERROR_RESOURCE_NOT_FOUND`, Kleinanzeigen redirect off `/s-anzeige/` or 404/410) sets `gone_at`.
+  A re-priced duplicate archives its older-price rows on insert. `getScanListings` hides archived
+  rows unless `includeArchived` (favourites always stay); the weekly mail never offers them
 - **Uploaded files are served from the manifest only** — `files.json` membership is the
   authorisation check; never resolve a request path straight onto disk, and never serve an unknown
   type inline (HTML/SVG would run on the Kaufradar's origin)
@@ -139,7 +144,7 @@ Branch, open a PR, let CI go green, squash-merge.
 ```bash
 npm install --ignore-scripts && npm rebuild better-sqlite3
 npm run scanner      # run the scanner directly, no Docker
-npm test             # unit tests (305)
+npm test             # unit tests (347)
 npm run smoke:db     # DB smoke test
 docker compose up -d --build
 ```

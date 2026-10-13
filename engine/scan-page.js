@@ -55,6 +55,8 @@ export function renderScanPage() {
   .card.seen { opacity:.45; }
   /* A starred listing stays fully legible even once it is checked off. */
   .card.fav { opacity:1; border-color:var(--gold-dark); }
+  .badge.gone { color:var(--text-muted); }
+  .card.gone { opacity:.5; filter:grayscale(1); }
   .card .btns { display:flex; flex-direction:column; gap:6px; flex-shrink:0; }
   .seen-btn, .star-btn { background:none; border:1px solid var(--border); color:var(--text-dim); border-radius:8px; padding:3px 9px; font-size:12px; cursor:pointer; flex-shrink:0; align-self:flex-start; }
   .seen-btn:hover, .star-btn:hover { border-color:var(--gold); color:var(--gold); }
@@ -162,6 +164,7 @@ export function renderScanPage() {
     </select>
     <label class="chk"><input type="checkbox" id="f-hideseen"> Gesehene ausblenden</label>
     <label class="chk"><input type="checkbox" id="f-fav"> ★ Nur Favoriten</label>
+    <label class="chk"><input type="checkbox" id="f-archived"> Archivierte zeigen</label>
   </div>
 </header>
 <div id="layout">
@@ -296,6 +299,11 @@ export function renderScanPage() {
   function euro(v) { return v > 0 ? Math.round(v).toLocaleString('de-DE') + ' €' : '–'; }
   function kb(n) {
     return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' kB';
+  }
+  function goneBadge(l) {
+    return l.gone_at
+      ? '<span class="badge gone">offline seit ' + new Date(l.gone_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) + '</span>'
+      : '';
   }
   function favOnly() { return document.getElementById('f-fav').checked; }
   function perSqm(l) { return (l.price > 0 && l.size > 0) ? Math.round(l.price / l.size).toLocaleString('de-DE') + ' €/m²' : ''; }
@@ -497,7 +505,7 @@ export function renderScanPage() {
   // A star keeps a dot vivid and gives it a gold ring — checking a favourite
   // off must not grey it out of sight.
   function markerStyle(l) {
-    var dim = l.seen && !l.favorite;
+    var dim = (l.seen && !l.favorite) || !!l.gone_at;
     return {
       radius: l.favorite ? 9 : 7,
       weight: l.favorite ? 3 : 2,
@@ -564,6 +572,7 @@ export function renderScanPage() {
       (perSqm(l) ? '<span>' + perSqm(l) + '</span>' : '') +
       '<span class="badge ' + esc(l.source || 'is24') + '">' + esc(l.source || 'is24') + '</span>' +
       (isNew(l) ? '<span class="badge new">neu</span>' : '') +
+      goneBadge(l) +
       (files ? '<span class="badge files">📎 ' + files + '</span>' : '') +
       '</div></div>' +
       '<div class="btns">' +
@@ -619,7 +628,7 @@ export function renderScanPage() {
     rows.forEach(function (l) {
       var card = document.createElement('div');
       card.className = 'card' + (l.hash === activeHash ? ' active' : '') +
-        (l.seen ? ' seen' : '') + (l.favorite ? ' fav' : '');
+        (l.seen ? ' seen' : '') + (l.favorite ? ' fav' : '') + (l.gone_at ? ' gone' : '');
       card.innerHTML = cardHtml(l);
       card.addEventListener('click', function () { openDetail(l); });
       card.querySelector('.seen-btn').addEventListener('click', function (ev) {
@@ -641,6 +650,7 @@ export function renderScanPage() {
         m.bindPopup(
           '<strong>' + esc(l.title || '') + '</strong><br>' + euro(l.price) +
           (l.size > 0 ? ' · ' + l.size + ' m²' : '') +
+          (l.gone_at ? '<br>' + goneBadge(l) : '') +
           '<br><a href="#" data-hash="' + l.hash + '" class="popup-more">Details…</a>' +
           (lMaps ? '<br><a href="' + lMaps + '" target="_blank" rel="noopener">Google Maps</a>' : '')
         );
@@ -833,7 +843,7 @@ export function renderScanPage() {
       '<div class="price-line">' + euro(l.price) +
       (l.size > 0 ? ' · ' + l.size + ' m²' : '') +
       (l.rooms > 0 ? ' · ' + l.rooms + ' Zi.' : '') +
-      (perSqm(l) ? ' · ' + perSqm(l) : '') + '</div>' +
+      (perSqm(l) ? ' · ' + perSqm(l) : '') + ' ' + goneBadge(l) + '</div>' +
       (l.image_url ? '<img class="hero" src="' + esc(l.image_url) + '" alt="">' : '') +
       '<div style="color:var(--text-muted);font-size:12px">Quelle: ' + esc(l.source || 'is24') +
       ' · gefunden ' + new Date(l.discovered_at + (String(l.discovered_at).endsWith('Z') ? '' : 'Z')).toLocaleString('de-DE') +
@@ -910,7 +920,7 @@ export function renderScanPage() {
   }
 
   function loadListings() {
-    return fetch('/api/scan/listings').then(function (r) { return r.json(); }).then(function (data) {
+    return fetch('/api/scan/listings' + (document.getElementById('f-archived').checked ? '?archived=1' : '')).then(function (r) { return r.json(); }).then(function (data) {
       all = data.listings || [];
       render();
     });
@@ -925,6 +935,7 @@ export function renderScanPage() {
   ['f-filter', 'f-sort', 'f-days', 'f-hideseen', 'f-type', 'f-fav'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', render);
   });
+  document.getElementById('f-archived').addEventListener('change', loadListings);
   ['f-q', 'f-maxprice', 'f-minrooms', 'f-minsize'].forEach(function (id) {
     document.getElementById(id).addEventListener('input', render);
   });

@@ -325,7 +325,7 @@ export function startScanServer(dbGetter, { port = DEFAULT_PORT, host = '127.0.0
         const filterId = url.searchParams.get('filter_id') || null;
         const limit = Math.min(10000, parseInt(url.searchParams.get('limit') || '5000', 10) || 5000);
         const listings = dbGetter()
-          .getScanListings({ filterId, limit, userId: uid })
+          .getScanListings({ filterId, limit, userId: uid, includeArchived: url.searchParams.get('archived') === '1' })
           .map(parseListingRow);
         return json(res, 200, { generated_at: new Date().toISOString(), count: listings.length, listings });
       }

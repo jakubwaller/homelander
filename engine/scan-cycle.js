@@ -5,7 +5,7 @@
 
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fetchIs24ExposeDetails, geocodePostcode } from './sources.js';
+import { checkListingGone, fetchIs24ExposeDetails, geocodePostcode } from './sources.js';
 import { downloadMediaBatch } from './media.js';
 import { maybeSendWeeklyReport } from './report.js';
 
@@ -51,6 +51,21 @@ export function createScanCycle({ log = () => {} } = {}) {
     return enriched;
   }
 
+  /** Expiry check for a small batch: never checked, or last checked over 3 days ago. */
+  async function checkExpiry(db, limit = 30, pauseMs = 1000) {
+    const before = new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString();
+    let gone = 0;
+    for (const row of db.getListingsToCheck(limit, before)) {
+      const isGone = await checkListingGone(row);
+      if (isGone !== null) {
+        db.markListingChecked(row.hash, isGone);
+        if (isGone) gone++;
+      }
+      await sleep(pauseMs);
+    }
+    return gone;
+  }
+
   function exportListings(db, dataDir) {
     if (db.getScanFilters().length === 0) return 0;
     const listings = db.getScanListings({ limit: 5000 }).map((l) => {
@@ -88,6 +103,12 @@ export function createScanCycle({ log = () => {} } = {}) {
       log(`[scan-cycle] media download failed: ${err?.message || err}`);
     }
     try {
+      const gone = await checkExpiry(db);
+      if (gone > 0) log(`Expiry check: ${gone} listing(s) archived`);
+    } catch (err) {
+      log(`[scan-cycle] expiry check failed: ${err?.message || err}`);
+    }
+    try {
       exported = exportListings(db, dataDir);
       if (onExported) onExported(exported);
     } catch (err) {
@@ -101,5 +122,5 @@ export function createScanCycle({ log = () => {} } = {}) {
     return { enriched, exported };
   }
 
-  return { enrich, exportListings, run };
+  return { enrich, checkExpiry, exportListings, run };
 }

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -54,7 +54,9 @@ CREATE TABLE IF NOT EXISTS listings (
   postcode TEXT,
   lat REAL,
   lng REAL,
-  scan_json TEXT
+  scan_json TEXT,
+  gone_at TEXT,
+  checked_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS geo_cache (
@@ -178,6 +180,18 @@ export class HomelanderDB {
         for (const stmt of v5Columns) {
           try { this.db.exec(stmt); } catch { /* column already exists */ }
         }
+      }
+      // v8 → v9: expiry tracking. gone_at = portal stopped serving the listing,
+      // checked_at = last expiry check.
+      if (version && version.version < 9) {
+        for (const col of ['gone_at', 'checked_at']) {
+          try { this.db.exec(`ALTER TABLE listings ADD COLUMN ${col} TEXT`); } catch { /* column already exists */ }
+        }
+        // An older-price row is superseded by the newer row of the same exposé.
+        this.db.exec(`
+          UPDATE listings SET gone_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+          WHERE EXISTS (SELECT 1 FROM listings n WHERE n.expose_id = listings.expose_id AND n.rowid > listings.rowid);
+        `);
       }
       this.db.exec(SCHEMA);
       if (version && version.version < 8) {
@@ -304,7 +318,7 @@ export class HomelanderDB {
     `).get(String(listing.expose_id));
     if (manuallyApplied) return { changes: 0, skipped: true };
     try {
-      return this.db.prepare(`
+      const info = this.db.prepare(`
         INSERT INTO listings (hash, expose_id, title, price, size, rooms, address, image_url, filter_id, status, url, source, postcode)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'seen', ?, ?, ?)
       `).run(
@@ -313,6 +327,12 @@ export class HomelanderDB {
         listing.filter_id,
         listing.url || null, listing.source || 'is24', listing.postcode || null
       );
+      // A re-priced listing mints a new hash: the older-price rows count as archived.
+      this.db.prepare(`
+        UPDATE listings SET gone_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+        WHERE expose_id = ? AND hash != ? AND gone_at IS NULL
+      `).run(listing.expose_id, hash);
+      return info;
     } catch (err) {
       if (err.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
         return { changes: 0, skipped: true };
@@ -570,8 +590,9 @@ export class HomelanderDB {
     `).all();
   }
 
-  /** Listings belonging to scan-mode filters, newest first. */
-  getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null, userId = 0 } = {}) {
+  /** Listings belonging to scan-mode filters, newest first. Archived (gone_at)
+   *  rows are left out unless `includeArchived` — favourites always stay. */
+  getScanListings({ filterId = null, limit = 2000, offset = 0, sinceIso = null, userId = 0, includeArchived = false } = {}) {
     let sql = `
       SELECT l.*, f.name AS filter_name, f.web_url AS filter_url,
              (ss.hash IS NOT NULL) AS seen,
@@ -583,6 +604,7 @@ export class HomelanderDB {
       WHERE f.mode = 'scan' AND f.archived = 0
     `;
     const params = [userId, userId];
+    if (!includeArchived) sql += ' AND (l.gone_at IS NULL OR sf.hash IS NOT NULL)';
     if (filterId) { sql += ' AND l.filter_id = ?'; params.push(filterId); }
     if (sinceIso) { sql += ' AND l.discovered_at >= ?'; params.push(sinceIso); }
     sql += ' ORDER BY l.discovered_at DESC, l.rowid DESC LIMIT ? OFFSET ?';
@@ -698,6 +720,26 @@ export class HomelanderDB {
       ORDER BY l.discovered_at DESC, l.rowid DESC
       LIMIT ?
     `).all(limit);
+  }
+
+  /** Live scan listings never checked, or last checked before `beforeIso` —
+   *  never-checked first, then oldest check. Neubaukompass is retired. */
+  getListingsToCheck(limit, beforeIso) {
+    return this.db.prepare(`
+      SELECT l.* FROM listings l
+      JOIN filters f ON f.id = l.filter_id
+      WHERE f.mode = 'scan' AND l.gone_at IS NULL AND l.source IN ('is24', 'kleinanzeigen')
+        AND (l.checked_at IS NULL OR l.checked_at < ?)
+      ORDER BY l.checked_at ASC, l.rowid ASC
+      LIMIT ?
+    `).all(beforeIso, limit);
+  }
+
+  /** Record an expiry check; `gone` also stamps gone_at. */
+  markListingChecked(hash, gone, nowIso = new Date().toISOString()) {
+    return this.db.prepare(
+      'UPDATE listings SET checked_at = ?, gone_at = CASE WHEN ? THEN ? ELSE gone_at END WHERE hash = ?'
+    ).run(nowIso, gone ? 1 : 0, nowIso, hash);
   }
 
   getGeoCache(postcode) {

@@ -418,6 +418,32 @@ let lastNominatimAt = 0;
  * Resolve a German postcode to coordinates via Nominatim, respecting the
  * 1 req/s usage policy. `db` is a HomelanderDB used as a persistent cache.
  */
+/**
+ * Has the portal stopped serving this listing? true = gone, false = live,
+ * null = can't tell (403/429/5xx, network error, timeout) — callers must
+ * leave the listing untouched on null. IS24 answers a gone exposé with 404 +
+ * ERROR_RESOURCE_NOT_FOUND; Kleinanzeigen redirects a gone ad to a search page.
+ */
+export async function checkListingGone({ source, expose_id: exposeId, url }) {
+  try {
+    if (source === SOURCE_IS24) {
+      const resp = await fetch(`https://api.mobile.immobilienscout24.de/expose/${exposeId}`, {
+        headers: IS24_APP_HEADERS, signal: AbortSignal.timeout(15000),
+      });
+      if (resp.ok) return false;
+      if (resp.status === 404 && (await resp.text()).includes('ERROR_RESOURCE_NOT_FOUND')) return true;
+      return null;
+    }
+    if (source === SOURCE_KLEINANZEIGEN && url) {
+      const resp = await fetch(url, { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(15000) });
+      if (resp.status === 404 || resp.status === 410) return true;
+      if (!resp.ok) return null;
+      return !new URL(resp.url || url).pathname.includes('/s-anzeige/');
+    }
+  } catch { /* network error or timeout — undecided */ }
+  return null;
+}
+
 export async function geocodePostcode(postcode, db) {
   const code = String(postcode || '').match(/\d{5}/)?.[0];
   if (!code) return null;
