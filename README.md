@@ -34,7 +34,7 @@ anything to a portal. For the desktop app, go upstream; its
 ```bash
 cp .env.example .env           # searches + optional SMTP settings
 docker compose up -d --build
-# Kaufradar: http://<host-address>:8477
+# Kaufradar: http://localhost:8477 (published on 127.0.0.1 only)
 ```
 
 Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is published for `arm64` and
@@ -42,9 +42,9 @@ Works on Raspberry Pi / ARM: the base image (`node:22-bookworm-slim`) is publish
 otherwise compiles during the build — expect the first `docker compose up -d --build` on a Pi to
 take a few minutes.
 
-⚠️ The Kaufradar has **no authentication** — the provided compose file exposes it to your LAN. Only
-do that on a private network you trust; on shared networks bind it to `127.0.0.1:8477:8477` and
-put a reverse proxy with auth in front.
+⚠️ The Kaufradar has **no authentication** — the provided compose file publishes it on `127.0.0.1`
+only. To reach it from your LAN, change the port mapping to `8477:8477`, but only on a private
+network you trust; otherwise put a reverse proxy with auth in front.
 
 ## ⚙️ Configuration
 
