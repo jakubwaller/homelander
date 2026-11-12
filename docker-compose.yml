@@ -2,7 +2,7 @@
 #
 #   cp .env.example .env       # fill in searches + (optional) mail keys
 #   docker compose up -d --build
-#   http://<host-address>:8477   # Kaufradar, reachable from your LAN
+#   http://localhost:8477   # Kaufradar, reachable from this host only
 #
 # Searches: list URLs in HOMELANDER_SCAN_URLS (.env), or drop a
 # scan-searches.json into the data volume:
@@ -19,10 +19,9 @@ services:
     container_name: homelander-scanner
     restart: unless-stopped
     ports:
-      # Kaufradar has no authentication — this exposes it to every device on
-      # the network the host is attached to. Fine on a private home LAN;
-      # switch back to "127.0.0.1:8477:8477" on anything shared or public.
-      - "8477:8477"
+      # Kaufradar has no authentication, so it is published on localhost only.
+      # To reach it from your LAN, change this to "8477:8477" (private networks only).
+      - "127.0.0.1:8477:8477"
     env_file: .env
     volumes:
       - homelander-data:/data
