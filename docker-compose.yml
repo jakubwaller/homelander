@@ -18,6 +18,9 @@ services:
     build: .
     container_name: homelander-scanner
     restart: unless-stopped
+    # Private side project: public apps win under memory pressure (caps policy 2026-11-12).
+    mem_limit: 384m
+    oom_score_adj: 500
     ports:
       # Kaufradar has no authentication, so it is published on localhost only.
       # To reach it from your LAN, change this to "8477:8477" (private networks only).
