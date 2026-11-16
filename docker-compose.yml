@@ -20,6 +20,7 @@ services:
     restart: unless-stopped
     # Private side project: public apps win under memory pressure (caps policy 2026-11-12).
     mem_limit: 384m
+    memswap_limit: 384m
     oom_score_adj: 500
     ports:
       # Kaufradar has no authentication, so it is published on localhost only.
